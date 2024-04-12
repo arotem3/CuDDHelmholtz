@@ -1,0 +1,6 @@
+#ifndef CUDDH_CONFIG_HPP
+#define CUDDH_CONFIG_HPP
+
+#cmakedefine CUDDH_DEBUG
+
+#endif

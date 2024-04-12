@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <memory>
 
+#include "cuddh_error.hpp"
+
 namespace cuddh
 {
     template <typename Size, typename... Sizes>
