@@ -4,6 +4,8 @@
 #include "Tensor.hpp"
 #include "QuadratureRule.hpp"
 
+#include <algorithm>
+
 namespace cuddh
 {
     /// @brief 1D nodal basis functions on Gauss-Lobatto nodes.
@@ -12,6 +14,12 @@ namespace cuddh
     public:
         /// @brief initialize a basis set on n Guass-Lobatto nodes.
         Basis(int n);
+
+        /// @brief return the number of basis functions
+        int size() const
+        {
+            return n;
+        }
 
         /// @brief evaluate basis function on grid x
         /// @param n number of points in grid
@@ -28,19 +36,30 @@ namespace cuddh
         void deriv(int n, const double * x, double * D) const;
 
         /// @brief returns the mass matrix for the basis set
-        const_dmat_wrapper mass_matrix() const;
+        const_dmat_wrapper mass_matrix() const
+        {
+            return const_dmat_wrapper(M.data(), n, n);
+        }
 
         /// @brief returns the derivative matrix for the basis set
-        const_dmat_wrapper derivative_matrix() const;
+        const_dmat_wrapper derivative_matrix() const
+        {
+            return const_dmat_wrapper(D.data(), n, n);
+        }
 
         /// @brief returns the underlying quadrature rule on which the nodal
-        /// basis is defined. 
-        const QuadratureRule& quadrature() const;
+        /// basis is defined.
+        const QuadratureRule& quadrature() const
+        {
+            return q;
+        }
 
     private:
+        int n;
         QuadratureRule q;
         dmat M; // mass matrix
         dmat D; // derivative matrix
+        dvec wb; // barycentric weights (for interpolation)
     };
 } // namespace cuddh
 

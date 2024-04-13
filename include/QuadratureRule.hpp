@@ -34,10 +34,22 @@ namespace cuddh
             return const_dvec_wrapper(_x.data(), _n);
         }
 
+        /// @brief return the i-th quadrature point 
+        double x(int i) const
+        {
+            return _x(i);
+        }
+
         /// @brief returns the quadrature weights 
         const_dvec_wrapper w() const
         {
             return const_dvec_wrapper(_w.data(), _n);
+        }
+
+        /// @brief return the i-th quadrature weight 
+        double w(int i) const
+        {
+            return _w(i);
         }
 
     private:

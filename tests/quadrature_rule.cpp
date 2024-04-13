@@ -19,7 +19,7 @@ using namespace cuddh;
 
 namespace cuddh_test
 {
-    int t_quadrature_rule()
+    void t_quadrature_rule(int& n_test, int& n_passed)
     {
         for (int n=1; n < 16; ++n)
         {
@@ -34,11 +34,11 @@ namespace cuddh_test
 
             const double error = std::abs(I - 2.0);
 
+            n_test++;
             if (error > 1e-10)
-            {
                 std::cout << "\tt_quadrature_rule(): Gauss Legendre with n = " << n << " points computed incorrect integral.\n";
-                return 0;
-            }
+            else
+                n_passed++;
         }
 
         for (int n=2; n < 16; ++n)
@@ -54,13 +54,11 @@ namespace cuddh_test
 
             const double error = std::abs(I - 2.0);
 
+            n_test++;
             if (error > 1e-10)
-            {
                 std::cout << "\tt_quadrature_rule(): Gauss Lobatto with n = " << n << " points computed incorrect integral.\n";
-                return 0;
-            }
+            else
+                n_passed++;
         }
-
-        return 1;
     }
 } // namespace cuddh_test

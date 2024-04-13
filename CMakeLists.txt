@@ -26,6 +26,7 @@ add_library(
     
     cuddh.hpp
     
+    source/Basis.cpp
     source/cuddh_error.cpp
     source/QuadratureRule.cpp
 )
