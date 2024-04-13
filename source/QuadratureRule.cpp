@@ -193,6 +193,7 @@ namespace cuddh
 {
     QuadratureRule::QuadratureRule(int n, QuadratureType type)
         : _n{n},
+          _type{type},
           _x(n),
           _w(n)
     {
@@ -200,5 +201,16 @@ namespace cuddh
             gauss_legendre(n, _x, _w);
         else // (type == GaussLobatto)
             gauss_lobatto(n, _x, _w);
+    }
+
+    std::string QuadratureRule::name() const
+    {
+        std::stringstream s;
+        if (_type == GaussLegendre)
+            s << "legendre";
+        else
+            s << "lobatto";
+        s << std::setw(5) << std::setfill('0') << _n;
+        return s.str();
     }
 } // namespace cuddh

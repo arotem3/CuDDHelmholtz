@@ -60,5 +60,23 @@ namespace cuddh_test
             else
                 n_passed++;
         }
+
+        {
+            QuadratureRule q(11, QuadratureRule::GaussLegendre);
+            n_test++;
+            if (q.name() != "legendre00011")
+                std::cout << "\tt_quadrature_rule(): Gauss Legendre quadrature rule has a bad name.\n";
+            else
+                n_passed++;
+        }
+        
+        {
+            QuadratureRule q(6, QuadratureRule::GaussLobatto);
+            n_test++;
+            if (q.name() != "lobatto00006")
+                std::cout << "\tt_quadrature_rule(): Gauss Lobatto quadrature rule has a bad name.\n";
+            else
+                n_passed++;
+        }
     }
 } // namespace cuddh_test

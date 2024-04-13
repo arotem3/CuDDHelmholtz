@@ -4,3 +4,4 @@ Makefile
 CMakeCache.txt
 libcuddh.a
 .vscode
+.DS_Store

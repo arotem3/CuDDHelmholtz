@@ -3,6 +3,8 @@
 
 #include <unordered_map>
 #include <cmath>
+#include <sstream>
+#include <iomanip>
 
 #include "Tensor.hpp"
 #include "cuddh_error.hpp"
@@ -27,6 +29,15 @@ namespace cuddh
         {
             return _n;
         }
+
+        /// @brief identifies the type of quadrature rule as either Gauss-Legendre or Gauss-Lobatto
+        QuadratureType type() const
+        {
+            return _type;
+        }
+
+        /// @brief identifies the quadrature rule by a name of the format "%s%05d" where s is type ("legendre" or "lobatto"), and d is n. 
+        std::string name() const;
 
         /// @brief returns the quadrature points 
         const_dvec_wrapper x() const
@@ -54,6 +65,7 @@ namespace cuddh
 
     private:
         const int _n;
+        const QuadratureType _type;
         dvec _x;
         dvec _w;
     };
