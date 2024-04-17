@@ -92,7 +92,7 @@ namespace cuddh
 
             if (verbose)
             {
-                std::cout << "After 0 iterations, GMRES achieved rel. residual of " << out.res_norm.back() << std::endl;
+                std::cout << "After 0 iterations, GMRES achieved rel. residual of " << out.res_norm.back()/bnrm << std::endl;
                 std::cout << "GMRES successfully converged within desired tolerance." << std::endl;
             }
 
@@ -166,11 +166,11 @@ namespace cuddh
             if (verbose == 1)
             {
                 ++bar;
-                std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it << " / " << maxit << " || rel. res. = " << std::setw(10) << out.res_norm.back() << "\r" << std::flush;
+                std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it << " / " << maxit << " || rel. res. = " << std::setw(10) << out.res_norm.back()/bnrm << "\r" << std::flush;
             }
             else if (verbose >= 2)
             {
-                std::cout << "iteration " << std::setw(10) << it << " / " << maxit << " || rel. res. = " << std::setw(10) << out.res_norm.back() << std::endl;
+                std::cout << "iteration " << std::setw(10) << it << " / " << maxit << " || rel. res. = " << std::setw(10) << out.res_norm.back()/bnrm << std::endl;
             }
 
             if (out.res_norm.at(it) < tol * bnrm)
@@ -184,7 +184,7 @@ namespace cuddh
             std::cout << std::endl;
         if (verbose)
         {
-            std::cout << "After " << it << " iterations, GMRES achieved rel. residual of " << out.res_norm.back() << std::endl;
+            std::cout << "After " << it << " iterations, GMRES achieved rel. residual of " << out.res_norm.back()/bnrm << std::endl;
             if (out.success)
                 std::cout << "GMRES successfully converged within desired tolerance." << std::endl;
             else
