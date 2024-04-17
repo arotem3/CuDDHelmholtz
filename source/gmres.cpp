@@ -78,7 +78,7 @@ namespace cuddh
 
         A->action(x, q); // q <- A * x
         out.num_matvec++;
-        axpby(n, one, b, -one, r); // q <- b - q = b - A * x
+        axpby(n, one, b, -one, q); // q <- b - q = b - A * x
 
         Precond->action(q, r); // r <- M \ q = M \ (b - A * x)
         out.num_precond++;
@@ -89,9 +89,15 @@ namespace cuddh
         {
             out.num_iter = 0;
             out.success = true;
+
+            if (verbose)
+            {
+                std::cout << "After 0 iterations, GMRES achieved rel. residual of " << out.res_norm.back() << std::endl;
+                std::cout << "GMRES successfully converged within desired tolerance." << std::endl;
+            }
+
             return out;
         }
-
         
         ProgressBar bar(maxit);
         if (verbose)

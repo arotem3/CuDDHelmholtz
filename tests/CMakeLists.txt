@@ -4,5 +4,8 @@ add_executable(
     quadrature_rule.cpp
     basis.cpp
     gmres.cpp
+    stiffness.cpp
+    mass.cpp
+    load_unstructured_square.cpp
 )
 target_link_libraries(test PUBLIC cuddh)

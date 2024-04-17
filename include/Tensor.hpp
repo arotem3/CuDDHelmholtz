@@ -327,8 +327,17 @@ namespace cuddh
     };
 
     template <int Dim, typename scalar>
-    Tensor<Dim, scalar>::Tensor(const Tensor<Dim, scalar>& t) : Tensor(t.shape)
+    Tensor<Dim, scalar>::Tensor(const Tensor<Dim, scalar>& t)
     {
+        this->len = 1;
+        for (int d = 0; d < Dim; ++d)
+        {
+            this->_shape[d] = t._shape[d];
+            this->len *= this->_shape[d];
+        }
+        mem.reset(new scalar[this->len]);
+        this->ptr = mem.get();
+        
         for (int i = 0; i < this->len; ++i)
             mem[i] = t[i];
     }

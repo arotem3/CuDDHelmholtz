@@ -32,8 +32,11 @@ add_library(
     source/gmres.cpp
     source/H1Space.cpp
     source/linalg.cpp
+    source/LinearFunctional.cpp
+    source/MassMatrix.cpp
     source/Mesh2D.cpp
     source/QuadratureRule.cpp
+    source/StiffnessMatrix.cpp
 )
 
 target_include_directories(cuddh PUBLIC . include)

@@ -1,0 +1,131 @@
+#include "test.hpp"
+#include <fstream>
+#include <iomanip>
+
+/// a function with zero normal derivative on boundary of [-1,1]x[-1,1] 
+static double func(const double X[2])
+{
+    const double x = X[0], y = X[1];
+    double x5 = std::pow(x, 5);
+    double y3 = std::pow(y, 3);
+    return (x5 - 5.0 * x) * (y3 - 3.0 * y);
+}
+
+// negative laplacian of func
+static double L(const double X[2])
+{
+    const double x = X[0], y = X[1];
+    double x3 = std::pow(x, 3);
+    double x5 = std::pow(x, 5);
+    double y3 = std::pow(y, 3);
+    return -6.0*y*(x5-5*x) - 20.0*x3*(y3-3.0*y);
+}
+
+using namespace cuddh;
+
+class mass_op : public Operator
+{
+public:
+    mass_op(const H1Space& fem) : n{fem.size()}, m(fem) {}
+
+    void action(const double * x, double * y) const override
+    {
+        for (int i = 0; i < n; ++i)
+            y[i] = 0.0;
+
+        m.action(1.0, x, y);
+    }
+
+private:
+    const int n;
+    MassMatrix m;
+};
+
+class mass_prec : public Operator
+{
+public:
+    mass_prec(const H1Space& fem) : n{fem.size()}, p(fem) {}
+
+    void action(const double * x, double * y) const override
+    {
+        for (int i = 0; i < n; ++i)
+            y[i] = 0.0;
+        p.action(1.0, x, y);
+    }
+
+private:
+    const int n;
+    DiagInvMassMatrix p;
+};
+
+namespace cuddh_test
+{
+    void t_stiffness(int& n_test, int& n_passed, const Mesh2D& mesh, const Basis& basis, const QuadratureRule& quad, const std::string& test_name)
+    {
+        n_test++;
+
+        const int n_basis = basis.size();
+
+        H1Space fem(mesh, basis);
+        const int ndof = fem.size();
+
+        dvec u(ndof);
+        dvec Au(ndof);
+        dvec f(ndof);
+        dvec Lf(ndof);
+
+        LinearFunctional l(fem, quad);
+        l.action(func, f);
+        l.action(L, Lf);
+
+        mass_op m(fem);
+        mass_prec p(fem);
+        auto out = gmres(ndof, u, &m, f, &p, 20, 10, 1e-12); // (u, v) == (f, v) for all v
+        if (not out.success)
+        {
+            std::cout << "\tt_stiffness(): test \"" << test_name << "\" failed... something wrong with the mass matrix?\n";
+            return;
+        }
+
+        StiffnessMatrix A(fem, quad);
+        A.action(1.0, u, Au);
+
+        double max_err = 0.0;
+        for (int i = 0; i < ndof; ++i)
+        {
+            double err = Au(i) - Lf(i);
+            max_err = std::max(std::abs(err), max_err);
+        }
+
+        if (max_err > 1e-6)
+            std::cout << "\tt_stiffness(): test \"" << test_name << "\" failed with error " << max_err << "\n";
+        else
+            n_passed++;
+    }
+
+    void t_stiffness(int& n_test, int& n_passed)
+    {
+        {
+            const int nx = 10;
+            Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
+            for (int p : {6, 7, 8})
+            {
+                Basis basis(p);
+                QuadratureRule q(p+2, QuadratureRule::GaussLegendre);
+                std::string test_name = "structured mesh | p = " + std::to_string(p);
+                t_stiffness(n_test, n_passed, mesh, basis, q, test_name);
+            }
+        }
+
+        {
+            Mesh2D mesh = load_unstructured_square();
+            for (int p : {6, 7, 8})
+            {
+                Basis basis(p);
+                QuadratureRule q(p+2, QuadratureRule::GaussLegendre);
+                std::string test_name = "unstructured mesh | p = " + std::to_string(p);
+                t_stiffness(n_test, n_passed, mesh, basis, q, test_name);
+            }
+        }
+    }
+} // namespace cuddh_test
