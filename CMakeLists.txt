@@ -29,7 +29,9 @@ add_library(
     source/Basis.cpp
     source/cuddh_error.cpp
     source/Element.cpp
+    source/gmres.cpp
     source/H1Space.cpp
+    source/linalg.cpp
     source/Mesh2D.cpp
     source/QuadratureRule.cpp
 )

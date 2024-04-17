@@ -9,6 +9,7 @@
 #include "Element.hpp"
 #include "include/gmres.hpp"
 #include "include/H1Space.hpp"
+#include "include/linalg.hpp"
 #include "include/MassMatrix.hpp"
 #include "include/Mesh2D.hpp"
 #include "include/Node.hpp"
