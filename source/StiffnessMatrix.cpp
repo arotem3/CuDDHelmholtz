@@ -3,7 +3,8 @@
 namespace cuddh
 {
     StiffnessMatrix::StiffnessMatrix(const H1Space& fem)
-        : n_elem{fem.mesh().n_elem()},
+        : ndof{fem.size()},
+          n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
           n_quad{fem.mesh().max_element_order() + n_basis},
           quad(n_quad, QuadratureRule::GaussLegendre),
@@ -17,7 +18,8 @@ namespace cuddh
     }
 
     StiffnessMatrix::StiffnessMatrix(const H1Space& fem, const QuadratureRule& quad_)
-        : n_elem{fem.mesh().n_elem()},
+        : ndof{fem.size()},
+          n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
           n_quad{quad_.size()},
           quad{quad_},
@@ -120,5 +122,12 @@ namespace cuddh
                 }
             }
         }
+    }
+
+    void StiffnessMatrix::action(const double * x, double * y) const
+    {
+        for (int i = 0; i < ndof; ++i)
+            y[i] = 0.0;
+        action(1.0, x, y);
     }
 } // namespace cuddh

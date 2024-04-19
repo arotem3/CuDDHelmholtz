@@ -4,20 +4,24 @@
 #include "Mesh2D.hpp"
 #include "Basis.hpp"
 #include "H1Space.hpp"
+#include "Operator.hpp"
 
 namespace cuddh
 {
     /// @brief b(u, v) = (grad u, grad v).
-    class StiffnessMatrix
+    class StiffnessMatrix : public Operator
     {
     public:
         StiffnessMatrix(const H1Space& fem);
         StiffnessMatrix(const H1Space& fem, const QuadratureRule& quad);
 
         /// @brief y <- y + c * S * x, where S is the stiffness matrix. 
-        void action(double c, const double * x, double * y) const;
+        void action(double c, const double * x, double * y) const override;
+
+        void action(const double * x, double * y) const override;
 
     private:
+        const int ndof;
         const int n_elem;
         const int n_basis;
         const int n_quad;

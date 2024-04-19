@@ -29,6 +29,8 @@ add_library(
     source/Basis.cpp
     source/cuddh_error.cpp
     source/Element.cpp
+    source/FaceLinearFunctional.cpp
+    source/FaceMassMatrix.cpp
     source/gmres.cpp
     source/H1Space.cpp
     source/linalg.cpp
@@ -46,3 +48,4 @@ target_link_libraries(cuddh PUBLIC ${LAPACK_LIBRARIES})
 set_target_properties(cuddh PROPERTIES PUBLIC_HEADER cuddh.hpp)
 
 add_subdirectory(tests)
+add_subdirectory(examples)

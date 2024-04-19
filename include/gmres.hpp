@@ -6,19 +6,10 @@
 
 #include "Tensor.hpp"
 #include "linalg.hpp"
+#include "Operator.hpp"
 
 namespace cuddh
 {
-    class Operator
-    {
-    public:
-        Operator() = default;
-        virtual ~Operator() = default;
-
-        /// @brief y <- A * x
-        virtual void action(const double * x, double * y) const = 0;
-    };
-
     struct solver_out
     {
         bool success;

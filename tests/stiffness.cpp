@@ -23,41 +23,6 @@ static double L(const double X[2])
 
 using namespace cuddh;
 
-class mass_op : public Operator
-{
-public:
-    mass_op(const H1Space& fem) : n{fem.size()}, m(fem) {}
-
-    void action(const double * x, double * y) const override
-    {
-        for (int i = 0; i < n; ++i)
-            y[i] = 0.0;
-
-        m.action(1.0, x, y);
-    }
-
-private:
-    const int n;
-    MassMatrix m;
-};
-
-class mass_prec : public Operator
-{
-public:
-    mass_prec(const H1Space& fem) : n{fem.size()}, p(fem) {}
-
-    void action(const double * x, double * y) const override
-    {
-        for (int i = 0; i < n; ++i)
-            y[i] = 0.0;
-        p.action(1.0, x, y);
-    }
-
-private:
-    const int n;
-    DiagInvMassMatrix p;
-};
-
 namespace cuddh_test
 {
     void t_stiffness(int& n_test, int& n_passed, const Mesh2D& mesh, const Basis& basis, const QuadratureRule& quad, const std::string& test_name)
@@ -75,11 +40,11 @@ namespace cuddh_test
         dvec Lf(ndof);
 
         LinearFunctional l(fem, quad);
-        l.action(func, f);
-        l.action(L, Lf);
+        l.action(1.0, func, f);
+        l.action(1.0, L, Lf);
 
-        mass_op m(fem);
-        mass_prec p(fem);
+        MassMatrix m(fem);
+        DiagInvMassMatrix p(fem);
         auto out = gmres(ndof, u, &m, f, &p, 20, 10, 1e-12); // (u, v) == (f, v) for all v
         if (not out.success)
         {

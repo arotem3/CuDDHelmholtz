@@ -5,20 +5,21 @@
 
 namespace cuddh
 {
+    /// @brief computes inner product (f, phi) for function f = f(x)
     class LinearFunctional
     {
     public:
         LinearFunctional(const H1Space& fem);
         LinearFunctional(const H1Space& fem, const QuadratureRule& quad);
 
-        /// @brief computes the inner product (f, phi) where f = f(x) for every
-        /// basis function phi.
+        /// @brief F[i] <- F[i] + c * (f, phi[i]) where f=f(x) and phi[i] is the i-th basis function in the H1Space.
         /// @tparam Func invocable as (const double x[2]) -> double
+        /// @param[in] c scalar coefficient
         /// @param[in] f f(const double x[2]) -> double 
-        /// @param[in,out] F has length of fem.size(); On exit F[i] <- F[i] + (f, phi[i])
+        /// @param[in,out] F has length of fem.size(); On exit F[i] <- F[i] + c * (f, phi[i])
         /// where phi[i] is the i-th basis function in the H1Space fem.
         template <typename Func>
-        void action(Func f, double * F) const;
+        void action(double c, Func f, double * F) const;
 
     private:
         const int n_elem;
@@ -35,7 +36,7 @@ namespace cuddh
     };
 
     template <typename Func>
-    void LinearFunctional::action(Func f, double * F) const
+    void LinearFunctional::action(double c, Func f, double * F) const
     {
         int n_quad = quad.size();
 
@@ -60,7 +61,7 @@ namespace cuddh
             {
                 for (int k = 0; k < n_basis; ++k)
                     for (int l = 0; l < n_basis; ++l)
-                        F[I(k, l, el)] += g(k, l);
+                        F[I(k, l, el)] += c * g(k, l);
             }
             else
             {
@@ -86,7 +87,7 @@ namespace cuddh
                         {
                             qqu += P(i, k) * Pg(i, l);
                         }
-                        F[I(k, l, el)] += qqu;
+                        F[I(k, l, el)] += c * qqu;
                     }
                 }
             }

@@ -96,5 +96,101 @@ namespace cuddh
         {
             I[v1] = I[v0];
         }
+
+        xy.reshape(2, ndof);
+        for (int el = 0; el < n_elem; ++el)
+        {
+            const Element * elem = _mesh.element(el);
+            for (int j = 0; j < n_basis; ++j)
+            {
+                for (int i = 0; i < n_basis; ++i)
+                {
+                    const double xi[2] = {_basis.quadrature().x(i), _basis.quadrature().x(j)};
+                    double x[2];
+                    elem->physical_coordinates(xi, x);
+                    const int idx = I(i, j, el);
+                    xy(0, idx) = x[0];
+                    xy(1, idx) = x[1];
+                }
+            }
+        }
     }
+
+    FaceSpace::FaceSpace(const H1Space& fem_, int nf, const int * faces_)
+        : fem{fem_},
+          _n_faces{nf},
+          n_basis{fem.basis().size()},
+          I(n_basis, nf),
+          _faces(nf)
+    {
+        for (int i = 0; i < nf; ++i)
+            _faces(i) = faces_[i];
+
+        auto K = fem.global_indices();
+
+        std::unordered_map<int, int> mask; // unique mapping from global DOFs to restricted DOFs
+        std::vector<int> P;
+
+        // map edge index to volume index
+        const int nc = n_basis;
+        auto E2V = [nc](int i, int f, int el) -> int
+        {
+            const int m = (f == 0 || f == 2) ? i : (f == 1) ? (nc-1) : 0;
+            const int n = (f == 1 || f == 3) ? i : (f == 2) ? (nc-1) : 0;
+
+            return m + nc * (n + nc * el);
+        };
+        
+        int l = 0;
+        for (int f = 0; f < nf; ++f)
+        {
+            const Edge * edge = fem.mesh().edge(_faces(f));
+            const int el = edge->elements[0];
+            const int s = edge->sides[0];
+
+            for (int i = 0; i < n_basis; ++i)
+            {
+                const int idx = K[E2V(i, s, el)];
+
+                if (not mask.contains(idx))
+                {
+                    mask[idx] = l;
+                    P.push_back(idx);
+                    ++l;
+                }
+
+                I(i, f) = mask[idx];
+            }
+        }
+
+        ndof = mask.size();
+
+        proj.reshape(ndof);
+        for (int i = 0; i < ndof; ++i)
+            proj(i) = P.at(i);
+    }
+
+    void FaceSpace::restrict(const double * x, double * y) const
+    {
+        for (int i = 0; i < ndof; ++i)
+            y[i] = x[proj(i)];
+    }
+
+    void FaceSpace::prolong(const double * x, double * y) const
+    {
+        for (int i = 0; i < ndof; ++i)
+            y[proj(i)] += x[i];
+    }
+
+    const Mesh2D::EdgeMetricCollection& FaceSpace::metrics(const QuadratureRule& quad) const
+    {
+        auto key = quad.name();
+        if (not _metrics.contains(key))
+        {
+            _metrics.insert({key, Mesh2D::EdgeMetricCollection(fem.mesh(), _n_faces, _faces, quad)});
+        }
+        return _metrics.at(key);
+    }
+
+    
 } // namespace cuddh

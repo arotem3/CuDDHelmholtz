@@ -60,7 +60,8 @@ namespace cuddh
     }
 
     MassMatrix::MassMatrix(const H1Space& fem)
-        : n_elem{fem.mesh().n_elem()},
+        : ndof{fem.size()},
+          n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
           n_quad{n_basis + fem.mesh().max_element_order()},
           quad(n_quad, QuadratureRule::GaussLegendre),
@@ -76,7 +77,8 @@ namespace cuddh
     }
 
     MassMatrix::MassMatrix(const double * a_, const H1Space& fem)
-        : n_elem{fem.mesh().n_elem()},
+        : ndof{fem.size()},
+          n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
           n_quad(1 + 1.5*n_basis + fem.mesh().max_element_order()),
           quad(n_quad, QuadratureRule::GaussLegendre),
@@ -172,6 +174,13 @@ namespace cuddh
         }
     }
 
+    void MassMatrix::action(const double * x, double * y) const
+    {
+        for (int i = 0; i < ndof; ++i)
+            y[i] = 0.0;
+        action(1.0, x, y);
+    }
+
     DiagInvMassMatrix::DiagInvMassMatrix(const H1Space& fem)
         : ndof{fem.size()},
           p(ndof),
@@ -231,5 +240,11 @@ namespace cuddh
     {
         for (int i = 0; i < ndof; ++i)
             y[i] += c * p(i) * x[i];
+    }
+
+    void DiagInvMassMatrix::action(const double * x, double * y) const
+    {
+        for (int i = 0; i < ndof; ++i)
+            y[i] = p(i) * x[i];
     }
 } // namespace cuddh

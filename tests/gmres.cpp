@@ -19,20 +19,9 @@ public:
         y[n-1] = c[0] * x[n-2] + c[1] * x[n-1];
     }
 
-private:
-    int n;
-};
-
-class IdentityPrecond : public cuddh::Operator
-{
-public:
-    IdentityPrecond(int n_) : n{n_} {}
-    ~IdentityPrecond() = default;
-
-    void action(const double * x, double * y) const override
+    void action(double c, const double * x, double * y) const override
     {
-        for (int i=0; i < n; ++i)
-            y[i] = x[i];
+        // not needed
     }
 
 private:
@@ -56,7 +45,7 @@ namespace cuddh_test
 
         x.zeros();
 
-        IdentityPrecond P(n);
+        cuddh::Identity P(n);
 
         const int m = 50;
         const int maxit = 100;

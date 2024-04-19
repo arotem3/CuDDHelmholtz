@@ -8,7 +8,7 @@
 namespace cuddh
 {
     /// @brief m(u, v) = (u, v) or m(u, v) = (a(x)*u, v)
-    class MassMatrix
+    class MassMatrix : public Operator
     {
     public:
         /// @brief initialize mass matrix m(u, v) = (u, v)
@@ -21,9 +21,12 @@ namespace cuddh
         MassMatrix(const double * a, const H1Space& fem);
 
         /// @brief y <- y + c * M*x, where M is the mass matrix
-        void action(double c, const double * x, double * y) const;
+        void action(double c, const double * x, double * y) const override;
+
+        void action(const double * x, double * y) const override;
 
     private:
+        const int ndof;
         const int n_elem;
         const int n_basis;
         const int n_quad;
@@ -36,7 +39,7 @@ namespace cuddh
     };
 
     /// @brief diagonal approximate inverse of mass matrix
-    class DiagInvMassMatrix
+    class DiagInvMassMatrix : public Operator
     {
     public:
         /// @brief construct a diagonal approximate inverse of the mass matrix
@@ -51,7 +54,9 @@ namespace cuddh
         DiagInvMassMatrix(const double * a, const H1Space& fem);
 
         /// @brief y <- y + c * P*x where P ~ inv(M), where M is the mass matrix. 
-        void action(double c, const double * x, double * y) const;
+        void action(double c, const double * x, double * y) const override;
+
+        void action(const double * x, double * y) const override;
 
     private:
         const int ndof;

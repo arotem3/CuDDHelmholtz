@@ -242,11 +242,36 @@ namespace cuddh
         }
     }
 
+    template <typename EvalMetric>
+    static void set_edge_metric(std::unique_ptr<double[]>& metric_, int dim, const_ivec_wrapper faces, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
+    {
+        const int m = quad.size();
+        const int ne = faces.size();
+
+        metric_.reset(new double[dim * m * ne]);
+        auto metric = reshape(metric_.get(), dim, m, ne);
+
+        for (int e = 0; e < ne; ++e)
+        {
+            const Edge * E = mesh.edge(faces(e));
+
+            for (int i = 0; i < m; ++i)
+            {
+                const double xi = quad.x(i);
+                eval_metric(&metric(0, i, e), E, xi);
+            }
+        }
+    }
+
     const double * Mesh2D::EdgeMetricCollection::measures() const
     {
         if (not detJ)
         {
-            set_edge_metric(detJ, 1, edge_type, mesh, quad, [](double* metric, const Edge * E, double xi) -> void {*metric = E->measure(xi);});
+            auto eval = [](double* metric, const Edge * E, double xi) -> void {*metric = E->measure(xi);};
+            if (face_subset)
+                set_edge_metric(detJ, 1, _faces, mesh, quad, eval);
+            else
+                set_edge_metric(detJ, 1, edge_type, mesh, quad, eval);
         }
 
         return detJ.get();
@@ -256,7 +281,11 @@ namespace cuddh
     {
         if (not x)
         {
-            set_edge_metric(x, 2, edge_type, mesh, quad, [](double * metric, const Edge * E, double xi) -> void {E->physical_coordinates(xi, metric);});
+            auto eval = [](double * metric, const Edge * E, double xi) -> void {E->physical_coordinates(xi, metric);};
+            if (face_subset)
+                set_edge_metric(x, 2, _faces, mesh, quad, eval);
+            else
+                set_edge_metric(x, 2, edge_type, mesh, quad, eval);
         }
 
         return x.get();
@@ -266,7 +295,11 @@ namespace cuddh
     {
         if (not n)
         {
-            set_edge_metric(n, 2, edge_type, mesh, quad, [](double * metric, const Edge * E, double xi) -> void {E->normal(xi, metric);});
+            auto eval = [](double * metric, const Edge * E, double xi) -> void {E->normal(xi, metric);};
+            if (face_subset)
+                set_edge_metric(n, 2, _faces, mesh, quad, eval);
+            else
+                set_edge_metric(n, 2, edge_type, mesh, quad, eval);
         }
 
         return n.get();
@@ -290,6 +323,15 @@ namespace cuddh
             h = std::max(h, edge->length());
         }
         return h;
+    }
+
+    ivec Mesh2D::boundary_edges() const
+    {
+        const int ne = _boundary_edges.size();
+        ivec b(ne);
+        for (int i = 0; i < ne; ++i)
+            b(i) = _boundary_edges.at(i);
+        return b;
     }
 
     const Mesh2D::ElementMetricCollection& Mesh2D::element_metrics(const QuadratureRule& quad) const

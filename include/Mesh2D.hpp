@@ -57,6 +57,8 @@ namespace cuddh
             /// @param quad the quadrature rule to evaluate metrics on
             EdgeMetricCollection(const Mesh2D& mesh, const FaceType edge_type, const QuadratureRule& quad);
 
+            EdgeMetricCollection(const Mesh2D& mesh, int n_faces, const int * faces, const QuadratureRule& quad);
+
             EdgeMetricCollection(EdgeMetricCollection&&);
 
             /// return an array of the edge measures on the quadrature rule for edges of
@@ -76,6 +78,9 @@ namespace cuddh
             const Mesh2D& mesh;
             const QuadratureRule& quad;
             const FaceType edge_type;
+
+            const bool face_subset;
+            const_ivec_wrapper _faces;
 
             mutable std::unique_ptr<double[]> detJ;
             mutable std::unique_ptr<double[]> x;
@@ -238,6 +243,9 @@ namespace cuddh
             }
         }
 
+        /// @brief returns the indicies of the edges such that edge(i) is on the boundary
+        ivec boundary_edges() const;
+
         /// returns the element specified by element index el. For distributed
         /// meshes: this index is local to the processor and should be in the
         /// range [0, n_elem() ).
@@ -293,9 +301,11 @@ namespace cuddh
 
     inline Mesh2D::ElementMetricCollection::ElementMetricCollection(ElementMetricCollection&& a) : mesh(a.mesh), quad{a.quad}, J(std::move(a.J)), detJ(std::move(a.detJ)), x(std::move(a.x)) {}
 
-    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(const Mesh2D& mesh_, const FaceType edge_type_, const QuadratureRule& quad_) : mesh(mesh_), quad{quad_}, edge_type(edge_type_) {}
+    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(const Mesh2D& mesh_, const FaceType edge_type_, const QuadratureRule& quad_) : mesh(mesh_), quad{quad_}, edge_type(edge_type_), face_subset{false}, _faces() {}
 
-    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(EdgeMetricCollection&& a) : mesh(a.mesh), quad{a.quad}, edge_type(a.edge_type), detJ(std::move(a.detJ)), x(std::move(a.x)), n(std::move(a.n)) {}
+    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(EdgeMetricCollection&& a) : mesh(a.mesh), quad{a.quad}, edge_type(a.edge_type), face_subset{a.face_subset}, _faces(std::move(a._faces)), detJ(std::move(a.detJ)), x(std::move(a.x)), n(std::move(a.n)) {}
+
+    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(const Mesh2D& mesh_, int n_faces, const int * faces, const QuadratureRule& quad_) : mesh{mesh_}, quad{quad_}, edge_type{FaceType::INTERIOR}, face_subset{true}, _faces(faces, n_faces) {}
 
 } // namespace cuddh
 
