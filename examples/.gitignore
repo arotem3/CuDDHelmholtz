@@ -1,5 +1,6 @@
 Helmholtz
 Poisson
+WaveHoltz
 gen_cmake.py
 gen_gitignore.py
 CMakeFiles

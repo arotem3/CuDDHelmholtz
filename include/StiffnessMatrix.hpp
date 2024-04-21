@@ -1,10 +1,8 @@
 #ifndef CUDDH_STIFFNESS_MATRIX_HPP
 #define CUDDH_STIFFNESS_MATRIX_HPP
 
-#include "Mesh2D.hpp"
-#include "Basis.hpp"
-#include "H1Space.hpp"
 #include "Operator.hpp"
+#include "H1Space.hpp"
 
 namespace cuddh
 {
@@ -15,9 +13,14 @@ namespace cuddh
         StiffnessMatrix(const H1Space& fem);
         StiffnessMatrix(const H1Space& fem, const QuadratureRule& quad);
 
-        /// @brief y <- y + c * S * x, where S is the stiffness matrix. 
+        ~StiffnessMatrix() = default;
+
+        /// @brief y[i] <- y[i] + c * (grad x, grad phi[i])
+        /// where phi[i] is the i-th basis function in the H1Space
         void action(double c, const double * x, double * y) const override;
 
+        /// @brief y[i] <- (grad x, grad phi[i])
+        /// where phi[i] is the i-th basis function in the H1Space
         void action(const double * x, double * y) const override;
 
     private:
@@ -26,12 +29,10 @@ namespace cuddh
         const int n_basis;
         const int n_quad;
 
-        const QuadratureRule quad;
-
         dmat P;
         dmat D;
 
-        TensorWrapper<5, const double> J;
+        Tensor<4, double> G;
         const_icube_wrapper I;
     };
 } // namespace cuddh

@@ -87,20 +87,6 @@ namespace cuddh
             mutable std::unique_ptr<double[]> n;
         };
 
-    private:
-        std::vector<Node> _nodes;
-        std::vector<std::unique_ptr<Edge>> _edges;
-        std::vector<std::unique_ptr<Element>> _elements;
-        std::vector<int> _interior_nodes;
-        std::vector<int> _boundary_nodes;
-        std::vector<int> _boundary_edges;
-        std::vector<int> _interior_edges;
-
-        mutable std::unordered_map<std::string, ElementMetricCollection> elem_collections;
-        mutable std::unordered_map<std::string, EdgeMetricCollection> interior_edge_collections;
-        mutable std::unordered_map<std::string, EdgeMetricCollection> boundary_edge_collections;
-
-    public:
         /// @brief constructs empty mesh
         Mesh2D() {}
         ~Mesh2D() = default;
@@ -295,6 +281,19 @@ namespace cuddh
             interior_edge_collections.clear();
             boundary_edge_collections.clear();
         }
+
+        std::vector<Node> _nodes;
+        std::vector<std::unique_ptr<Edge>> _edges;
+        std::vector<std::unique_ptr<Element>> _elements;
+        std::vector<int> _interior_nodes;
+        std::vector<int> _boundary_nodes;
+        std::vector<int> _boundary_edges;
+        std::vector<int> _interior_edges;
+
+        mutable std::unordered_map<std::string, ElementMetricCollection> elem_collections;
+        mutable std::unordered_map<std::string, EdgeMetricCollection> interior_edge_collections;
+        mutable std::unordered_map<std::string, EdgeMetricCollection> boundary_edge_collections;
+
     };
 
     inline Mesh2D::ElementMetricCollection::ElementMetricCollection(const Mesh2D& mesh_, const QuadratureRule& quad_) : mesh(mesh_), quad{quad_} {}
