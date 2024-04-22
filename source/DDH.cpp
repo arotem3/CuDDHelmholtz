@@ -282,8 +282,7 @@ void DDH::action(const double * x, double * y) const
     auto faces = efem->faces(); // the lambda-faces for each subdomain
 
     auto s_elem = efem->n_elems(); // number of elements for each subdomain
-    auto s_faces = efem->n_faces(); // number of boundary faces for each subdomain
-
+    
     auto subspace_indices = efem->subspace_indices(); // ((i,j,el), p) -> p-th subspace index for dof (i,j,el)
     auto P = efem->face_proj(); // (i, p) -> p-th subspace's face space index to subspace index
 
@@ -310,7 +309,6 @@ void DDH::action(const double * x, double * y) const
         {
             // get subspace dimensions
             const int nel = s_elem(subsp);
-            const int nf = s_faces(subsp);
 
             // copy global lambda to subdomain face space
             const int nl = s_lambda(subsp);

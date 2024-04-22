@@ -1,6 +1,9 @@
 #ifndef CUDDH_ENSEMBLE_SPACE_HPP
 #define CUDDH_ENSEMBLE_SPACE_HPP
 
+#include <array>
+#include <utility>
+
 #include "H1Space.hpp"
 
 namespace cuddh
