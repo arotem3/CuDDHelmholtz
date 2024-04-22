@@ -66,9 +66,22 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
       omega{omega_},
       g_inv_m(fem)
 {
-    n_domains = 2;
-    lambda_maxit = 2;
-    wh_maxit = 20;
+    int block_size_x = 32;
+
+    if (n_basis != 4 && n_basis != 8)
+        cuddh_error("Only n_basis==4, and n_basis==8 supported.");
+
+    int elems_per_domain_x = block_size_x / n_basis;
+
+    if (nx % elems_per_domain_x != 0 || ny % elems_per_domain_x != 0)
+        cuddh_error("Only nx x ny meshes with nx and ny multiples of 32 / n_basis allowed.");
+
+    int num_domains_x = nx / elems_per_domain_x;
+    int num_domains_y = ny / elems_per_domain_x;
+
+    n_domains = num_domains_x * num_domains_y;
+    lambda_maxit = 4;
+    wh_maxit = 10;
 
     // waveholtz setup
     double T = (2 * M_PI) / omega;
@@ -98,7 +111,9 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
     {
         for (int i = 0; i < nx; ++i)
         {
-            element_labels(i, j) = (2 * i < nx) ? 0 : 1;
+            int label_x = i / elems_per_domain_x;
+            int label_y = j / elems_per_domain_x;
+            element_labels(i, j) = label_x + num_domains_x * label_y;
         }
     }
 
@@ -110,12 +125,13 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
     g_lambda.reshape(2 * n_lambda); // g_lambda = (lambda1, lambda2, mu1, mu2)
     g_update.reshape(2 * n_lambda);
 
-    // g_lambda = (lambda1, lambda2, mu1, mu2) where lambda1 is the "interior"
-    // trace for each subspace and lambda2 is the "external" trace. cmap is a
+    // g_lambda = (lambda0, lambda1, mu0, mu1) where lambda0 is the "interior"
+    // trace for each subspace and lambda1 is the "external" trace. cmap is a
     // one-to-one map between lambda1 and lambda2 in the respective face spaces
-    // of each subspace, so we assign the column index of cmap to lambda1, and
-    // take the index of lambda2 to be twice that of lambda1. Consequently, the
-    // indices of mu1 and mu2 are those of lambda1 and lambda2 offset by n_lambda.
+    // of each subspace, so we assign the column index of cmap to lambda0, and
+    // take the index of lambda1 to be that of lambda0 offset by _n.
+    // Consequently, the indices of mu0 and mu1 are those of lambda0 and
+    // lambda1, respectively, offset by n_lambda (=2*_n).
 
     std::unordered_map<int, std::vector<std::pair<int,int>>> _b;
     std::unordered_map<int, std::vector<std::pair<int,int>>> _bt;
@@ -127,9 +143,9 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
         int face_index1 = cmap(3, k);
 
         _b[subspace0].push_back({face_index0, k}); // lambda0
-        _b[subspace1].push_back({face_index1, 2*k}); // lambda0 of subspace1 == lambda1 of subspace0
+        _b[subspace1].push_back({face_index1, _n + k}); // lambda0 of subspace1 == lambda1 of subspace0
 
-        _bt[subspace0].push_back({face_index0, 2*k}); // lambda1
+        _bt[subspace0].push_back({face_index0, _n + k}); // lambda1
         _bt[subspace1].push_back({face_index1, k}); // lambda1 of subpsace1 == lambda0 of subspace0
     }
 
@@ -290,7 +306,6 @@ void DDH::action(const double * x, double * y) const
             V[i] = 0.0;
         }
 
-        std::cout << lit << " / " << lambda_maxit << "\n";
         for (int subsp = 0; subsp < n_domains; ++subsp)
         {
             // get subspace dimensions
@@ -405,9 +420,7 @@ void DDH::action(const double * x, double * y) const
                         v[i] += dK * q[i];
                     }
                 } // time stepping
-                std::cout << "\t" << std::setw(5) << whit << " / " << wh_maxit << " : " << subsp << "\r" << std::flush;
             } // WaveHoltz
-            std::cout << std::endl;
 
             // rescale v
             for (int i = 0; i < ndof; ++i)

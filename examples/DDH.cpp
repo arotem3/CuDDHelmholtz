@@ -14,7 +14,7 @@ int main()
 {
     const double omega = 10.0; // Helmholtz frequency
     const int deg = 3; // polynomial degree of basis functions
-    const int nx = 20; // number of elements along each direction. Mesh will have nx^2 elements
+    const int nx = 32; // number of elements along each direction. Mesh will have nx^2 elements
     
     // Assemble the mesh
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
