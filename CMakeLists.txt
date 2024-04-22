@@ -13,6 +13,7 @@ find_package(LAPACK REQUIRED)
 
 # specify which version of waveDG to make
 option(CUDDH_DEBUG "compiles library in debug mode and add extra checks for correctness (like index bounds, etc.)")
+option(CUDDH_LOG_MEMCPY "HostDeviceArray will log every cuda memcpy to stdout")
 
 add_compile_options(-Wno-unused-parameter -Wall -Wextra -Wpedantic)
 if (CUDDH_DEBUG)

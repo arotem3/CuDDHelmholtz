@@ -2,5 +2,6 @@
 #define CUDDH_CONFIG_HPP
 
 #cmakedefine CUDDH_DEBUG
+#cmakedefine CUDDH_LOG_MEMCPY
 
 #endif
