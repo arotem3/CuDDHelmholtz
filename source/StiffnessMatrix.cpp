@@ -60,7 +60,7 @@ namespace cuddh
         fem.basis().deriv(n_quad, quad.x(), D);
 
         auto& metrics = fem.mesh().element_metrics(quad);
-        auto J = reshape(fem.mesh().element_metrics(quad).jacobians(), 2, 2, n_quad, n_quad, n_elem);
+        auto J = reshape(metrics.jacobians(), 2, 2, n_quad, n_quad, n_elem);
         setup_geometric_factors(n_elem, quad, J, G);
     }
 

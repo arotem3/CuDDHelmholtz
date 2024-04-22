@@ -115,7 +115,7 @@ namespace cuddh
             eta.zeros();
             eta(0) = r_nrm;
 
-            int k1;
+            int k1=0;
             for (int k = 0; k < m; ++k)
             {
                 k1 = k + 1;
