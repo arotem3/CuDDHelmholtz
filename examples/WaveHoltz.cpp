@@ -198,14 +198,14 @@ void WaveHoltz::action(double c, const double * x, double * y) const
     dvec_wrapper u(y, ndof);
     dvec_wrapper v(y+ndof, ndof);
 
-    double dK = c * 0.5 * K(0) * dt;
+    double dK = c - c * 0.5 * K(0) * dt;
     for (int i = 0; i < ndof; ++i)
     {
         p(i) = x[i];
         q(i) = x[ndof+i];
 
-        u(i) += (c - dK) * p(i);
-        v(i) += (c - dK) * q(i);
+        u(i) += dK * p(i);
+        v(i) += dK * q(i);
     }
 
     double t = 0.0;

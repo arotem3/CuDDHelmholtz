@@ -1,5 +1,10 @@
 ##### --- examples --- #####
 
+##### DDH #####
+add_executable(DDH DDH.cpp)
+target_link_libraries(DDH PUBLIC cuddh)
+add_custom_command(TARGET DDH POST_BUILD COMMAND ${CMAKE_COMMAND} -E make_directory ../solution)
+
 ##### Helmholtz #####
 add_executable(Helmholtz Helmholtz.cpp)
 target_link_libraries(Helmholtz PUBLIC cuddh)

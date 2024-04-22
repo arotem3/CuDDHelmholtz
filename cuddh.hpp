@@ -5,8 +5,10 @@
 
 #include "include/Basis.hpp"
 #include "include/cuddh_error.hpp"
+#include "include/DDH.hpp"
 #include "include/Edge.hpp"
 #include "include/Element.hpp"
+#include "include/EnsembleSpace.hpp"
 #include "include/FaceLinearFunctional.hpp"
 #include "include/FaceMassMatrix.hpp"
 #include "include/gmres.hpp"

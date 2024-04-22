@@ -218,6 +218,15 @@ namespace cuddh
         {
             return _shape;
         }    
+
+        inline int shape(int d) const
+        {
+            #ifdef CUDDH_DEBUG
+            if (d < 0 || d >= Dim)
+                cuddh_error("TensorWrapper::shape() error: shape index out of range of Dim.");
+            #endif
+            return _shape[d];
+        }
     
         /// @brief returns total size of tensor. The product of shape.
         inline int size() const
