@@ -13,8 +13,10 @@ namespace cuddh
           n_basis{basis_.size()},
           _mesh{mesh_},
           _basis{basis_},
-          I(n_basis, n_basis, n_elem)
+          _I(n_basis * n_basis * n_elem)
     {
+        icube_wrapper I(_I.host_write(), n_basis, n_basis, n_elem);
+
         std::unordered_map<int, int> mask;
         
         const int n_edges = _mesh.n_edges(FaceType::INTERIOR);
@@ -103,7 +105,9 @@ namespace cuddh
             I[v1] = I[v0];
         }
 
-        xy.reshape(2, ndof);
+        _xy.resize(2 * ndof);
+        auto xy = reshape(_xy.host_write(), 2, ndof);
+
         for (int el = 0; el < n_elem; ++el)
         {
             const Element * elem = _mesh.element(el);
@@ -126,13 +130,18 @@ namespace cuddh
         : fem{fem_},
           _n_faces{nf},
           n_basis{fem.basis().size()},
-          I(n_basis, nf),
+          _I(n_basis * nf),
           _faces(nf)
     {
-        for (int i = 0; i < nf; ++i)
-            _faces(i) = faces_[i];
+        auto F = reshape(_faces.host_write(), nf);
+        auto I = reshape(_I.host_write(), n_basis, nf);
 
-        auto K = fem.global_indices();
+        for (int i = 0; i < nf; ++i)
+            F(i) = faces_[i];
+
+        const Mesh2D& mesh = fem.mesh();
+        const int n_elem = mesh.n_elem();
+        auto K = reshape(fem.global_indices().host_read(), n_basis, n_basis, n_elem);
 
         std::unordered_map<int, int> mask; // unique mapping from global DOFs to restricted DOFs
         std::vector<int> P;
@@ -150,7 +159,7 @@ namespace cuddh
         int l = 0;
         for (int f = 0; f < nf; ++f)
         {
-            const Edge * edge = fem.mesh().edge(_faces(f));
+            const Edge * edge = mesh.edge(_faces(f));
             const int el = edge->elements[0];
             const int s = edge->sides[0];
 
@@ -171,21 +180,30 @@ namespace cuddh
 
         ndof = mask.size();
 
-        proj.reshape(ndof);
+        _proj.resize(ndof);
+        auto proj = reshape(_proj, ndof);
         for (int i = 0; i < ndof; ++i)
             proj(i) = P.at(i);
     }
 
-    void FaceSpace::restrict(const double * x, double * y) const
+    void FaceSpace::restrict(const double * __restrict__ x, double * __restrict__ y) const
     {
-        for (int i = 0; i < ndof; ++i)
+        const int n = ndof;
+        auto proj = reshape(_proj.device_read(), n);
+
+        forall(n [=] __device__ (int i) -> void {
             y[i] = x[proj(i)];
+        });
     }
 
-    void FaceSpace::prolong(const double * x, double * y) const
+    void FaceSpace::prolong(const double * __restrict__ x, double * __restrict__ y) const
     {
-        for (int i = 0; i < ndof; ++i)
+        const int n = ndof;
+        auto proj = reshape(_proj.device_read(), n);
+
+        forall(n, [=] __device__ (int i) -> void {
             y[proj(i)] += x[i];
+        });
     }
 
     const Mesh2D::EdgeMetricCollection& FaceSpace::metrics(const QuadratureRule& quad) const
@@ -197,6 +215,4 @@ namespace cuddh
         }
         return _metrics.at(key);
     }
-
-    
 } // namespace cuddh

@@ -54,7 +54,30 @@ private:
 
 namespace cuddh
 {
-    solver_out gmres(int n, double * x, const Operator * A, const double * b, const Operator * Precond, int m, int maxit, double tol, int verbose)
+    class PreconditionedSystem : public Operator
+    {
+    public:
+        PreconditionedSystem(int n, const Operator * A_, const Operator * P_) : q(n), A{A_}, P{P_} {}
+
+        void action(double c, const double * x, double * y) const override
+        {
+            cuddh_error("How did you get this error?");
+        }
+
+        void action(const double * x, double * y) const override
+        {
+            double * d_q = q.device_write();
+            A->action(x, d_q);
+            P->action(d_q, y);
+        }
+
+    private:
+        mutable host_device_dvec q;
+        const Operator * A;
+        const Operator * P;
+    };
+
+    solver_out gmres(int n, double * x, const Operator * A, const double * b, int m, int maxit, double tol, int verbose)
     {
         const double one = 1.0, zero = 0.0;
 
@@ -62,26 +85,27 @@ namespace cuddh
 
         const int m1 = m + 1;
 
-        dvec r(n);
+        // DEVICE data:
+        host_device_dvec _r(n);
+        double * r = _r.device_write();
+        
+        host_device_dvec _V(n * m1);
+        double * V =_V.device_write();
+
+        // HOST data:
         dmat H(m1, m);
         dvec sn(m);
         dvec cs(m);
-        dvec q(n);
-        dmat V(n, m1);
         dvec eta(m1);
 
         solver_out out;
         out.res_norm.reserve(maxit+1);
         out.num_matvec = 0;
-        out.num_precond = 0;
         out.success = false;
 
-        A->action(x, q); // q <- A * x
+        A->action(x, r); // r <- A * x
         out.num_matvec++;
-        axpby(n, one, b, -one, q); // q <- b - q = b - A * x
-
-        Precond->action(q, r); // r <- M \ q = M \ (b - A * x)
-        out.num_precond++;
+        axpby(n, one, b, -one, r); // r <- b - r = b - A * x
 
         out.res_norm.push_back(norm(n, r));
 
@@ -120,18 +144,15 @@ namespace cuddh
             for (int k = 0; k < m; ++k)
             {
                 k1 = k + 1;
-                vk = V.data() + k * n;
+                vk = V + k * n;
                 vk1 = vk + n;
 
-                A->action(vk, q); // q <- A * v[k]
+                A->action(vk, vk1); // v[k+1] <- A * v[k]
                 out.num_matvec++;
-
-                Precond->action(q, vk1); // v[k+1] <- M \ q = M \ (A * v[k])
-                out.num_precond++;
 
                 for (int j = 0; j < k1; ++j)
                 {
-                    const double * vj = V.data() + j * n;
+                    const double * vj = V + j * n;
                     H(j, k) = dot(n, vk1, vj);
                     axpby(n, -H(j, k), vj, one, vk1); // v[k+1] <- v[k+1] - H(j, k) * v[j]
                 }
@@ -153,14 +174,11 @@ namespace cuddh
 
             solve_upper_triangular(k1, H, m1, eta);
             for (int k = 0; k < k1; ++k)
-                axpby(n, eta(k), V.data() + k*n, one, x); // x <- x + eta[k] * v[k]
+                axpby(n, eta(k), V + k*n, one, x); // x <- x + eta[k] * v[k]
 
-            A->action(x, q); // q <- A * x
+            A->action(x, r); // r <- A * x
             out.num_matvec++;
-            axpby(n, one, b, -one, q); // q <- b - q = b - A * x
-
-            Precond->action(q, r); // r <- M \ q = M \ (b - A * x)
-            out.num_precond++;
+            axpby(n, one, b, -one, r); // r <- b - r = b - A * x
             
             out.res_norm.push_back(norm(n, r));
 
@@ -194,5 +212,11 @@ namespace cuddh
 
         out.num_iter = it;
         return out;
+    }
+
+    solver_out gmres(int n, double * x, const Operator * A, const double * b, const Operator * P, int m, int maxit, double tol, int verbose)
+    {
+        PreconditionedSystem PA(n, A, P);
+        return gmres(n, x, &PA, b, m, maxit, tol, verbose);
     }
 } // namespace cuddh

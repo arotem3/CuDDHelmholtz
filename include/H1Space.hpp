@@ -8,6 +8,8 @@
 #include "Basis.hpp"
 #include "Operator.hpp"
 
+#include "HostDeviceArray.hpp"
+
 namespace cuddh
 {
     /// @brief abstract representation of H1 finite element space on a mesh of
@@ -28,9 +30,9 @@ namespace cuddh
         /// @brief returns the inidices of the global degrees of freedom from
         /// element local indicies.
         /// The output has shape (n_basis, n_basis, n_elem).
-        const_icube_wrapper global_indices() const
+        const host_device_ivec& global_indices() const
         {
-            return const_icube_wrapper(I.data(), n_basis, n_basis, n_elem);
+            return _I;
         }
 
         /// @brief returns a reference to the mesh
@@ -45,10 +47,11 @@ namespace cuddh
             return _basis;
         }
 
-        /// @brief returns the physical coordinates corresponding to collocation point of each nodal DOF 
-        const_dmat_wrapper physical_coordinates() const
+        /// @brief returns the physical coordinates corresponding to collocation
+        /// point of each nodal DOF. The output has shape (2, ndof).
+        const host_device_dvec& physical_coordinates() const
         {
-            return reshape(xy.data(), 2, ndof);
+            return _xy;
         }
 
     private:
@@ -56,9 +59,10 @@ namespace cuddh
         const int n_basis;
         const Mesh2D& _mesh;
         const Basis& _basis;
-        icube I;
         int ndof;
-        dmat xy;
+
+        host_device_ivec _I;
+        host_device_dvec _xy;
     };
 
     /// @brief abstract representation of a subspace of an H1Space spanned by
@@ -81,37 +85,37 @@ namespace cuddh
         }
 
         /// @brief returns the face indices of the faces in the space 
-        const_ivec_wrapper faces() const
+        const host_device_ivec& faces() const
         {
-            return reshape(_faces.data(), _n_faces);
+            return _faces;
         }
 
         /// @brief returns the indices of the FaceSpace degrees of freedom
         /// corresponding to the local face indices. Specifically,
         /// subspace_indices(i, f) is the subspace index of the i-th basis
         /// function on face f. These indices range from 0 to this->size()-1.
-        const_imat_wrapper subspace_indices() const
+        const host_device_ivec& subspace_indices() const
         {
-            return reshape(I.data(), n_basis, _n_faces);
+            return _I;
         }
 
         /// @brief returns the indicies of the global degrees of freedom in the
         /// H1Space relative to the FaceSpace. that is, global_indicies(i) is
         /// the index in H1Space corresponding to the i-th FaceSpace degree of
         /// freedom.
-        const_ivec_wrapper global_indices() const
+        const host_device_ivec& global_indices() const
         {
-            return reshape(proj.data(), ndof);
+            return _proj;
         }
 
         /// @brief project H1Space vector to FaceSpace vector
-        /// @param x H1Space vector
-        /// @param y FaceSpace vector
+        /// @param x DEVICE. H1Space vector
+        /// @param y DEVICE. FaceSpace vector
         void restrict(const double * x, double * y) const;
 
         /// @brief Transpose of restrict. Extend FaceSpace vector to H1Space
-        /// @param x FaceSpace vector
-        /// @param y H1Space vector. On exit, y <- y + P' * x where P is the restriction operator.
+        /// @param x DEVICE. FaceSpace vector
+        /// @param y DEVICE. H1Space vector. On exit, y <- y + P' * x where P is the restriction operator.
         void prolong(const double * x, double * y) const;
 
         /// @brief returns the global H1Space
@@ -129,9 +133,9 @@ namespace cuddh
         const int n_basis;
         int ndof;
 
-        ivec proj;
-        imat I;
-        ivec _faces;
+        host_device_ivec _I;
+        host_device_ivec _faces;
+        host_device_ivec _proj;
 
         mutable std::unordered_map<std::string, Mesh2D::EdgeMetricCollection> _metrics;
     };
@@ -142,18 +146,21 @@ namespace cuddh
     public:
         /// @brief initialize projector
         /// @param fs FaceSpace of all boundary Dirichlet faces
-        H1_0(const FaceSpace& fs) : I{fs.global_indices()} {}
+        H1_0(const FaceSpace& fs) : _I{fs.global_indices()} {}
 
         /// @brief projects an H1Space vector onto the H1_0 inplace. 
         void action(double * y) const
         {
-            const int ndof = I.size();
-            for (int i = 0; i < ndof; ++i)
+            const int ndof = _I.size();
+            const int * I = _I.device_read();
+
+            forall(ndof, [=](int i) -> void {
                 y[I(i)] = 0.0;
+            });
         }
 
     private:
-        const_ivec_wrapper I;
+        const host_device_ivec& _I;
     };
 } // namespace cuddh
 

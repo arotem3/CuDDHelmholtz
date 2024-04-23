@@ -5,6 +5,10 @@
 #include "Mesh2D.hpp"
 #include "H1Space.hpp"
 
+#include "HostDeviceArray.hpp"
+#include "forall.hpp"
+#include "linalg.hpp"
+
 namespace cuddh
 {
     /// @brief m(u, v) = (u, v) or m(u, v) = (a(x)*u, v)
@@ -15,8 +19,7 @@ namespace cuddh
         MassMatrix(const H1Space& fem);
 
         /// @brief initialize weighted mass matrix m(u, v) = (a(x)*u, v)
-        /// @param a nodal-FEM grid function representing the coefficient a(x)
-        /// on the nodes of the mesh
+        /// @param a DEVICE. H1Space vector representing the function a.
         /// @param fem 
         MassMatrix(const double * a, const H1Space& fem);
 
@@ -32,10 +35,9 @@ namespace cuddh
         const int n_quad;
         const QuadratureRule quad;
         
-        dmat P;
-        dcube a; // a(x) * w(i) * w(j) * detJ
-
-        const_icube_wrapper I;
+        host_device_dvec _P;
+        host_device_dvec _a; // a(x) * w(i) * w(j) * detJ
+        const host_device_ivec& _I;
     };
 
     /// @brief diagonal approximate inverse of mass matrix
@@ -61,8 +63,8 @@ namespace cuddh
     private:
         const int ndof;
 
-        dvec p;
-        const_icube_wrapper I;
+        host_device_dvec _p;
+        const host_device_ivec& _I;
     };
 } // namespace cuddh
 

@@ -18,6 +18,9 @@ namespace cuddh
         // call is made to any of the read/write functions.
         HostDeviceArray(int n);
 
+        // initialize empty array
+        HostDeviceArray();
+
         // no copy allowed. HostDeviceArray is like unique_ptr.
         HostDeviceArray(const HostDeviceArray&) = delete;
         HostDeviceArray& operator=(const HostDeviceArray&) = delete;
@@ -30,6 +33,10 @@ namespace cuddh
 
         // returns the size of the array
         int size() const;
+
+        // resizes the array and invalidates both host and device pointer. This
+        // action deletes previous data.
+        void resize(int new_size);
 
         // returns a read only host pointer to the array. This potentially copies
         // the data from device. (The copy occurs only if the last write access to the
@@ -90,6 +97,9 @@ namespace cuddh
     HostDeviceArray<T>::HostDeviceArray(int n_) : n{n_}, device_is_valid{false}, host_is_valid{false}, device_array{nullptr}, host_array{nullptr} {}
 
     template <typename T>
+    HostDeviceArray<T>::HostDeviceArray() : n{0}, device_is_valid{false}, host_is_valid{false}, device_array{nullptr}, host_array{nullptr} {}
+
+    template <typename T>
     HostDeviceArray<T>::HostDeviceArray(HostDeviceArray&& x)
         : n{x.n},
         device_is_valid{std::exchange(x.device_is_valid, false)},
@@ -124,8 +134,23 @@ namespace cuddh
     }
 
     template <typename T>
+    void HostDeviceArray<T>::resize(int new_size)
+    {
+        delete[] host_array;
+        cudaFree(device_array);
+
+        host_is_valid = false;
+        device_is_valid = false;
+
+        n = new_size;
+    }
+
+    template <typename T>
     const T * HostDeviceArray<T>::host_read(bool force_copy) const
     {
+        if (n < 1)
+            return nullptr;
+
     #ifdef CUDDH_LOG_MEMCPY
         std::cout << "host read:" << std::endl;
     #endif
@@ -160,6 +185,9 @@ namespace cuddh
     template <typename T>
     T * HostDeviceArray<T>::host_write()
     {
+        if (n < 1)
+            return nullptr;
+
     #ifdef CUDDH_LOG_MEMCPY
         std::cout << "host write:" << std::endl;
     #endif
@@ -199,6 +227,8 @@ namespace cuddh
     template <typename T>
     const T * HostDeviceArray<T>::device_read(bool force_copy) const
     {
+        if (n < 1)
+            return nullptr;
     #ifdef CUDDH_LOG_MEMCPY
         std::cout << "Device read:" << std::endl;
     #endif
@@ -232,6 +262,9 @@ namespace cuddh
     template <typename T>
     T * HostDeviceArray<T>::device_write()
     {
+        if (n < 1)
+            return nullptr;
+            
     #ifdef CUDDH_LOG_MEMCPY
         std::cout << "Device write:" << std::endl;
     #endif

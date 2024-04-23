@@ -171,13 +171,13 @@ namespace cuddh
     }
 
     template <typename EvalMetric>
-    static void set_element_metric(std::unique_ptr<double[]>& metric_, int dim, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
+    static void set_element_metric(host_device_dvec& metric_, int dim, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
     {
         const int m = quad.size();
         const int nel = mesh.n_elem();
 
-        metric_.reset(new double[dim * m * m * nel]);
-        auto metric = reshape(metric_.get(), dim, m, m, nel);
+        metric_.resize(dim * m * m * nel);
+        auto metric = reshape(metric_.host_write(), dim, m, m, nel);
 
         double xi[2];
 
@@ -196,44 +196,44 @@ namespace cuddh
         }
     }
 
-    const double * Mesh2D::ElementMetricCollection::jacobians() const
+    const host_device_dvec& Mesh2D::ElementMetricCollection::jacobians() const
     {
-        if (not J)
+        if (J.size() == 0)
         {
             set_element_metric(J, 4, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {elem->jacobian(xi, metric);});
         }
 
-        return J.get();
+        return J;
     }
 
-    const double * Mesh2D::ElementMetricCollection::measures() const
+    const host_device_dvec& Mesh2D::ElementMetricCollection::measures() const
     {
-        if (not detJ)
+        if (detJ.size() == 0)
         {
             set_element_metric(detJ, 1, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {*metric = elem->measure(xi);});
         }
 
-        return detJ.get();
+        return detJ;
     }
 
-    const double * Mesh2D::ElementMetricCollection::physical_coordinates() const
+    const host_device_dvec& Mesh2D::ElementMetricCollection::physical_coordinates() const
     {
-        if (not x)
+        if (x.size() == 0)
         {
             set_element_metric(x, 2, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {elem->physical_coordinates(xi, metric);});
         }
 
-        return x.get();
+        return x;
     }
 
     template <typename EvalMetric>
-    static void set_edge_metric(std::unique_ptr<double[]>& metric_, int dim, FaceType edge_type, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
+    static void set_edge_metric(host_device_dvec& metric_, int dim, FaceType edge_type, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
     {
         const int m = quad.size();
         const int ne = mesh.n_edges(edge_type);
 
-        metric_.reset(new double[dim * m * ne]);
-        auto metric = reshape(metric_.get(), dim, m, ne);
+        metric_.resize(dim * m * ne);
+        auto metric = reshape(metric_.host_write(), dim, m, ne);
 
         for (int e = 0; e < ne; ++e)
         {
@@ -249,13 +249,13 @@ namespace cuddh
     }
 
     template <typename EvalMetric>
-    static void set_edge_metric(std::unique_ptr<double[]>& metric_, int dim, const_ivec_wrapper faces, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
+    static void set_edge_metric(host_device_dvec& metric_, int dim, const_ivec_wrapper faces, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
     {
         const int m = quad.size();
         const int ne = faces.size();
 
-        metric_.reset(new double[dim * m * ne]);
-        auto metric = reshape(metric_.get(), dim, m, ne);
+        metric_.resize(dim * m * ne);
+        auto metric = reshape(metric_.host_write(), dim, m, ne);
 
         for (int e = 0; e < ne; ++e)
         {
@@ -269,9 +269,9 @@ namespace cuddh
         }
     }
 
-    const double * Mesh2D::EdgeMetricCollection::measures() const
+    const host_device_dvec& Mesh2D::EdgeMetricCollection::measures() const
     {
-        if (not detJ)
+        if (detJ.size() == 0)
         {
             auto eval = [](double* metric, const Edge * E, double xi) -> void {*metric = E->measure(xi);};
             if (face_subset)
@@ -280,12 +280,12 @@ namespace cuddh
                 set_edge_metric(detJ, 1, edge_type, mesh, quad, eval);
         }
 
-        return detJ.get();
+        return detJ;
     }
 
-    const double * Mesh2D::EdgeMetricCollection::physical_coordinates() const
+    const host_device_dvec& Mesh2D::EdgeMetricCollection::physical_coordinates() const
     {
-        if (not x)
+        if (x.size() == 0)
         {
             auto eval = [](double * metric, const Edge * E, double xi) -> void {E->physical_coordinates(xi, metric);};
             if (face_subset)
@@ -294,12 +294,12 @@ namespace cuddh
                 set_edge_metric(x, 2, edge_type, mesh, quad, eval);
         }
 
-        return x.get();
+        return x;
     }
 
-    const double * Mesh2D::EdgeMetricCollection::normals() const
+    const host_device_dvec& Mesh2D::EdgeMetricCollection::normals() const
     {
-        if (not n)
+        if (n.size() == 0)
         {
             auto eval = [](double * metric, const Edge * E, double xi) -> void {E->normal(xi, metric);};
             if (face_subset)
@@ -308,7 +308,7 @@ namespace cuddh
                 set_edge_metric(n, 2, edge_type, mesh, quad, eval);
         }
 
-        return n.get();
+        return n;
     }
 
     double Mesh2D::min_h() const
