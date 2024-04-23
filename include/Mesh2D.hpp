@@ -30,15 +30,15 @@ namespace cuddh
 
             /// returns an array of the element jacobians evaluated on a quadrature rule.
             /// The output J has shape (2, 2, n, n, n_elem).
-            const host_device_dvec& jacobians() const;
+            const double * jacobians(MemorySpace m) const;
             
             /// returns an array of the element measures ie the determinant of the
             /// jacobians evaluated on a quadrature rule. The output detJ has shape (n, n, n_elem).
-            const host_device_dvec& measures() const;
+            const double * measures(MemorySpace m) const;
             
             /// returns an array of the physical coordinates of the quadrature rule on
             /// every element. The output x has shape (2, n, n, n_elem).
-            const host_device_dvec& physical_coordinates() const;
+            const double * physical_coordinates(MemorySpace m) const;
 
         private:
             const Mesh2D& mesh;
@@ -65,16 +65,16 @@ namespace cuddh
 
             /// return an array of the edge measures on the quadrature rule for edges of
             /// the requested types. The output has shape (n, n_edges).
-            const host_device_dvec& measures() const;
+            const double * measures(MemorySpace m) const;
 
             /// returns an array of the physical coordinates of the quadrature rule on
             /// every edge of the requested type. The output has shape (2, n, n_edges)
-            const host_device_dvec& physical_coordinates() const;
+            const double * physical_coordinates(MemorySpace m) const;
 
             /// returns an array of the normal derivatives of all of the edges of the
             /// requested FaceType evaluated on the quadrature rule. The output has shape
             /// (2, n, n_edges).
-            const host_device_dvec& normals() const;
+            const double * normals(MemorySpace m) const;
 
         private:
             const Mesh2D& mesh;

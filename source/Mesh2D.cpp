@@ -196,34 +196,34 @@ namespace cuddh
         }
     }
 
-    const host_device_dvec& Mesh2D::ElementMetricCollection::jacobians() const
+    const double * Mesh2D::ElementMetricCollection::jacobians(MemorySpace m) const
     {
         if (J.size() == 0)
         {
             set_element_metric(J, 4, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {elem->jacobian(xi, metric);});
         }
 
-        return J;
+        return J.read(m);
     }
 
-    const host_device_dvec& Mesh2D::ElementMetricCollection::measures() const
+    const double * Mesh2D::ElementMetricCollection::measures(MemorySpace m) const
     {
         if (detJ.size() == 0)
         {
             set_element_metric(detJ, 1, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {*metric = elem->measure(xi);});
         }
 
-        return detJ;
+        return detJ.read(m);
     }
 
-    const host_device_dvec& Mesh2D::ElementMetricCollection::physical_coordinates() const
+    const double * Mesh2D::ElementMetricCollection::physical_coordinates(MemorySpace m) const
     {
         if (x.size() == 0)
         {
             set_element_metric(x, 2, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {elem->physical_coordinates(xi, metric);});
         }
 
-        return x;
+        return x.read(m);
     }
 
     template <typename EvalMetric>
@@ -269,7 +269,7 @@ namespace cuddh
         }
     }
 
-    const host_device_dvec& Mesh2D::EdgeMetricCollection::measures() const
+    const double * Mesh2D::EdgeMetricCollection::measures(MemorySpace m) const
     {
         if (detJ.size() == 0)
         {
@@ -280,10 +280,10 @@ namespace cuddh
                 set_edge_metric(detJ, 1, edge_type, mesh, quad, eval);
         }
 
-        return detJ;
+        return detJ.read(m);
     }
 
-    const host_device_dvec& Mesh2D::EdgeMetricCollection::physical_coordinates() const
+    const double * Mesh2D::EdgeMetricCollection::physical_coordinates(MemorySpace m) const
     {
         if (x.size() == 0)
         {
@@ -294,10 +294,10 @@ namespace cuddh
                 set_edge_metric(x, 2, edge_type, mesh, quad, eval);
         }
 
-        return x;
+        return x.read(m);
     }
 
-    const host_device_dvec& Mesh2D::EdgeMetricCollection::normals() const
+    const double * Mesh2D::EdgeMetricCollection::normals(MemorySpace m) const
     {
         if (n.size() == 0)
         {
@@ -308,7 +308,7 @@ namespace cuddh
                 set_edge_metric(n, 2, edge_type, mesh, quad, eval);
         }
 
-        return n;
+        return n.read(m);
     }
 
     double Mesh2D::min_h() const

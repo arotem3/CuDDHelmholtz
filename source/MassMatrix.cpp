@@ -25,7 +25,8 @@ namespace cuddh
         
         auto w = reshape(_w.device_read(), n_quad);
 
-        forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) -> void {
+        forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) -> void
+        {
             __shared__ double x[NQ][NQ];
             __shared__ double z[NQ][NQ];
             __shared__ double P[NQ][NQ];
@@ -89,62 +90,66 @@ namespace cuddh
         });
     }
 
-    MassMatrix::MassMatrix(const H1Space& fem)
-        : ndof{fem.size()},
+    MassMatrix::MassMatrix(const H1Space& fem_)
+        : fem{fem_},
+          ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
           n_quad{n_basis + fem.mesh().max_element_order()},
           quad(n_quad, QuadratureRule::GaussLegendre),
           _P(n_quad * n_basis),
-          _a(n_quad * n_quad * n_elem),
-          _I{fem.global_indices()}
+          _a(n_quad * n_quad * n_elem)
     {
-        auto const& detJ = fem.mesh().element_metrics(quad).measures();
+        const int * = fem.global_indices(MemorySpace::DEVICE);
+        const double * detJ = fem.mesh().element_metrics(quad).measures(MemorySpace::DEVICE);
+        double * op = _a.device_write();
 
         fem.basis().eval(n_quad, quad.x(), _P.host_write());
 
         if (n_quad <= 4)
-            init_mass_matrix<4>(n_elem, n_basis, n_quad, nullptr, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<4>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
         else if (n_quad <= 8)
-            init_mass_matrix<8>(n_elem, n_basis, n_quad, nullptr, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<8>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
         else if (n_quad <= 16)
-            init_mass_matrix<16>(n_elem, n_basis, n_quad, nullptr, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<16>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
         else if (n_quad <= 24)
-            init_mass_matrix<24>(n_elem, n_basis, n_quad, nullptr, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<24>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
         else if (n_quad <= 32)
-            init_mass_matrix<32>(n_elem, n_basis, n_quad, nullptr, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<32>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
         else if (n_quad <= 64)
-            init_mass_matrix<64>(n_elem, n_basis, n_quad, nullptr, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<64>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
         else
             cuddh_error("MassMatrix error: quadrature rules with more than 64 points not yet supported.");
     }
 
-    MassMatrix::MassMatrix(const double * a_, const H1Space& fem)
-        : ndof{fem.size()},
+    MassMatrix::MassMatrix(const double * a_, const H1Space& fem_)
+        : fem{fem_}
+          ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
           n_quad(1 + 1.5*n_basis + fem.mesh().max_element_order()),
           quad(n_quad, QuadratureRule::GaussLegendre),
           _P(n_quad * n_basis),
-          _a(n_quad * n_quad * n_elem),
-          _I{fem.global_indices()}
+          _a(n_quad * n_quad * n_elem)
     {
-        auto const& detJ = fem.mesh().element_metrics(quad).measures();
+        const int * = fem.global_indices(MemorySpace::DEVICE);
+        const double * detJ = fem.mesh().element_metrics(quad).measures(MemorySpace::DEVICE);
+        double * op = _a.device_write();
 
         fem.basis().eval(n_quad, quad.x(), P.host_write());
 
         if (n_quad <= 4)
-            init_mass_matrix<4>(n_elem, n_basis, n_quad, a_, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<4>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
         else if (n_quad <= 8)
-            init_mass_matrix<8>(n_elem, n_basis, n_quad, a_, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<8>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
         else if (n_quad <= 16)
-            init_mass_matrix<16>(n_elem, n_basis, n_quad, a_, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<16>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
         else if (n_quad <= 24)
-            init_mass_matrix<24>(n_elem, n_basis, n_quad, a_, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<24>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
         else if (n_quad <= 32)
-            init_mass_matrix<32>(n_elem, n_basis, n_quad, a_, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<32>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
         else if (n_quad <= 64)
-            init_mass_matrix<64>(n_elem, n_basis, n_quad, a_, detJ.device_read(), quad, _I.device_read(), _P.device_read(), _a.device_write());
+            init_mass_matrix<64>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
         else
             cuddh_error("MassMatrix error: quadrature rules with more than 64 points not yet supported.");
     }
@@ -164,7 +169,8 @@ namespace cuddh
         auto P_ = reshape(_P, n_quad, n_basis);
         auto a = reshape(_a, n_quad, n_quad, n_elem);
 
-        forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) -> void {
+        forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) -> void
+        {
             __shared__ double u[NQ][NQ];
             __shared__ double Pu[NQ][NQ];
             __shared__ double P[NQ][NQ];
@@ -263,20 +269,23 @@ namespace cuddh
 
     void MassMatrix::action(double c, const double * x, double * y) const
     {
+        const int * I = fem.global_indices(MemorySpace::DEVICE);
+        const double * a = _a.device_read();
+
         if (n_quad <= 4)
-            mass_action<4>(n_elem, n_quad, n_basis, _I.device_read(), _P.device_read(), _a.device_read(), c, x, y);
+            mass_action<4>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
         else if (n_quad <= 8)
-            mass_action<8>(n_elem, n_quad, n_basis, _I.device_read(), _P.device_read(), _a.device_read(), c, x, y);
+            mass_action<8>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
         else if (n_quad <= 12)
-            mass_action<12>(n_elem, n_quad, n_basis, _I.device_read(), _P.device_read(), _a.device_read(), c, x, y);
+            mass_action<12>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
         else if (n_quad <= 16)
-            mass_action<16>(n_elem, n_quad, n_basis, _I.device_read(), _P.device_read(), _a.device_read(), c, x, y);
+            mass_action<16>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
         else if (n_quad <= 24)
-            mass_action<24>(n_elem, n_quad, n_basis, _I.device_read(), _P.device_read(), _a.device_read(), c, x, y);
+            mass_action<24>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
         else if (n_quad <= 32)
-            mass_action<32>(n_elem, n_quad, n_basis, _I.device_read(), _P.device_read(), _a.device_read(), c, x, y);
+            mass_action<32>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
         else if (n_quad <= 64)
-            mass_action<64>(n_elem, n_quad, n_basis, _I.device_read(), _P.device_read(), _a.device_read(), c, x, y);
+            mass_action<64>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
         else
             cuddh_error("MassMatrix error: quadrature rules with more than 64 points not yet supported.");
     }
@@ -307,7 +316,8 @@ namespace cuddh
 
         zeros(ndof, op);
 
-        forall_2d(n_basis, n_basis, n_elem, [=] __device__ (int el) -> void {
+        forall_2d(n_basis, n_basis, n_elem, [=] __device__ (int el) -> void
+        {
             const int i = threadIdx.x;
             const int j = threadIdx.y;
 
@@ -320,7 +330,8 @@ namespace cuddh
             AtomicAdd(op + idx, m);
         });
 
-        forall(ndof, [=] __device__ (int i) -> void {
+        forall(ndof, [=] __device__ (int i) -> void
+        {
             op[i] = 1.0 / op[i];
         });
     }
@@ -335,9 +346,11 @@ namespace cuddh
 
         auto& q = fem.basis().quadrature();
         auto& metrics = fem.mesh().element_metrics(q);
-        auto detJ = metrics.measures().device_read();
+        const double * detJ = metrics.measures(MemorySpace::DEVICE);
+        const int * I = fem.global_indices(MemorySpace::DEVICE);
+        double * op = _p.device_write();
         
-        init_diag_mass(n_elem, n_basis, nullptr, detJ, q, _I.device_read(), _p.device_write());
+        init_diag_mass(n_elem, n_basis, nullptr, detJ, q, I, op);
     }
 
     DiagInvMassMatrix::DiagInvMassMatrix(const double * a, const H1Space& fem)
@@ -350,9 +363,11 @@ namespace cuddh
 
         auto& q = fem.basis().quadrature();
         auto& metrics = fem.mesh().element_metrics(q);
-        auto detJ = metrics.measures().device_read();
+        const double * detJ = metrics.measures(MemorySpace::DEVICE);
+        const int * I = fem.global_indices(MemorySpace::DEVICE);
+        double * op = _p.device_write();
 
-        init_diag_mass(n_elem, n_basis, a, detJ, q, _I.device_read(), _p.device_write());
+        init_diag_mass(n_elem, n_basis, a, detJ, q, I, op);
     }
 
     void DiagInvMassMatrix::action(double c, const double * x, double * y) const

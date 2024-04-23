@@ -2,30 +2,36 @@
 
 namespace cuddh
 {
-    FaceLinearFunctional::FaceLinearFunctional(const FaceSpace& fs)
-        : n_faces{fs.n_faces()},
+    FaceLinearFunctional::FaceLinearFunctional(const FaceSpace& fs_)
+        : fs{fs_},
+          metrics{fs.metrics(fs.h1_space().basis().quadrature())},
+          n_faces{fs.n_faces()},
           n_basis{fs.h1_space().basis().size()},
-          quad{fs.h1_space().basis().quadrature()},
+          n_quad{n_basis},
           fast{true},
-          I{fs.subspace_indices()}
+          _w(n_quad)
     {
-        auto& metrics = fs.metrics(quad);
-        detJ = reshape(metrics.measures(), n_basis, n_faces);
-        x = reshape(metrics.physical_coordinates(), 2, n_basis, n_faces);
+        auto& quad = fs.h1_space().basis().quadrature();
+
+        double * h_w = _w.host_write();
+        for (int i = 0; i < n_quad; ++i)
+            h_w[i] = quad.w(i);
     }
 
-    FaceLinearFunctional::FaceLinearFunctional(const FaceSpace& fs, const QuadratureRule& quad_)
-        : n_faces{fs.n_faces()},
+    FaceLinearFunctional::FaceLinearFunctional(const FaceSpace& fs_, const QuadratureRule& quad)
+        : fs{fs_},
+          metrics{fs.metrics(quad)},
+          n_faces{fs.n_faces()},
           n_basis{fs.h1_space().basis().size()},
-          quad{quad_},
+          n_quad{quad.size()},
           fast{false},
-          P(quad.size(), n_basis)
+          _w(n_quad),
+          _P(n_quad * n_basis)
     {
-        const int n_quad = quad.size();
-        auto& metrics = fs.metrics(quad);
-        detJ = reshape(metrics.measures(), n_quad, n_faces);
-        x = reshape(metrics.physical_coordinates(), 2, n_quad, n_faces);
+        double * h_w = _w.host_write();
+        for (int i = 0; i < n_quad; ++i)
+            h_w[i] = quad.w(i);
 
-        fs.h1_space().basis().eval(n_quad, quad.x(), P);
+        fs.h1_space().basis().eval(n_quad, quad.x(), _P.host_write());
     }
 } // namespace cuddh

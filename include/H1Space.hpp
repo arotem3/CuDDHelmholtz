@@ -30,9 +30,9 @@ namespace cuddh
         /// @brief returns the inidices of the global degrees of freedom from
         /// element local indicies.
         /// The output has shape (n_basis, n_basis, n_elem).
-        const host_device_ivec& global_indices() const
+        const_icube_wrapper global_indices(MemorySpace m) const
         {
-            return _I;
+            return reshape(_I.read(m), n_basis, n_basis, n_elem);
         }
 
         /// @brief returns a reference to the mesh
@@ -49,9 +49,9 @@ namespace cuddh
 
         /// @brief returns the physical coordinates corresponding to collocation
         /// point of each nodal DOF. The output has shape (2, ndof).
-        const host_device_dvec& physical_coordinates() const
+        const_dmat_wrapper physical_coordinates(MemorySpace m) const
         {
-            return _xy;
+            return reshape(_xy.read(m), 2, ndof);
         }
 
     private:
@@ -85,27 +85,27 @@ namespace cuddh
         }
 
         /// @brief returns the face indices of the faces in the space 
-        const host_device_ivec& faces() const
+        const_ivec_wrapper faces(MemorySpace m) const
         {
-            return _faces;
+            return reshape(_faces.read(m), n_faces);
         }
 
         /// @brief returns the indices of the FaceSpace degrees of freedom
         /// corresponding to the local face indices. Specifically,
         /// subspace_indices(i, f) is the subspace index of the i-th basis
         /// function on face f. These indices range from 0 to this->size()-1.
-        const host_device_ivec& subspace_indices() const
+        const_imat_wrapper subspace_indices(MemorySpace m) const
         {
-            return _I;
+            return reshape(_I.read(m), n_basis, n_faces);
         }
 
         /// @brief returns the indicies of the global degrees of freedom in the
         /// H1Space relative to the FaceSpace. that is, global_indicies(i) is
         /// the index in H1Space corresponding to the i-th FaceSpace degree of
         /// freedom.
-        const host_device_ivec& global_indices() const
+        const_ivec_wrapper global_indices(MemorySpace m) const
         {
-            return _proj;
+            return reshape(_proj.read(m), ndof);
         }
 
         /// @brief project H1Space vector to FaceSpace vector

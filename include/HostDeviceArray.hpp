@@ -10,6 +10,12 @@
 // manages pointers of arrays that may be accessed between host and device
 namespace cuddh
 {
+    enum class MemorySpace
+    {
+        HOST,
+        DEVICE
+    };
+
     template <typename T>
     class HostDeviceArray
     {
@@ -37,6 +43,16 @@ namespace cuddh
         // resizes the array and invalidates both host and device pointer. This
         // action deletes previous data.
         void resize(int new_size);
+
+        // read access to data, same as host_read or device_read for respective MemorySpace. 
+        const T * read(MemorySpace m) const;
+
+        // write access to data, same as host_write or device_write for respective MemorySpace.
+        T * write(MemorySpace m);
+
+        // read & write access to data, same as host_read_write or
+        // device_read_write for respective MemorySpace.
+        T * read_write(MemorySpace m);
 
         // returns a read only host pointer to the array. This potentially copies
         // the data from device. (The copy occurs only if the last write access to the
@@ -300,6 +316,33 @@ namespace cuddh
         T * d_a = device_array;
         device_array = nullptr;
         return d_a;
+    }
+
+    template <typename T>
+    const T * HostDeviceArray<T>::read(MemorySpace m) const
+    {
+        if (m == MemorySpace::HOST)
+            return host_read();
+        else
+            return device_read();
+    }
+
+    template <typename T>
+    T * HostDeviceArray<T>::write(MemorySpace m)
+    {
+        if (m == MemorySpace::HOST)
+            return host_write();
+        else
+            return device_write();
+    }
+
+    template <typename T>
+    T * HostDeviceArray<T>::read_write(MemorySpace m)
+    {
+        if (m == MemorySpace::HOST)
+            return host_read_write();
+        else
+            return device_read_write();
     }
 
     typedef HostDeviceArray<double> host_device_dvec;

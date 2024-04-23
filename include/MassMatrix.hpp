@@ -29,6 +29,8 @@ namespace cuddh
         void action(const double * x, double * y) const override;
 
     private:
+        const H1Space& fem;
+        
         const int ndof;
         const int n_elem;
         const int n_basis;
@@ -37,7 +39,6 @@ namespace cuddh
         
         host_device_dvec _P;
         host_device_dvec _a; // a(x) * w(i) * w(j) * detJ
-        const host_device_ivec& _I;
     };
 
     /// @brief diagonal approximate inverse of mass matrix
@@ -62,9 +63,9 @@ namespace cuddh
 
     private:
         const int ndof;
+        const H1Space& fem;
 
         host_device_dvec _p;
-        const host_device_ivec& _I;
     };
 } // namespace cuddh
 

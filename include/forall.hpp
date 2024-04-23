@@ -26,6 +26,23 @@ namespace cuddh
     }
 
     template <typename LAMBDA>
+    __global__ static void forall1d_kernel(int n, LAMBDA fun)
+    {
+        const int k = blockIdx.x;
+        if (k >= n) return;
+
+        fun(k);
+    }
+
+    template <typename LAMBDA>
+    void forall_1d(int bx, int n, LAMBDA && fun)
+    {
+        if (n == 0) return;
+
+        forall2d_kernel<<<n, bx>>>(n, fun);
+    }
+
+    template <typename LAMBDA>
     __global__ static void forall2d_kernel(int n, LAMBDA fun)
     {
         const int k = blockIdx.x;
@@ -40,7 +57,7 @@ namespace cuddh
         if (n == 0) return;
         
         const dim3 block_size(bx, by);
-        forall2d_kernel<<<n, block_size>>>(bx, by, n, fun);
+        forall2d_kernel<<<n, block_size>>>(n, fun);
     }
 } // namespace cuddh
 

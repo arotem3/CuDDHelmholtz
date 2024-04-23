@@ -189,7 +189,7 @@ namespace cuddh
     void FaceSpace::restrict(const double * __restrict__ x, double * __restrict__ y) const
     {
         const int n = ndof;
-        auto proj = reshape(_proj.device_read(), n);
+        auto proj = global_indices(MemorySpace::DEVICE);
 
         forall(n [=] __device__ (int i) -> void {
             y[i] = x[proj(i)];
@@ -199,7 +199,7 @@ namespace cuddh
     void FaceSpace::prolong(const double * __restrict__ x, double * __restrict__ y) const
     {
         const int n = ndof;
-        auto proj = reshape(_proj.device_read(), n);
+        auto proj = global_indices(MemorySpace::DEVICE);
 
         forall(n, [=] __device__ (int i) -> void {
             y[proj(i)] += x[i];
