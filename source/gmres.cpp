@@ -112,7 +112,8 @@ namespace cuddh
             const double r_nrm = out.res_norm.at(it-1);
             axpby(n, one/r_nrm, r, zero, vk); // v[0] <- r / ||r||
 
-            eta.zeros();
+            // eta.zeros();
+            std::fill(eta.begin(), eta.end(), 0.0);
             eta(0) = r_nrm;
 
             int k1=0;

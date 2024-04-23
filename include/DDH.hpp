@@ -4,6 +4,7 @@
 #include "Operator.hpp"
 #include "EnsembleSpace.hpp"
 #include "MassMatrix.hpp"
+#include "linalg.hpp"
 
 namespace cuddh
 {

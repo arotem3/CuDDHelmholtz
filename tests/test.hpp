@@ -15,6 +15,8 @@ namespace cuddh_test
     void t_stiffness(int& n_test, int& n_passed);
     void t_mass(int& n_test, int& n_passed);
 
+    void t_linalg(int& n_test, int& n_passed);
+
     cuddh::Mesh2D load_unstructured_square();
 } // namespace cuddh_test
 

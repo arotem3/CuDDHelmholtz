@@ -1,5 +1,11 @@
 #include "H1Space.hpp"
 
+template <typename Map, typename Key>
+static bool contains(const Map & map, Key key)
+{
+    return map.find(key) != map.end();
+}
+
 namespace cuddh
 {
     H1Space::H1Space(const Mesh2D& mesh_, const Basis& basis_)
@@ -85,7 +91,7 @@ namespace cuddh
         int l = 0;
         for (int i = 0; i < N; ++i)
         {
-            if (not mask.contains(i))
+            if (not contains(mask, i))
             {
                 I[i] = l;
                 ++l;
@@ -152,7 +158,7 @@ namespace cuddh
             {
                 const int idx = K[E2V(i, s, el)];
 
-                if (not mask.contains(idx))
+                if (not contains(mask, idx))
                 {
                     mask[idx] = l;
                     P.push_back(idx);
@@ -185,7 +191,7 @@ namespace cuddh
     const Mesh2D::EdgeMetricCollection& FaceSpace::metrics(const QuadratureRule& quad) const
     {
         auto key = quad.name();
-        if (not _metrics.contains(key))
+        if (not contains(_metrics, key))
         {
             _metrics.insert({key, Mesh2D::EdgeMetricCollection(fem.mesh(), _n_faces, _faces, quad)});
         }

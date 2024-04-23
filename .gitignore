@@ -7,3 +7,4 @@ libcuddh.a
 .DS_Store
 *.py
 solution
+*.sh

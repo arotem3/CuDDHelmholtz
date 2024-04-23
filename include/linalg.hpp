@@ -2,6 +2,13 @@
 #define CUDDH_LINALG_HPP
 
 #include <cmath>
+#include <assert.h>
+
+#include <cuda_runtime.h>
+
+#include "cuddh_config.hpp"
+#include "forall.hpp"
+#include "HostDeviceArray.hpp"
 
 namespace cuddh
 {
@@ -19,6 +26,15 @@ namespace cuddh
 
     /// @brief x <- a * x 
     void scal(int n, double a, double * x);
+
+    /// @brief x <- a
+    void fill(int n, double a, double * x);
+
+    /// @brief x <- 0
+    void zeros(int n, double * x);
+
+    /// @brief x <- 1
+    void ones(int n, double * x);
 } // namespace cuddh
 
 #endif

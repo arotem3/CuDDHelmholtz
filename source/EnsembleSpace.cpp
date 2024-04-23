@@ -1,5 +1,11 @@
 #include "EnsembleSpace.hpp"
 
+template <typename Map, typename Key>
+static bool contains(const Map & map, Key key)
+{
+    return map.find(key) != map.end();
+}
+
 namespace cuddh
 {
     EnsembleSpace::EnsembleSpace(const H1Space& fem, int n_spaces_, const int * element_labels)
@@ -38,11 +44,11 @@ namespace cuddh
         // sI maps element local indices in subspace (with respect to subspace
         // element index) to subspace degree of freedom.
         sI.reshape(n_basis, n_basis, smax, n_spaces);
-        sI.fill(-1);
+        std::fill(sI.begin(), sI.end(), -1);
         
         // maps subspace element index to global element index
         elems.reshape(smax, n_spaces);
-        elems.fill(-1);
+        std::fill(elems.begin(), elems.end(), -1);
         
         for (int p = 0; p < n_spaces; ++p)
         {
@@ -101,13 +107,13 @@ namespace cuddh
         // fI maps the face local indices (with respect to subdomain face index)
         // to face space degrees of freedom
         fI.reshape(n_basis, smax, n_spaces);
-        fI.fill(-1);
+        std::fill(fI.begin(), fI.end(), -1);
 
         _faces.reshape(smax, n_spaces);
-        _faces.fill(-1);
+        std::fill(_faces.begin(), _faces.end(), -1);
 
         imat face_side(smax, n_spaces);
-        face_side.fill(-1);
+        std::fill(face_side.begin(), face_side.end(), -1);
 
         for (int p = 0; p < n_spaces; ++p)
         {
@@ -139,7 +145,7 @@ namespace cuddh
                     for (int i = 0; i < n_basis; ++i)
                     {
                         const int g_idx = g_inds(i, j, g_el); // global index
-                        if (not s_unique.contains(g_idx))
+                        if (not contains(s_unique, g_idx))
                         {
                             s_unique[g_idx] = l;
                             s_s2g.push_back(g_idx);
@@ -158,7 +164,7 @@ namespace cuddh
         
         // maps subspace indices to global indices
         gI.reshape(smax, n_spaces);
-        gI.fill(-1);
+        std::fill(gI.begin(), gI.end(), -1);
 
         for (int p = 0; p < n_spaces; ++p)
         {
@@ -198,7 +204,7 @@ namespace cuddh
                     
                     const int idx = sI(m, n, el, p);
 
-                    if (not s_unique.contains(idx))
+                    if (not contains(s_unique, idx))
                     {
                         s_unique[idx] = l;
                         s_f2s.push_back(idx);
@@ -217,7 +223,7 @@ namespace cuddh
         // pI maps the subdomain face space degree of freedom to the subspace
         // degree of freedom
         pI.reshape(smax, n_spaces);
-        pI.fill(-1);
+        std::fill(pI.begin(), pI.end(), -1);
         
         for (int p = 0; p < n_spaces; ++p)
         {
@@ -246,7 +252,7 @@ namespace cuddh
                 const int j1 = fI(i, f1, S1);
 
                 const int lkey = (S0 < S1) ? j0 : j1; // key is same for symmetric pairs
-                if (not unq.contains(lkey))
+                if (not contains(unq, lkey))
                 {
                     shared_dofs.push_back({S0, S1, j0, j1});
                     unq.insert(lkey);

@@ -1,5 +1,11 @@
 #include "Mesh2D.hpp"
 
+template <typename Map, typename Key>
+static bool contains(const Map & map, Key key)
+{
+    return map.find(key) != map.end();
+}
+
 namespace cuddh
 {
     Mesh2D Mesh2D::from_vertices(int nx, const double * x_, int nel, const int * elems_)
@@ -72,7 +78,7 @@ namespace cuddh
                 const int C1 = elems(l2, el);
 
                 const int k = key(C0, C1);
-                if (not edge_map.contains(k))
+                if (not contains(edge_map, k))
                 {
                     const double * x0 = x_ + 2*C0;
                     const double * x1 = x_ + 2*C1;
@@ -337,7 +343,7 @@ namespace cuddh
     const Mesh2D::ElementMetricCollection& Mesh2D::element_metrics(const QuadratureRule& quad) const
     {
         auto id = quad.name();
-        if (not elem_collections.contains(id))
+        if (not contains(elem_collections, id))
         {
             elem_collections.insert({id, ElementMetricCollection(*this, quad)});
         }
@@ -350,7 +356,7 @@ namespace cuddh
         auto& collection = (edge_type == FaceType::INTERIOR) ? interior_edge_collections : boundary_edge_collections;
 
         auto id = quad.name();
-        if (not collection.contains(id))
+        if (not contains(collection, id))
         {
             collection.insert({id, EdgeMetricCollection(*this, edge_type, quad)});
         }

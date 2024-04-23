@@ -3,6 +3,7 @@
 
 #include <array>
 #include <utility>
+#include <algorithm>
 
 #include "H1Space.hpp"
 

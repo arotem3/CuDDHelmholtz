@@ -1,5 +1,11 @@
 #include "include/QuadratureRule.hpp"
 
+template <typename Map, typename Key>
+static bool contains(const Map & map, Key key)
+{
+    return map.find(key) != map.end();
+}
+
 // extern to lapack routine dsteqr for eigevalue decomposition of symmetric
 // tridiagonal matrix:
 // COMPZ: is a single character, set to 'N' for only eigenvalues
@@ -73,7 +79,7 @@ static void gauss_legendre(int n, double * x, double * w)
         {10, {-0.973906528517171720077964, -0.865063366688984510732097, -0.679409568299024406234327, -0.433395394129247190799266, -0.148874338981631210884826, 0.148874338981631210884826, 0.433395394129247190799266, 0.679409568299024406234327, 0.865063366688984510732097, 0.973906528517171720077964}}
     };
 
-    if (cached_nodes.contains(n))
+    if (contains(cached_nodes, n))
     {
         auto& xq = cached_nodes.at(n);
         for (int i=0; i < n; ++i)
@@ -83,7 +89,7 @@ static void gauss_legendre(int n, double * x, double * w)
     }
     else
     { // Golub-Welsch algorithm
-        std::fill_n(x+1, n, 0.0);
+        std::fill_n(x, n, 0.0);
 
         cuddh::dvec E(n-1);
         for (int i=0; i < n-1; ++i) // off diagonal for symmetric tridiagonal matrix
@@ -138,7 +144,7 @@ static void gauss_lobatto(int n, double * x, double * w)
         {9, {-1, -0.899757995411460, -0.677186279510738, -0.363117463826178, 0, 0.363117463826178, 0.677186279510738, 0.899757995411460, 1}}
     };
     
-    if (cached_nodes.contains(n))
+    if (contains(cached_nodes, n))
     {
         auto& xq = cached_nodes.at(n);
         for (int i=0; i < n; ++i)

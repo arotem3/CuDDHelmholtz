@@ -43,7 +43,8 @@ namespace cuddh_test
         TestMatrix a(n);
         a.action(x, y);
 
-        x.zeros();
+        // x.zeros();
+        zeros(x.size(), x);
 
         cuddh::Identity P(n);
 

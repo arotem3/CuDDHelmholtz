@@ -7,5 +7,7 @@ add_executable(
     stiffness.cpp
     mass.cpp
     load_unstructured_square.cpp
+    linalg.cpp
 )
+target_compile_options(test PRIVATE -x=cu)
 target_link_libraries(test PUBLIC cuddh)

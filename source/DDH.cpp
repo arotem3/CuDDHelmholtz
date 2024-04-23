@@ -158,8 +158,8 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
         mx = std::max(mx, n);
     }
 
-    B.reshape(2, mx, n_domains); B.fill(-1);
-    dualB.reshape(2, mx, n_domains); dualB.fill(-1);
+    B.reshape(2, mx, n_domains); std::fill(B.begin(), B.end(), -1);
+    dualB.reshape(2, mx, n_domains); std::fill(dualB.begin(), dualB.end(), -1);
 
     for (int p = 0; p < n_domains; ++p)
     {
@@ -290,8 +290,8 @@ void DDH::action(const double * x, double * y) const
     const double half_dt = 0.5 * dt;
     const double rw = 1.0 / omega;
 
-    g_lambda.zeros();
-
+    // g_lambda.zeros();
+    zeros(g_lambda.size(), g_lambda);
     const double * g_F = x;
     const double * g_G = x + g_ndof;
     double * U = y;

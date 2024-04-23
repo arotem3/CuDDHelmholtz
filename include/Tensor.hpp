@@ -233,24 +233,6 @@ namespace cuddh
         {
             return len;
         }
-    
-        inline void fill(scalar x) requires (!std::is_const_v<scalar>)
-        {
-            for (int i=0; i < len; ++i)
-            {
-                ptr[i] = x;
-            }
-        }
-
-        inline void zeros() requires (!std::is_const_v<scalar>)
-        {
-            fill(0);
-        }
-
-        inline void ones() requires (!std::is_const_v<scalar>)
-        {
-            fill(1);
-        }
     };
 
     /// @brief wraps an array in a `TensorWrapper`. Same as declaring a new

@@ -1,14 +1,14 @@
 #include "test.hpp"
 
 // n-th Chebyshev polynomial of first kind
-double Tn(double x, int n)
+static double Tn(double x, int n)
 {
     double z = std::acos(x);
     return std::cos(n * z);
 }
 
 // f(x) is a polynomial of degree n with integral of 2 over [-1, 1]
-double f(double x, int n)
+static double f(double x, int n)
 {
     const double a = 1.0 - n*n;
     const double b = 1.0 - (n-1.0)*(n-1.0);
@@ -29,7 +29,7 @@ namespace cuddh_test
             double I = 0.0;
             for (int i=0; i < n; ++i)
             {
-                I += q.w()[i] * f(q.x()[i], p);
+                I += q.w(i) * f(q.x(i), p);
             }
 
             const double error = std::abs(I - 2.0);
@@ -49,7 +49,7 @@ namespace cuddh_test
             double I = 0.0;
             for (int i=0; i < n; ++i)
             {
-                I += q.w()[i] * f(q.x()[i], p);
+                I += q.w(i) * f(q.x(i), p);
             }
 
             const double error = std::abs(I - 2.0);
