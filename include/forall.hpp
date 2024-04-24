@@ -59,6 +59,24 @@ namespace cuddh
         const dim3 block_size(bx, by);
         forall2d_kernel<<<n, block_size>>>(n, fun);
     }
+
+    template <typename LAMBDA>
+    __global__ static void forall3d_kernel(int n, LAMBDA fun)
+    {
+        const int k = blockIdx.x;
+        if (k >= n) return;
+
+        fun(k);
+    }
+
+    template <typename LAMBDA>
+    void forall_3d(int bx, int by, int bz, int n, LAMBDA && fun)
+    {
+        if (n == 0) return;
+
+        const dim3 block_size(bx, by, bz);
+        forall3d_kernel<<<n, dim3>>>(n, fun);
+    }
 } // namespace cuddh
 
 #endif

@@ -1,6 +1,6 @@
 #include "test.hpp"
 
-static double func(const double X[2])
+static double __host__ __device__ func(const double X[2])
 {
     const double x = X[0], y = X[1];
     return 3.0 * x * x - 2.0 * x * y + y + 1.0;
@@ -18,8 +18,11 @@ namespace cuddh_test
         H1Space fem(mesh, basis);
         const int ndof = fem.size();
 
-        dvec u(ndof);
-        dvec f(ndof);
+        host_device_dvec _u(ndof);
+        host_device_dvec _f(ndof);
+        
+        double * u = _u.device_write();
+        double * f = _f.device_write();
 
         LinearFunctional l(fem, quad);
         l.action(1.0, func, f);
@@ -33,25 +36,22 @@ namespace cuddh_test
         auto out = gmres(ndof, u, &m, f, &p, gmres_m, maxiter, tol);
 
         // verify correctness
-        auto I = fem.global_indices();
-        auto x = reshape(mesh.element_metrics(basis.quadrature()).physical_coordinates(), 2, n_basis, n_basis, n_elem);
+        const double * h_u = _u.host_read();
+        const double * h_f = _f.host_read();
+
+        auto I = fem.global_indices(MemorySpace::HOST);
+        auto x = fem.physical_coordinates(MemorySpace::HOST);
 
         double max_err = 0.0;
-        for (int el = 0; el < n_elem; ++el)
+        for (int i = 0; i < ndof; ++i)
         {
-            for (int j = 0; j < n_basis; ++j)
-            {
-                for (int i = 0; i < n_basis; ++i)
-                {
-                    double xij[2];
-                    xij[0] = x(0, i, j, el);
-                    xij[1] = x(1, i, j, el);
+            double xi[2];
+            xi[0] = x(0, i);
+            xi[1] = x(1, i);
 
-                    double fij = func(xij);
-                    double err = u[I(i, j, el)] - fij;
-                    max_err = std::max(std::abs(err), max_err);
-                }
-            }
+            double fi = func(xi);
+            double err = h_u[i] - fi;
+            max_err = std::max(std::abs(err), max_err);
         }
 
         n_test++;

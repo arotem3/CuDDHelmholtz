@@ -3,7 +3,7 @@
 #include <iomanip>
 
 /// a function with zero normal derivative on boundary of [-1,1]x[-1,1] 
-static double func(const double X[2])
+static double __host__ __device__ func(const double X[2])
 {
     const double x = X[0], y = X[1];
     double x5 = std::pow(x, 5);
@@ -12,7 +12,7 @@ static double func(const double X[2])
 }
 
 // negative laplacian of func
-static double L(const double X[2])
+static double __host__ __device__ L(const double X[2])
 {
     const double x = X[0], y = X[1];
     double x3 = std::pow(x, 3);
@@ -34,10 +34,15 @@ namespace cuddh_test
         H1Space fem(mesh, basis);
         const int ndof = fem.size();
 
-        dvec u(ndof);
-        dvec Au(ndof);
-        dvec f(ndof);
-        dvec Lf(ndof);
+        host_device_dvec _u(ndof);
+        host_device_dvec _Au(ndof);
+        host_device_dvec _f(ndof);
+        host_device_dvec _Lf(ndof);
+        
+        double * u = _u.device_write();
+        double * Au = _Au.device_write();
+        double * f = _f.device_write();
+        double * Lf = _Lf.device_write();
 
         LinearFunctional l(fem, quad);
         l.action(1.0, func, f);
@@ -55,10 +60,13 @@ namespace cuddh_test
         StiffnessMatrix A(fem, quad);
         A.action(1.0, u, Au);
 
+        const double * h_Au = _Au.host_read();
+        const double * h_Lf = _Lf.host_read();
+
         double max_err = 0.0;
         for (int i = 0; i < ndof; ++i)
         {
-            double err = Au(i) - Lf(i);
+            double err = h_Au[i] - h_Lf[i];
             max_err = std::max(std::abs(err), max_err);
         }
 

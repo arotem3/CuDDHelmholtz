@@ -3,60 +3,321 @@
 
 using namespace cuddh;
 
-static void stiffness(int subsp,
-                      int n_elem,
-                      int n_basis,
-                      const TensorWrapper<4,const double>& G,
-                      const TensorWrapper<4,const int>& I,
-                      const const_imat_wrapper& elems,
-                      const dmat& D,
-                      const double * u,
-                      double * out)
+static void init_geom_factors(int n_elem,
+                              int n_basis,
+                              const double * d_w,
+                              const double * d_J,
+                              double * g_G)
 {
-    dcube F(2, n_basis, n_basis);
-    
-    for (int el = 0; el < n_elem; ++el)
+    auto w = reshape(d_w, n_basis);
+    auto J = reshape(d_J, 2, 2, n_basis, n_basis, n_elem);
+
+    auto G = reshape(d_G, 3, n_basis, n_basis, n_elem);
+
+    forall_2d(n_basis, n_basis, n_elem, [=] __device__ (int el) -> void
     {
-        const int g_el = elems(el, subsp);
+        const int i = threadIdx.x;
+        const int j = threadIdx.y;
 
-        // compute contravariant flux
-        for (int l = 0; l < n_basis; ++l)
-        {
-            for (int k = 0; k < n_basis; ++k)
-            {
-                double Dx = 0.0;
-                double Dy = 0.0;
-                for (int i = 0; i < n_basis; ++i)
-                {
-                    Dx += D(k, i) * u[I(i, l, el, subsp)];
-                    Dy += D(l, i) * u[I(k, i, el, subsp)];
-                }
+        const double W = q.w(i) * q.w(j);
+        const double Y_eta = J(1, 1, i, j, el);
+        const double X_eta = J(0, 1, i, j, el);
+        const double Y_xi  = J(1, 0, i, j, el);
+        const double X_xi  = J(0, 0, i, j, el);
 
-                const double A = G(0, k, l, g_el);
-                const double B = G(1, k, l, g_el);
-                const double C = G(2, k, l, g_el);
+        const double detJ = X_xi * Y_eta - X_eta * Y_xi;
+        
+        G(0, i, j, el) =  W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
+        G(1, i, j, el) = -W * (Y_xi  * Y_eta + X_xi  * X_eta) / detJ;
+        G(2, i, j, el) =  W * (Y_xi  * Y_xi  + X_xi  * X_xi)  / detJ;
+    });
+}
 
-                F(0, k, l) = A * Dx + B * Dy;
-                F(1, k, l) = B * Dx + C * Dy;
-            }
-        }
+static void __device__ stiffness(int subsp,
+                                int n_elem,
+                                int n_basis,
+                                const TensorWrapper<4,const double>& G,
+                                const TensorWrapper<4,const int>& I,
+                                const const_imat_wrapper& elems,
+                                const dmat& D,
+                                double F[][][][2],
+                                const double * u,
+                                double * out)
+{
+    const int k = threadIdx.x;
+    const int l = threadIdx.y;
+    const int el = threadIdx.z;
 
-        // inner product with D'
-        for (int l = 0; l < n_basis; ++l)
-        {
-            for (int k = 0; k < n_basis; ++k)
-            {
-                double Su = 0.0;
-                for (int i = 0; i < n_basis; ++i)
-                {
-                    Su += D(i, k) * F(0, i, l) + D(i, l) * F(1, k, i);
-                }
+    const int g_el = elems(el, subsp);
 
-                const int idx = I(k, l, el, subsp);
-                out[idx] += Su;
-            }
-        }
+    // compute contravariant flux
+    double Dx = 0.0, Dy = 0.0;
+    for (int i = 0; i < n_basis; ++i)
+    {
+        const int il = I(i, l, el, subsp);
+        const int ki = I(k, i, el, subsp);
+        Dx += D(k, i) * u[il];
+        Dy += D(l, i) * u[ki];
     }
+
+    const double A = G(0, k, l, g_el);
+    const double B = G(1, k, l, g_el);
+    const double C = G(2, k, l, g_el);
+
+    F[el][k][l][0] = A * Dx + B * Dy;
+    F[el][k][l][1] = B * Dx + C * Dy;
+
+    __syncthreads();
+
+    // inner product with D'
+    double Su = 0.0;
+    for (int i = 0; i < n_basis; ++i)
+        Su += D(i, k) * F[el][i][l][0] + D(i, l) * F[el][k][i][1];
+    
+    const int idx = I(k, l, el, subsp);
+    AtomicAdd(out+idx, Su);
+}
+
+template <int NB, int NEL>
+static void ddh_action(const EnsembleSpace * efem
+                       int g_ndof,
+                       int g_elem,
+                       int n_basis,
+                       int n_lambda,
+                       int nt,
+                       double omega,
+                       double dt,
+                       const double * d_g,
+                       const double * d_whf
+                       const double * d_cs,
+                       const double * d_sn
+                       double c,
+                       const double * x,
+                       double * y,
+                       double * d_lambda)
+{
+    auto gI = efem->global_indices(MemorySpace::DEVICE); // global indices of subspace local dofs
+    auto s_dof = efem->sizes(MemorySpace::DEVICE);  // number of subdomain degrees of freedom
+    auto s_fdof = efem->fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
+
+    auto elems = efem->elements(MemorySpace::DEVICE); // elements for each subdomain
+    auto faces = efem->faces(MemorySpace::DEVICE); // the lambda-faces for each subdomain
+
+    auto s_elem = efem->n_elems(MemorySpace::DEVICE); // number of elements for each subdomain
+    
+    auto subspace_indices = efem->subspace_indices(MemorySpace::DEVICE); // ((i,j,el), p) -> p-th subspace index for dof (i,j,el)
+    auto P = efem->face_proj(MemorySpace::DEVICE); // (i, p) -> p-th subspace's face space index to subspace index
+
+    auto g = reshape(d_g, 3, n_basis, n_basis, g_elem);
+
+    const double half_dt = 0.5 * dt;
+    const double rw = 1.0 / omega;
+
+    auto wh_filter = reshape(d_whf, nt+1);
+    auto cs = reshape(d_cs, 2*nt+1);
+    auto sn = reshape(d_sn, 2*nt+1);
+
+    auto g_lambda = reshape(d_lambda, 2 * n_lambda);
+
+    auto g_F = reshape(x, g_ndof);
+    auto g_G = reshape(x+g_ndof, g_ndof);
+    auto U = reshape(y, g_ndof);
+    auto V = reshape(y+g_ndof, g_ndof);
+
+    zeros(2 * n_lambda, d_lambda);
+
+    constexpr int MX_NDOF = NB * NB * NEL * NEL;
+    constexpr int MX_FDOF = 4 * (NB * NEL - NEL) - 4;
+
+    for (int lit = 0; lit < lambda_maxit; ++lit)
+    {
+        zeros(2 * g_ndof, y);
+
+        forall_3d(NB, NB, NEL*NEL, n_domains, [=] __device__ (int subsp) -> void
+        {
+            // thread id
+            const int t = k + blockDim.x * (l + blockDim.y * el); // linear thread index
+            const int inc = blockDim.x * blockDim.y * blockDim.z;
+
+            // get subspace dimensions
+            const int nel = s_elem(subsp);
+
+            const int nl = s_lambda(subsp);
+            const int fdof = s_fdof(subsp);
+            const int ndof = s_dof(subsp);
+
+            // note nl <= fdof. The lambdas make up a subset of the boundary
+            // degrees of freedom. The rest is outflow corresponding to lambda = 0
+
+            // shared mem
+            __shared__ double lambda[MX_FDOF];
+            __shared__ double mu[MX_FDOF];
+            __shared__ double F[MX_NDOF];
+            __shared__ double G[MX_NDOF];
+            __shared__ double u[MX_NDOF];
+            __shared__ double v[MX_NDOF];
+            __shared__ double p[MX_NDOF];
+            __shared__ double q[MX_NDOF];
+            __shared__ double p_half[MX_NDOF];
+            __shared__ double q_half[MX_NDOF];
+            __shared__ double z[MX_NDOF];
+            __shared__ double flx[NEL*NEL][NB][NB][2];
+
+            // copy global lambda to subdomain face space
+            for (int i = t; i < nl; i += inc)
+            {
+                int j = B(0, i, subsp); // face space index
+                int idx = B(1, i, subsp); // global lambda index
+                
+                lambda[j] = g_lambda[idx];
+                mu[j] = g_lambda[idx + n_lambda];
+            }
+
+            // copy global x to forcing
+            for (int i = t; i < ndof; i += inc)
+            {
+                const int idx = gI(i, subsp);
+                F[i] = g_F[idx];
+                G[i] = g_G[idx];
+            }
+
+            // zero out work variables
+            for (int i = t; i < ndof; i += inc)
+            {
+                u[i] = 0.0;
+                v[i] = 0.0;
+            }
+
+            __syncthreads();
+
+            // Add trace terms to forcing
+            for (int i = t; i < fdof; i += inc)
+            {
+                const int idx = P(i, subsp);
+                const double Hi = H(i, subsp);
+                F[idx] += Hi * lambda[i];
+                G[idx] += Hi * mu[i];
+            }
+
+            // WaveHoltz iteration
+            for (int whit=0; whit < wh_maxit; ++whit)
+            {
+                __syncthreads();
+                
+                double dK = wh_filter(0);
+                for (int i = t; i < ndof; i += inc)
+                {
+                    p[i] = u[i];
+                    q[i] = v[i];
+
+                    u[i] = dK * u[i];
+                    v[i] = dK * v[i];
+                }
+
+                // time stepping
+                for (int it=1; it <= nt; ++it)
+                {
+                    for (int i = t; i < ndof; i += inc)
+                        z[i] = 0.0;
+                    __syncthreads();
+
+                    stiffness(subsp, nel, n_basis, g, subspace_indices, elems, D, flx, p, z);
+                    __syncthreads();
+
+                    // z <- z - H * q
+                    for (int i = t; i < fdof; i += inc)
+                    {
+                        const int idx = P(i, subsp);
+                        const double Hi = H(i, subsp);
+
+                        z[idx] -= Hi * q[idx];
+                    }
+                    __syncthreads();
+
+                    // half time step
+                    double c = cs(2*it-2);
+                    double s = sn(2*it-2);
+                    for (int i = t; i < ndof; i += inc)
+                    {
+                        const double dq = z[i] - c * F[i] + s * G[i];
+                        p_half[i] = p[i] - half_dt * q[i];
+                        q_half[i] = q[i] + half_dt * inv_m(i, subsp) * dq;
+                    }
+                    __syncthreads();
+
+                    for (int i = t; i < fdof; i += inc)
+                        z[i] = 0.0;
+
+                    __syncthreads();
+
+                    stiffness(subsp, nel, n_basis, g, subspace_indices, elems, D, flx, p_half, z);
+                    __syncthreads();
+
+                    for (int i = t; i < fdof; i += inc)
+                    {
+                        const int idx = P(i, subsp);
+                        const double Hi = H(i, subsp);
+                        z[idx] -= Hi * q_half[idx];
+                    }
+
+                    __syncthreads();
+
+                    // full time step + WaveHoltz update
+                    dK = wh_filter(it);
+                    c = cs(2*it-1);
+                    s = sn(2*it-1);
+                    for (int i = t; i < ndof; i += inc)
+                    {
+                        const double dq = z[i] - c * F[i] + s * G[i];
+                        p[i] -= dt * q_half[i];
+                        q[i] += dt * inv_m(i, subsp) * dq;
+
+                        u[i] += dK * p[i];
+                        v[i] += dK * q[i];
+                    }
+                } // time stepping
+            } // WaveHoltz
+
+            __syncthreads();
+
+            // rescale v and update global solution
+            for (int i = t; i < ndof; i += inc)
+            {
+                v[i] *= rw;
+
+                const int idx = gI(i, subsp);
+                const double mi = m(i, subsp);
+                const double m_u = mi * u[i];
+                const double m_v = mi * v[i];
+                
+                AtomicAdd(U+idx, m_u);
+                AtomicAdd(V+idx, m_v);
+            }
+                
+            __syncthreads();
+
+            // update Lambdas
+            for (int i = t; i < nl; i += inc)
+            {
+                const int j = dualB(0, i, subsp);
+                const int idx = dualB(1, i, subsp);
+                const int k = P(j, subsp); // volume index of trace
+
+                g_update[idx] = -lambda[j] - 2.0 * omega * v[k];
+                g_update[idx + n_lambda] = -mu[j] + 2.0 * omega * u[k];
+            }
+        });
+
+        // update Lambdas
+        forall(2*n_lambda, [=] __device__ (int i) -> void
+        {
+            g_lambda[i] = g_update[i];
+        });
+    } // for lambda iteration
+
+    // multiply by inverse mass
+    g_inv_m.action(U, U);
+    g_inv_m.action(V, V);
 }
 
 DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
@@ -90,14 +351,17 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
     nt = std::ceil(T / dt);
     dt = T / nt;
 
-    wh_filter.reshape(nt+1);
+    _wh_filter.resize(nt+1);
+    auto wh_filter = reshape(_wh_filter.host_write(), nt+1);
     for (int k = 0; k <= nt; ++k)
         wh_filter(k) = dt * (omega / M_PI) * (std::cos(omega * k * dt) - 0.25);
     wh_filter(0) *= 0.5;
     wh_filter(nt) *= 0.5;
 
-    cs.reshape(2*nt+1);
-    sn.reshape(2*nt+1);
+    _cs.resize(2*nt+1);
+    _sn.resize(2*nt+1);
+    auto cs = reshape(_cs.host_write(), 2*nt+1);
+    auto sn = reshape(_sn.host_write(), 2*nt+1);
     for (int k = 0; k <= 2*nt; ++k)
     {
         double t = 0.5 * k * dt;
@@ -122,8 +386,8 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
     auto cmap = efem->connectivity_map();
     int _n = cmap.shape(1);
     n_lambda = 2 * _n;
-    g_lambda.reshape(2 * n_lambda); // g_lambda = (lambda1, lambda2, mu1, mu2)
-    g_update.reshape(2 * n_lambda);
+    _g_lambda.resize(2 * n_lambda); // g_lambda = (lambda1, lambda2, mu1, mu2)
+    _g_update.resize(2 * n_lambda);
 
     // g_lambda = (lambda0, lambda1, mu0, mu1) where lambda0 is the "interior"
     // trace for each subspace and lambda1 is the "external" trace. cmap is a
@@ -149,17 +413,23 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
         _bt[subspace1].push_back({face_index1, k}); // lambda1 of subpsace1 == lambda0 of subspace0
     }
 
-    s_lambda.reshape(n_domains);
-    int mx = 0;
+    _s_lambda.resize(n_domains);
+    auto s_lambda = reshape(_s_lambda.host_write(), n_domains);
+    mx_n_lambda = 0;
     for (int p = 0; p < n_domains; ++p)
     {
         const int n = _b.at(p).size();
         s_lambda(p) = n;
-        mx = std::max(mx, n);
+        mx_n_lambda = std::max(mx_n_lambda, n);
     }
 
-    B.reshape(2, mx, n_domains); std::fill(B.begin(), B.end(), -1);
-    dualB.reshape(2, mx, n_domains); std::fill(dualB.begin(), dualB.end(), -1);
+    _B.resize(2 * mx_n_lambda * n_domains);
+    auto B = reshape(_B.host_write(), 2, mx_n_lambda, n_domains);
+    std::fill(B.begin(), B.end(), -1);
+    
+    _dualB.resize(2 * mx_n_lambda * n_domains);
+    dualB = reshape(_dualB.host_write(), 2, mx_n_lambda, n_domains);
+    std::fill(dualB.begin(), dualB.end(), -1);
 
     for (int p = 0; p < n_domains; ++p)
     {
@@ -182,60 +452,56 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
     // set up FEM
     auto& basis = fem.basis();
     auto& q = basis.quadrature();
+
+    host_device_dvec _w(n_basis);
+    double * h_w = _w.host_write();
+    for (int i = 0; i < n_basis; ++i)
+        h_w[i] = q.w(i);
+    const double * d_w = _w.device_read();
     
-    D.reshape(n_basis, n_basis);
-    basis.deriv(n_basis, q.x(), D);
+    _D.resize(n_basis * n_basis);
+    basis.deriv(n_basis, q.x(), _D.host_write());
 
     auto& metrics = fem.mesh().element_metrics(q);
-    auto J = reshape(metrics.jacobians(), 2, 2, n_basis, n_basis, g_elem);
+    const double * d_J = metrics.jacobians(MemorySpace::DEVICE);
     
-    auto g_inds = fem.global_indices();
-    auto s_inds = efem->subspace_indices();
-    auto f_inds = efem->face_indices();
+    _g_tensor.resize(3 * n_basis * n_basis * g_elem);
+    double * d_G = _g_tensor.device_write();
+    init_geom_factors(n_elem, n_basis, d_w, d_J, d_G);
 
-    g_tensor.reshape(3, n_basis, n_basis, g_elem);
-    for (int el = 0; el < g_elem; ++el)
-    {
-        for (int j = 0; j < n_basis; ++j)
-        {
-            for (int i = 0; i < n_basis; ++i)
-            {
-                const double W = q.w(i) * q.w(j);
-                const double Y_eta = J(1, 1, i, j, el);
-                const double X_eta = J(0, 1, i, j, el);
-                const double Y_xi  = J(1, 0, i, j, el);
-                const double X_xi  = J(0, 0, i, j, el);
+    auto g_inds = fem.global_indices(MemorySpace::HOST);
+    auto s_inds = efem->subspace_indices(MemorySpace::HOST);
+    auto f_inds = efem->face_indices(MemorySpace::HOST);
 
-                const double detJ = X_xi * Y_eta - X_eta * Y_xi;
-                
-                g_tensor(0, i, j, el) =  W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
-                g_tensor(1, i, j, el) = -W * (Y_xi  * Y_eta + X_xi  * X_eta) / detJ;
-                g_tensor(2, i, j, el) =  W * (Y_xi  * Y_xi  + X_xi  * X_xi)  / detJ;
-            }
-        }
-    }
-
-    int mx_dof = 0, mx_fdof = 0;
-    auto sizes = efem->sizes();
-    auto fsizes = efem->fsizes();
+    mx_dof = 0;
+    mx_fdof = 0;
+    auto sizes = efem->sizes(MemorySpace::HOST);
+    auto fsizes = efem->fsizes(MemorySpace::HOST);
     for (int subsp = 0; subsp < n_domains; ++subsp)
     {
         mx_dof = std::max(mx_dof, sizes(subsp));
         mx_fdof = std::max(mx_fdof, fsizes(subsp));
     }
 
-    inv_m.reshape(mx_dof, n_domains);
-    m.reshape(mx_dof, n_domains);
-    H.reshape(mx_fdof, n_domains);
-
-    auto elems = efem->elements();
-    auto n_elems = efem->n_elems();
-    auto faces = efem->faces();
-    auto n_faces = efem->n_faces();
+    _inv_m.resize(mx_dof * n_domains);
+    auto inv_m = reshape(_inv_m.host_write(), mx_dof, n_domains);
     
+    _m.resize(mx_dof, n_domains);
+    auto m = reshape(_m.host_write(), mx_dof, n_domains);
+    
+    _H.resize(mx_fdof, n_domains);
+    auto H = reshape(_H.host_write(), xm_fdof, n_domains);
+
+    auto elems = efem->elements(MemorySpace::HOST);
+    auto n_elems = efem->n_elems(MemorySpace::HOST);
+    auto faces = efem->faces(MemorySpace::HOST);
+    auto n_faces = efem->n_faces(MemorySpace::HOST);
+    
+    mx_elem_per_dom = 0;
     for (int subsp = 0; subsp < n_domains; ++subsp)
     {
         const int s_nel = n_elems(subsp);
+        mx_elem_per_dom = std::max(mx_elem_per_dom, s_nel);
         for (int el = 0; el < s_nel; ++el)
         {
             const int g_el = elems(el, subsp);
@@ -274,185 +540,38 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
 
 void DDH::action(const double * x, double * y) const
 {
-    auto gI = efem->global_indices(); // global indices of subspace local dofs
-    auto s_dof = efem->sizes();  // number of subdomain degrees of freedom
-    auto s_fdof = efem->fsizes(); // number of face space degrees of freedom
+    auto gI = efem->global_indices(MemorySpace::DEVICE); // global indices of subspace local dofs
+    auto s_dof = efem->sizes(MemorySpace::DEVICE);  // number of subdomain degrees of freedom
+    auto s_fdof = efem->fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
 
-    auto elems = efem->elements(); // elements for each subdomain
-    auto faces = efem->faces(); // the lambda-faces for each subdomain
+    auto elems = efem->elements(MemorySpace::DEVICE); // elements for each subdomain
+    auto faces = efem->faces(MemorySpace::DEVICE); // the lambda-faces for each subdomain
 
-    auto s_elem = efem->n_elems(); // number of elements for each subdomain
+    auto s_elem = efem->n_elems(MemorySpace::DEVICE); // number of elements for each subdomain
     
-    auto subspace_indices = efem->subspace_indices(); // ((i,j,el), p) -> p-th subspace index for dof (i,j,el)
-    auto P = efem->face_proj(); // (i, p) -> p-th subspace's face space index to subspace index
+    auto subspace_indices = efem->subspace_indices(MemorySpace::DEVICE); // ((i,j,el), p) -> p-th subspace index for dof (i,j,el)
+    auto P = efem->face_proj(MemorySpace::DEVICE); // (i, p) -> p-th subspace's face space index to subspace index
 
-    auto g = reshape(g_tensor.data(), 3, n_basis, n_basis, g_elem);
+    auto g = reshape(_g_tensor.device_read(), 3, n_basis, n_basis, g_elem);
     const double half_dt = 0.5 * dt;
     const double rw = 1.0 / omega;
 
-    // g_lambda.zeros();
-    zeros(g_lambda.size(), g_lambda);
-    const double * g_F = x;
-    const double * g_G = x + g_ndof;
-    double * U = y;
-    double * V = y + g_ndof;
+    auto wh_filter = reshape(_wh_filter.device_read(), nt+1);
+    auto cs = reshape(_cs.device_read(), 2*nt+1);
+    auto sn = reshape(_sn.device_read(), 2*nt+1);
+
+    auto g_lambda = reshape(_g_lambda.device_write(), 2 * n_lambda);
+    zeros(2 * n_lambda, g_lambda);
+
+    auto g_F = reshape(x, g_ndof);
+    auto g_G = reshape(x+g_ndof, g_ndof);
+    auto U = reshape(y, g_ndof);
+    auto V = reshape(y+g_ndof, g_ndof);
+
+    constexpr int MX_NDOF = 1024;
+    constexpr int MX_FDOF = 124;
     
-    for (int lit = 0; lit < lambda_maxit; ++lit)
-    {
-        for (int i = 0; i < g_ndof; ++i)
-        {
-            U[i] = 0.0;
-            V[i] = 0.0;
-        }
-
-        for (int subsp = 0; subsp < n_domains; ++subsp)
-        {
-            // get subspace dimensions
-            const int nel = s_elem(subsp);
-
-            // copy global lambda to subdomain face space
-            const int nl = s_lambda(subsp);
-            const int fdof = s_fdof(subsp);
-            const int ndof = s_dof(subsp);
-
-            // note nl <= fdof. The lambdas make up a subset of the boundary
-            // degrees of freedom. The rest is outflow corresponding to lambda = 0
-
-            dvec lambda(fdof), mu(fdof);
-
-            for (int i = 0; i < nl; ++i)
-            {
-                const int j = B(0, i, subsp); // face space index
-                const int idx = B(1, i, subsp); // global lambda index
-                lambda[j] = g_lambda[idx];
-                mu[j] = g_lambda[idx + n_lambda];
-            }
-
-            // copy global x to forcing
-            dvec F(ndof), G(ndof);
-            for (int i = 0; i < ndof; ++i)
-            {
-                const int idx = gI(i, subsp);
-                F[i] = g_F[idx];
-                G[i] = g_G[idx];
-            }
-
-            // Add trace terms to forcing
-            for (int i = 0; i < fdof; ++i)
-            {
-                const int idx = P(i, subsp);
-                const double Hi = H(i, subsp);
-                F[idx] += Hi * lambda[i];
-                G[idx] += Hi * mu[i];
-            }
-
-            // WaveHoltz/time-stepping work variables
-            dvec u(ndof), v(ndof),
-                 p(ndof), q(ndof),
-                 p_half(ndof), q_half(ndof),
-                 z(ndof);
-
-            // WaveHoltz iteration
-            for (int whit=0; whit < wh_maxit; ++whit)
-            {
-                double dK = wh_filter(0);
-                for (int i = 0; i < ndof; ++i)
-                {
-                    p[i] = u[i];
-                    q[i] = v[i];
-
-                    u[i] = dK * u[i];
-                    v[i] = dK * v[i];
-                }
-
-                // time stepping loop
-                for (int it=1; it <= nt; ++it)
-                {
-                    // compute dq/dt
-                    for (int i = 0; i < ndof; ++i)
-                        z[i] = 0.0;
-                    
-                    stiffness(subsp, nel, n_basis, g, subspace_indices, elems, D, p, z); // z <- S * p
-
-                    // z <- z - H * q
-                    for (int i = 0; i < fdof; ++i)
-                    {
-                        const int idx = P(i, subsp); // volume index of trace
-                        const double Hi = H(i, subsp);
-                        z[idx] -= Hi * q[idx];
-                    }
-
-                    // half time step
-                    double c = cs(2*it-2);
-                    double s = sn(2*it-2);
-                    for (int i = 0; i < ndof; ++i)
-                    {
-                        const double dq = z[i] - c * F[i] + s * G[i];
-                        p_half[i] = p[i] - half_dt * q[i];
-                        q_half[i] = q[i] + half_dt * inv_m(i, subsp) * dq;
-                    }
-
-                    for (int i = 0; i < ndof; ++i)
-                        z[i] = 0.0;
-                    
-                    stiffness(subsp, nel, n_basis, g, subspace_indices, elems, D, p_half, z);
-
-                    for (int i = 0; i < fdof; ++i)
-                    {
-                        const int idx = P(i, subsp);
-                        const double Hi = H(i, subsp);
-                        z[idx] -= Hi * q_half[idx];
-                    }
-
-                    // full time step + WaveHoltz update
-                    dK = wh_filter(it);
-                    c = cs(2*it-1);
-                    s = sn(2*it-1);
-                    for (int i = 0; i < ndof; ++i)
-                    {
-                        const double dq = z[i] - c * F[i] + s * G[i];
-                        p[i] -= dt * q_half[i];
-                        q[i] += dt * inv_m(i, subsp) * dq;
-
-                        u[i] += dK * p[i];
-                        v[i] += dK * q[i];
-                    }
-                } // time stepping
-            } // WaveHoltz
-
-            // rescale v
-            for (int i = 0; i < ndof; ++i)
-                v[i] *= rw;
-
-            // update Lambdas
-            for (int i = 0; i < nl; ++i)
-            {
-                const int j = dualB(0, i, subsp);
-                const int idx = dualB(1, i, subsp);
-                const int k = P(j, subsp); // volume index of trace
-
-                g_update[idx] = -lambda[j] - 2.0 * omega * v[k];
-                g_update[idx + n_lambda] = -mu[j] + 2.0 * omega * u[k];
-            }
-
-            // add M * u to global solution
-            for (int i=0; i < ndof; ++i)
-            {
-                const int idx = gI(i, subsp);
-                const double mi = m(i, subsp);
-                U[idx] += mi * u[i];
-                V[idx] += mi * v[i];
-            }
-        } // for subspace
-
-        // update Lambdas
-        for (int i = 0; i < 2*n_lambda; ++i)
-            g_lambda[i] = g_update[i];
-    } // for lambda iteration
-
-    // multiply by inverse mass
-    g_inv_m.action(U, U);
-    g_inv_m.action(V, V);
+    
 }
 
 void DDH::action(double c, const double * x, double * y) const

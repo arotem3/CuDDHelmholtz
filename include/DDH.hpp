@@ -26,27 +26,32 @@ namespace cuddh
         int nt;
         int wh_maxit;
         int lambda_maxit;
+        int mx_n_lambda;
+        int mx_dof;
+        int mx_fdof;
+        int mx_elem_per_dom;
 
         double omega;
         double dt;
 
-        icube B; // B(:, l, p) = {face dof, g_lambda dof}, where l is the local lambda index on subdomain p
-        icube dualB;
-        ivec s_lambda;
+        host_device_ivec _B;
+        host_device_ivec _dualB;
+        host_device_ivec _s_lambda;
 
-        dmat D; // differentiation matrix
+        host_device_dvec _D; // differentiation matrix
 
         DiagInvMassMatrix g_inv_m; // global inverse mass matrix
-        Tensor<4, double> g_tensor; // geometric factors for stiffness matrix computations
-        dmat inv_m; // inverse mass matrix
-        dmat m; // mass matrix 
-        dmat H; // face mass matrix
-        dvec wh_filter; // omega / pi * (cos(omega * t) - 0.25) scaled by quadrature weights
-        dvec cs; // cos(omega t) on all half time steps
-        dvec sn; // sin(omega t) on all half time steps
+        
+        host_device_dvec _g_tensor; // geometric factors for stiffness matrix computations
+        host_device_dvec _inv_m; // inverse mass matrix
+        host_device_dvec _m; // mass matrix 
+        host_device_dvec _H; // face mass matrix
+        host_device_dvec _wh_filter; // omega / pi * (cos(omega * t) - 0.25) scaled by quadrature weights
+        host_device_dvec _cs; // cos(omega t) on all half time steps
+        host_device_dvec _sn; // sin(omega t) on all half time steps
 
-        mutable dvec g_lambda; // global lambda vector
-        mutable dvec g_update; // global lambda updates
+        mutable host_device_dvec _g_lambda; // global lambda vector
+        mutable host_device_dvec _g_update; // global lambda updates
 
         std::unique_ptr<EnsembleSpace> efem;
     };
