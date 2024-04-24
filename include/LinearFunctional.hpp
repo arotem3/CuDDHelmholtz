@@ -3,6 +3,7 @@
 
 #include "H1Space.hpp"
 #include "forall.hpp"
+#include "linalg.hpp"
 
 namespace cuddh
 {
@@ -22,9 +23,13 @@ namespace cuddh
         template <typename Func>
         void action(double c, Func && f, double * F) const;
 
+        template <typename Func>
+        void action(Func && f, double * F) const;
+
     private:
         const H1Space& fem;
         
+        const int ndof;
         const int n_elem;
         const int n_basis;
         const int n_quad;
@@ -166,6 +171,13 @@ namespace cuddh
             else
                 cuddh_error("LinearFunctional::action does not support quadrature rules with more than 32 points");
         }
+    }
+
+    template <typename Func>
+    void LinearFunctional::action(Func && f, double * F) const
+    {
+        zeros(ndof, F);
+        action(1.0, f, F);
     }
 } // namespace cuddh
 

@@ -31,20 +31,23 @@ namespace cuddh_test
         h_y = y.host_release();
         const double * h_y_result = y.host_read();
 
-        bool is_correct = true;
+        double max_error = 0.0;
         for (int i=0; i < n; ++i)
         {
             double c = b * h_y[i] + a * h_x[i];
-            is_correct = std::abs(h_y_result[i] - c) < 1e-12;
-            if (not is_correct)
-                break;
+            max_error = std::max(max_error, std::abs(h_y_result[i] - c));
         }
 
         n_test++;
-        if (is_correct)
+        if (max_error < 1e-12)
+        {
+            std::cout << "\t[ + ] t_axpby() test successful." << std::endl;
             n_passed++;
+        }
         else
-            std::cout << "\tt_linalg(): axpby is incorrect.\n";
+        {
+            std::cout << "\t[ - ] t_axpby() test failed.\n\t\tComputed error ~ " << max_error << "but should have been exact to machine prec." << std::endl;
+        }
 
         delete[] h_y;
     }
@@ -77,12 +80,17 @@ namespace cuddh_test
             if (not is_correct)
                 break;
         }
-        
+
         n_test++;
         if (is_correct)
+        {
+            std::cout << "\t[ + ] t_copy() test successful." << std::endl;
             n_passed++;
+        }
         else
-            std::cout << "\tt_linalg(): copy is incorrect.\n";
+        {
+            std::cout << "\t[ - ] t_copy() test failed." << std::endl;
+        }
     }
 
     static void t_dot(int& n_test, int& n_passed)
@@ -109,13 +117,18 @@ namespace cuddh_test
 
         const double ddot_result = dot(n, d_x, d_y);
 
-        bool is_correct = std::abs(h_ddot - ddot_result) < 1e-12; // they won't be exactly the same due to floating point arithmetic
+        const double error = std::abs(h_ddot - ddot_result);
 
         n_test++;
-        if (is_correct)
+        if (error < 1e-12)
+        {
+            std::cout << "\t[ + ] t_dot test successful." << std::endl;
             n_passed++;
+        }
         else
-            std::cout << "\tt_linalg(): dot is incorrect.\n";
+        {
+            std::cout << "\t[ - ] t_dot test failed.\n\t\tComputed error ~ " << error << "but should have been exact to machine prec." << std::endl;
+        }
     }
 
     static void t_fill(int& n_test, int& n_passed)
@@ -141,9 +154,14 @@ namespace cuddh_test
 
         n_test++;
         if (is_correct)
+        {
+            std::cout << "\t[ + ] t_fill() test successful." << std::endl;
             n_passed++;
+        }
         else
-            std::cout << "\tt_linalg(): fill is incorrect.\n";
+        {
+            std::cout << "\t[ - ] t_fill() test failed." << std::endl;
+        }
     }
 
     static void t_scal(int& n_test, int& n_passed)
@@ -178,10 +196,56 @@ namespace cuddh_test
 
         n_test++;
         if (is_correct)
+        {
+            std::cout << "\t[ + ] t_scal() test successful." << std::endl;
             n_passed++;
+        }
         else
-            std::cout << "\tt_linalg(): scal is incorrect.\n";
+        {
+            std::cout << "\t[ - ] t_scal() test failed." << std::endl;
+        }
+
         delete[] h_x;
+    }
+
+    static void t_dist(int& n_test, int& n_passed)
+    {
+        const int n = 1<<10;
+
+        host_device_dvec x(n);
+        host_device_dvec y(n);
+
+        double * h_x = x.host_write();
+        double * h_y = y.host_write();
+
+        double h_dist = 0.0;
+        for (int i = 0; i < n; ++i)
+        {
+            h_x[i] = (double)rand() / RAND_MAX - 0.2; // [-0.2, 0.8]
+            h_y[i] = (double)rand() / RAND_MAX - 0.2;
+
+            double e = h_x[i] - h_y[i];
+            h_dist += e * e;
+        }
+        h_dist = std::sqrt(h_dist);
+
+        const double * d_x = x.device_read();
+        const double * d_y = y.device_read();
+
+        const double d_dist = dist(n, d_x, d_y);
+
+        const double err = std::abs(d_dist - h_dist) / n;
+
+        n_test++;
+        if (err < 1e-10)
+        {
+            std::cout << "\t[ + ] t_dist() test successful." << std::endl;
+            n_passed++;
+        }
+        else
+        {
+            std::cout << "\t[ - ] t_dist() test failed.\n\t\tComputed error ~ " << err << "but should have been exact to machine prec." << std::endl;
+        }
     }
 
     void t_linalg(int& n_test, int& n_passed)
@@ -191,5 +255,6 @@ namespace cuddh_test
         t_dot(n_test, n_passed);
         t_fill(n_test, n_passed);
         t_scal(n_test, n_passed);
+        t_dist(n_test, n_passed);
     }
 } // namespace cuddh_test

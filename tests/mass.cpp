@@ -12,6 +12,7 @@ namespace cuddh_test
 {
     void t_mass(int& n_test, int& n_passed, const Mesh2D& mesh, const Basis& basis, const QuadratureRule& quad, const std::string& test_name)
     {
+        constexpr double tol = 1e-8;
         const int n_elem = mesh.n_elem();
         const int n_basis = basis.size();
 
@@ -41,7 +42,7 @@ namespace cuddh_test
         
         // evaluate (f, phi)
         LinearFunctional l(fem, quad);
-        l.action(1.0, [] __device__ (double X[2]) {return func(X);}, b);
+        l.action([] __device__ (double X[2]) {return func(X);}, b);
 
         MassMatrix m(fem);
         DiagInvMassMatrix p(fem);
@@ -51,24 +52,34 @@ namespace cuddh_test
         double err = dist(ndof, Mf, b) / cuddh::norm(ndof, b);
 
         n_test++;
-        if (err > 1e-8)
-            std::cout << "\tt_mass(): test \"" << test_name << "\" failed forward problem with error ~ " << err << "\n";
-        else
+        if (err < tol)
+        {
+            std::cout << "\t[ + ] t_mass(" << test_name << ") forward error test successful." << std::endl;
             n_passed++;
+        }
+        else
+        {
+            std::cout << "\t[ - ] t_mass(" << test_name << ") test failed.\n\t\tForward error ~ " << err << " > tol (" << tol << ")" << std::endl;
+        }
         
         // solve for u
         const int gmres_m = 5;
         const int maxiter = 10;
-        const double tol = 1e-12;
-        auto out = gmres(ndof, u, &m, b, &p, gmres_m, maxiter, tol);
+        const double gmres_tol = 1e-12;
+        auto out = gmres(ndof, u, &m, b, &p, gmres_m, maxiter, gmres_tol);
 
         err = dist(ndof, u, f) / cuddh::norm(ndof, f);
 
         n_test++;
-        if (err > 1e-8)
-            std::cout << "\tt_mass(): test \"" << test_name << "\" failed inverse problem with error ~ " << err << "\n";
-        else
+        if (err < tol)
+        {
+            std::cout << "\t[ + ] t_mass(" << test_name << ") backward error test successful." << std::endl;
             n_passed++;
+        }
+        else
+        {
+            std::cout << "\t[ - ] t_mass(" << test_name << ") backward error test failed.\n\t\tBackward error ~ " << err << "> tol (" << tol << ")" << std::endl;
+        }
     }
 
     void t_mass(int& n_test, int& n_passed)

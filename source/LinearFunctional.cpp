@@ -4,6 +4,7 @@ namespace cuddh
 {
     LinearFunctional::LinearFunctional(const H1Space& fem_)
         : fem{fem_},
+          ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
           n_quad{n_basis},
@@ -20,6 +21,7 @@ namespace cuddh
 
     LinearFunctional::LinearFunctional(const H1Space& fem_, const QuadratureRule& quad)
         : fem{fem_},
+          ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
           n_quad{quad.size()},

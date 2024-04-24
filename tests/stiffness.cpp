@@ -27,53 +27,48 @@ namespace cuddh_test
 {
     void t_stiffness(int& n_test, int& n_passed, const Mesh2D& mesh, const Basis& basis, const QuadratureRule& quad, const std::string& test_name)
     {
-        n_test++;
-
+        constexpr double tol = 1e-6;
         const int n_basis = basis.size();
 
         H1Space fem(mesh, basis);
         const int ndof = fem.size();
 
-        host_device_dvec _u(ndof);
-        host_device_dvec _Au(ndof);
+        host_device_dvec _Af(ndof);
         host_device_dvec _f(ndof);
         host_device_dvec _Lf(ndof);
         
-        double * u = _u.device_write();
-        double * Au = _Au.device_write();
+        double * Af = _Af.device_write();
         double * f = _f.device_write();
         double * Lf = _Lf.device_write();
 
-        LinearFunctional l(fem, quad);
-        l.action(1.0, func, f);
-        l.action(1.0, L, Lf);
+        auto x = fem.physical_coordinates(MemorySpace::DEVICE);
 
-        MassMatrix m(fem);
-        DiagInvMassMatrix p(fem);
-        auto out = gmres(ndof, u, &m, f, &p, 20, 10, 1e-12); // (u, v) == (f, v) for all v
-        if (not out.success)
+        // evaluate func
+        forall(ndof, [=] __device__ (int i) -> void
         {
-            std::cout << "\tt_stiffness(): test \"" << test_name << "\" failed... something wrong with the mass matrix?\n";
-            return;
-        }
+            const double xi[] = {x(0, i), x(1, i)};
+            f[i] = func(xi);
+        });
+
+        // (L, phi)
+        LinearFunctional l(fem, quad);
+        l.action([=] __device__ (const double X[2]) -> double {return L(X);}, Lf);
 
         StiffnessMatrix A(fem, quad);
-        A.action(1.0, u, Au);
+        A.action(f, Af);
 
-        const double * h_Au = _Au.host_read();
-        const double * h_Lf = _Lf.host_read();
+        const double err = dist(ndof, Af, Lf) / cuddh::norm(ndof, Lf);
 
-        double max_err = 0.0;
-        for (int i = 0; i < ndof; ++i)
+        n_test++;
+        if (err < tol)
         {
-            double err = h_Au[i] - h_Lf[i];
-            max_err = std::max(std::abs(err), max_err);
-        }
-
-        if (max_err > 1e-6)
-            std::cout << "\tt_stiffness(): test \"" << test_name << "\" failed with error " << max_err << "\n";
-        else
+            std::cout << "\t[ + ] t_stiffness(" << test_name << ") test successful." << std::endl;
             n_passed++;
+        }
+        else
+        {
+            std::cout << "\t[ - ] t_stiffness(" << test_name << ") test failed.\n\t\tComputed error ~ " << err << "> tol (" << tol << ")." << std::endl;
+        }
     }
 
     void t_stiffness(int& n_test, int& n_passed)

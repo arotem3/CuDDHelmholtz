@@ -61,9 +61,14 @@ namespace cuddh_test
         auto out = cuddh::gmres(n, x, &a, y, m, maxit, tol);
 
         n_test++;
-        if (not out.success)
-            std::cout << "\tt_gmres(): gmres failed to solve linear system. Final residual = " << out.res_norm.back() << "\n";
-        else
+        if (out.success)
+        {
+            std::cout << "\t[ + ] t_gmres() test successful." << std::endl;
             n_passed++;
+        }
+        else
+        {
+            std::cout << "\t[ - ] t_gmres() test failed.\n\t\tFinal residual ~ " << out.res_norm.back() << " > specified tol. (" << tol << ")" << std::endl;
+        }
     }
 } // namespace cuddh_test

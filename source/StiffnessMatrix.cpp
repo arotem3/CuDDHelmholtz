@@ -94,8 +94,10 @@ namespace cuddh
     {
         auto _P = reshape(d_P, n_quad, n_basis);
         auto _D = reshape(d_D, n_quad, n_basis);
+        
+        auto I = reshape(d_I, n_basis, n_basis, n_elem);
+        
         auto G = reshape(d_G, 3, n_quad, n_quad, n_elem);
-        auto I = reshape(d_I, n_quad, n_quad, n_elem);
         
         forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) -> void
         {
@@ -106,106 +108,77 @@ namespace cuddh
             __shared__ double P[NQ][NQ];
             __shared__ double D[NQ][NQ];
 
-            const int x = threadIdx.x;
-            const int y = threadIdx.y;
-            const int dx = blockDim.x;
-            const int dy = blockDim.y;
+            const int tx = threadIdx.x;
+            const int ty = threadIdx.y;
 
             int idx;
 
             // copy P and D
-            for (int i = x; i < n_quad; i += dx)
+            if (ty < n_basis)
             {
-                for (int k = y; k < n_basis; k += dy)
-                {
-                    P[i][k] = _P(i, k);
-                    D[i][k] = _D(i, k);
-                }
+                P[tx][ty] = _P(tx, ty);
+                D[tx][ty] = _D(tx, ty);
             }
 
             // copy global dofs to element
-            for (int l = x; l < n_basis; l += dx)
+            if (tx < n_basis && ty < n_basis)
             {
-                for (int k = y; k < n_basis; k += dy)
-                {
-                    idx = I(k, l, el);
-                    u[k][l] = d_u[idx];
-                }
+                idx = I(tx, ty, el);
+                u[tx][ty] = d_u[idx];
             }
-
             __syncthreads();
 
             // evaluate & differentiate on quadrature points
-            for (int l = x; l < n_basis; l += dx)
+            if (ty < n_basis)
             {
-                for (int i = y; i < n_quad; i += dy)
+                double pxu = 0.0, dxu = 0.0;
+                for (int k = 0; k < n_basis; ++k)
                 {
-                    double pxu = 0.0, dxu = 0.0;
-                    for (int k = 0; k < n_basis; ++k)
-                    {
-                        const double uk = u[k][l];
-                        pxu += P[i][k] * uk;
-                        dxu += D[i][k] * uk;
-                    }
-                    Pu[i][l] = pxu;
-                    Du[i][l] = dxu;
+                    const double uk = u[k][ty];
+                    pxu += P[tx][k] * uk;
+                    dxu += D[tx][k] * uk;
                 }
+                Pu[tx][ty] = pxu;
+                Du[tx][ty] = dxu;
             }
-
             __syncthreads();
 
-            for (int j = x; j < n_quad; j += dx)
+            const double A = G(0, tx, ty, el);
+            const double B = G(1, tx, ty, el);
+            const double C = G(2, tx, ty, el);
+
+            double Dx = 0.0, Dy = 0.0;
+            for (int l = 0; l < n_basis; ++l)
             {
-                for (int i = y; i < n_quad; i += dy)
-                {
-                    const double A = G(0, i, j, el);
-                    const double B = G(1, i, j, el);
-                    const double C = G(2, i, j, el);
-
-                    double Dx = 0.0, Dy = 0.0;
-                    for (int l = 0; l < n_basis; ++l)
-                    {
-                        Dx += P[j][l] * Du[i][l];
-                        Dy += D[j][l] * Pu[i][l];
-                    }
-                    F[i][j][0] = A * Dx + B * Dy;
-                    F[i][j][1] = B * Dx + C * Dy;
-                }
+                Dx += P[ty][l] * Du[tx][l];
+                Dy += D[ty][l] * Pu[tx][l];
             }
-
+            F[tx][ty][0] = A * Dx + B * Dy;
+            F[tx][ty][1] = B * Dx + C * Dy;
             __syncthreads();
 
             // integrate
-            for (int k = x; k < n_basis; k += dx)
+            if (tx < n_basis)
             {
-                for (int j = y; j < n_quad; j += dy)
+                double df = 0.0, pg = 0.0;
+                for (int i = 0; i < n_quad; ++i)
                 {
-                    double df = 0.0, pg = 0.0;
-                    for (int i = 0; i < n_quad; ++i)
-                    {
-                        df += D[i][k] * F[i][j][0];
-                        pg += P[i][k] * F[i][j][1];
-                    }
-                    Du[j][k] = df;
-                    Pu[j][k] = pg;
+                    df += D[i][tx] * F[i][ty][0];
+                    pg += P[i][tx] * F[i][ty][1];
                 }
+                Du[tx][ty] = df;
+                Pu[tx][ty] = pg;
             }
-
             __syncthreads();
 
-            for (int l = x; l < n_basis; l += dx)
+            if (tx < n_basis && ty < n_basis)
             {
-                for (int k = y; k < n_basis; k += dy)
-                {
-                    double Su = 0.0;
-                    for (int j = 0; j < n_quad; ++j)
-                    {
-                        Su += P[j][l] * Du[j][k] + D[j][l] * Pu[j][k];
-                    }
-                    Su *= c;
+                double Su = 0.0;
+                for (int j = 0; j < n_quad; ++j)
+                    Su += P[j][ty] * Du[tx][j] + D[j][ty] * Pu[tx][j];
+                Su *= c;
 
-                    atomicAdd(d_out+idx, Su);
-                }
+                atomicAdd(d_out+idx, Su);
             }
         });
     }

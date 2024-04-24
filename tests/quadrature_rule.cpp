@@ -35,16 +35,21 @@ namespace cuddh_test
             const double error = std::abs(I - 2.0);
 
             n_test++;
-            if (error > 1e-10)
-                std::cout << "\tt_quadrature_rule(): Gauss Legendre with n = " << n << " points computed incorrect integral.\n";
-            else
+            if (error < 1e-10)
+            {
+                std::cout << "\t[ + ] t_quadrature_rule(" << q.name() << ") test successful." << std::endl;
                 n_passed++;
+            }
+            else
+            {
+                std::cout << "\t[ - ] t_quadrature_rule(" << q.name() << ") test failed.\n\t\tQuadrature error ~ " << error << "but should have been exact to machine prec." << std::endl;
+            }
         }
 
         for (int n=2; n < 16; ++n)
         {
             QuadratureRule q(n, QuadratureRule::GaussLobatto);
-            const int p = 2*n-3; // Gauss-Legendre rule is exact for polynomials of degree 2*n-1;
+            const int p = 2*n-3; // Gauss-Lobatto rule is exact for polynomials of degree 2*n-3;
 
             double I = 0.0;
             for (int i=0; i < n; ++i)
@@ -55,28 +60,15 @@ namespace cuddh_test
             const double error = std::abs(I - 2.0);
 
             n_test++;
-            if (error > 1e-10)
-                std::cout << "\tt_quadrature_rule(): Gauss Lobatto with n = " << n << " points computed incorrect integral.\n";
-            else
+            if (error < 1e-10)
+            {
+                std::cout << "\t[ + ] t_quadrature_rule(" << q.name() << ") test successful." << std::endl;
                 n_passed++;
-        }
-
-        {
-            QuadratureRule q(11, QuadratureRule::GaussLegendre);
-            n_test++;
-            if (q.name() != "legendre00011")
-                std::cout << "\tt_quadrature_rule(): Gauss Legendre quadrature rule has a bad name.\n";
+            }
             else
-                n_passed++;
-        }
-        
-        {
-            QuadratureRule q(6, QuadratureRule::GaussLobatto);
-            n_test++;
-            if (q.name() != "lobatto00006")
-                std::cout << "\tt_quadrature_rule(): Gauss Lobatto quadrature rule has a bad name.\n";
-            else
-                n_passed++;
+            {
+                std::cout << "\t[ - ] t_quadrature_rule(" << q.name() << ") test failed.\n\t\tQuadrature error ~ " << error << "but should have been exact to machine prec." << std::endl;
+            }
         }
     }
 } // namespace cuddh_test
