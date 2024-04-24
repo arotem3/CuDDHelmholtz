@@ -9,6 +9,7 @@
 #include "Operator.hpp"
 
 #include "HostDeviceArray.hpp"
+#include "forall.hpp"
 
 namespace cuddh
 {
@@ -87,7 +88,7 @@ namespace cuddh
         /// @brief returns the face indices of the faces in the space 
         const_ivec_wrapper faces(MemorySpace m) const
         {
-            return reshape(_faces.read(m), n_faces);
+            return reshape(_faces.read(m), _n_faces);
         }
 
         /// @brief returns the indices of the FaceSpace degrees of freedom
@@ -96,7 +97,7 @@ namespace cuddh
         /// function on face f. These indices range from 0 to this->size()-1.
         const_imat_wrapper subspace_indices(MemorySpace m) const
         {
-            return reshape(_I.read(m), n_basis, n_faces);
+            return reshape(_I.read(m), n_basis, _n_faces);
         }
 
         /// @brief returns the indicies of the global degrees of freedom in the
@@ -146,21 +147,22 @@ namespace cuddh
     public:
         /// @brief initialize projector
         /// @param fs FaceSpace of all boundary Dirichlet faces
-        H1_0(const FaceSpace& fs) : _I{fs.global_indices()} {}
+        H1_0(const FaceSpace& fs_) : fs{fs_} {}
 
         /// @brief projects an H1Space vector onto the H1_0 inplace. 
         void action(double * y) const
         {
-            const int ndof = _I.size();
-            const int * I = _I.device_read();
+            const int ndof = fs.size();
+            const int * I = fs.global_indices(MemorySpace::DEVICE);
 
-            forall(ndof, [=](int i) -> void {
-                y[I(i)] = 0.0;
+            forall(ndof, [=] __device__ (int i) -> void
+            {
+                y[I[i]] = 0.0;
             });
         }
 
     private:
-        const host_device_ivec& _I;
+        const FaceSpace& fs;
     };
 } // namespace cuddh
 

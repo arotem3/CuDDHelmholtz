@@ -114,7 +114,7 @@ namespace cuddh
 
         // fI maps the face local indices (with respect to subdomain face index)
         // to face space degrees of freedom
-        fI.resize(n_basis * mx_faces * n_space);
+        fI.resize(n_basis * mx_faces * n_spaces);
         auto h_fI = reshape(fI.host_write(), n_basis, mx_faces, n_spaces);
         std::fill(h_fI.begin(), h_fI.end(), -1);
 
@@ -122,7 +122,7 @@ namespace cuddh
         auto h_faces = reshape(_faces.host_write(), mx_faces, n_spaces);
         std::fill(h_faces.begin(), h_faces.end(), -1);
 
-        imat face_side(smax, n_spaces);
+        imat face_side(mx_faces, n_spaces);
         std::fill(face_side.begin(), face_side.end(), -1);
 
         for (int p = 0; p < n_spaces; ++p)
@@ -138,7 +138,7 @@ namespace cuddh
 
         // determine the mapping from subspace indices to global indices.
         std::vector<std::vector<int>> s2g(n_spaces); // subspace index to global index
-        auto g_inds = fem.global_indices(); // global element indices
+        auto g_inds = fem.global_indices(MemorySpace::HOST); // global element indices
         mx_ndof = 0;
         for (int p = 0; p < n_spaces; ++p)
         {
@@ -173,7 +173,7 @@ namespace cuddh
         }
         
         // maps subspace indices to global indices
-        gI.resize(mx_ndof, n_space);
+        gI.resize(mx_ndof * n_spaces);
         auto h_gI = reshape(gI.host_write(), mx_ndof, n_spaces);
         std::fill(h_gI.begin(), h_gI.end(), -1);
 
@@ -199,7 +199,7 @@ namespace cuddh
             const int nf = h_s_faces(p);
             for (int f = 0; f < nf; ++f)
             {
-                const Edge * edge = mesh.edge(_faces(f, p));
+                const Edge * edge = mesh.edge(h_faces(f, p));
                 const int side = face_side(f, p);
                 const int g_el = edge->elements[side];
                 const int s = edge->sides[side];
@@ -233,7 +233,7 @@ namespace cuddh
 
         // pI maps the subdomain face space degree of freedom to the subspace
         // degree of freedom
-        pI.resize(mx_fdof * n_spaces):
+        pI.resize(mx_fdof * n_spaces);
         auto h_pI = reshape(pI.host_write(), mx_fdof, n_spaces);
         std::fill(h_pI.begin(), h_pI.end(), -1);
         

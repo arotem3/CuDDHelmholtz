@@ -50,7 +50,7 @@ namespace cuddh
                    double c,
                    double * d_F)
     {
-        auto w = reshape(w, n_quad);
+        auto w = reshape(d_w, n_quad);
         auto _P = reshape(d_P, n_quad, n_basis);
         auto detJ =reshape(d_detJ, n_quad, n_quad, n_elem);
         auto X = reshape(d_X, 2, n_quad, n_quad, n_elem);
@@ -63,65 +63,41 @@ namespace cuddh
             __shared__ double P[NQ][NQ];
 
             const int tx = threadIdx.x;
-            const int dx = blockDim.x;
             const int ty = threadIdx.y;
-            const int dy = blockDim.y;
 
             // copy P
-            for (int i = tx; i < n_quad; i += dx)
-            {
-                for (int k = ty; k < n_basis; k += dy)
-                {
-                    P[i][k] = _P(i, k);
-                }
-            }
-
+            if (ty < n_basis)
+                P[tx][ty] = _P(tx, ty);
+            
             // eval f on quadrature points
-            for (int i = tx; i < n_quad; i += dx)
+            double xij[2];
+            xij[0] = X(0, tx, ty, el);
+            xij[1] = X(1, tx, ty, el);
+
+            const double fij = f(xij);
+            g[tx][ty] = w(tx) * w(ty) * detJ(tx, ty, el) * fij;
+
+            __syncthreads();
+
+            if (ty < n_basis)
             {
-                for (int j = ty; j < n_quad; j += dy)
-                {
-                    double xij[2];
-                    xij[0] = X(0, i, j, el);
-                    xij[1] = X(1, i, j, el);
-
-                    const double fij = f(xij);
-
-                    g[i][j] = w(i) * w(j) * detJ(i, j, el) * fij;
-                }
+                double qu = 0.0;
+                for (int j = 0; j < n_quad; ++j)
+                    qu += P[j][ty] * g[tx][j];
+                Pg[tx][ty] = qu;
             }
 
             __syncthreads();
 
-            for (int i = tx; i < n_quad; i += dx)
+            if (tx < n_basis && ty < n_basis)
             {
-                for (int l = ty; l < n_basis; l += dy)
-                {
-                    double qu = 0.0;
-                    for (int j = 0; j < n_quad; ++j)
-                    {
-                        qu += P[j][l] * g[i][j];
-                    }
-                    Pg[i][l] = qu;
-                }
-            }
-
-            __syncthreads();
-
-            for (int k = tx; k < n_basis; k += dx)
-            {
-                for (int l = ty; l < n_basis; l += dy)
-                {
-                    double qqu = 0.0;
-                    for (int i = 0; i < n_quad; ++i)
-                    {
-                        qqu += P[i][k] * Pg[i][l];
-                    }
-                    qqu *= c;
-                    
-                    const int idx = I(k, l, el);
-                    AtomicAdd(d_F + idx, qqu);
-                }
+                double qqu = 0.0;
+                for (int i = 0; i < n_quad; ++i)
+                    qqu += P[i][tx] * Pg[i][ty];
+                qqu *= c;
+                
+                const int idx = I(tx, ty, el);
+                atomicAdd(d_F + idx, qqu);
             }
         });
     }
@@ -137,7 +113,7 @@ namespace cuddh
                  double c,
                  double * d_F)
     {
-        auto w = reshape(w, n_basis);
+        auto w = reshape(d_w, n_basis);
         auto detJ = reshape(d_detJ, n_basis, n_basis, n_elem);
         auto X = reshape(d_X, 2, n_basis, n_basis, n_elem);
         auto I = reshape(d_I, n_basis, n_basis, n_elem);
@@ -156,7 +132,7 @@ namespace cuddh
 
             const int idx = I(i, j, el);
 
-            AtomicAdd(d_F + idx, fij);
+            atomicAdd(d_F + idx, fij);
         });
     }
 
@@ -172,25 +148,23 @@ namespace cuddh
         const int * d_I = fem.global_indices(MemorySpace::DEVICE);
 
         if (fast)
-            lf_fast(f, n_elem, n_basis, d_w, d_detJ, d_X, d_I, c, d_F);
+            lf_fast(f, n_elem, n_basis, d_w, d_detJ, d_X, d_I, c, F);
         else
         {
             if (n_quad <= 4)
-                lf_action<4>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, d_F);
+                lf_action<4>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, F);
             else if (n_quad <= 8)
-                lf_action<8>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, d_F);
+                lf_action<8>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, F);
             else if (n_quad <= 12)
-                lf_action<12>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, d_F);
+                lf_action<12>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, F);
             else if (n_quad <= 16)
-                lf_action<16>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, d_F);
+                lf_action<16>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, F);
             else if (n_quad <= 24)
-                lf_action<24>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, d_F);
+                lf_action<24>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, F);
             else if (n_quad <= 32)
-                lf_action<32>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, d_F);
-            else if (n_quad <= 64)
-                lf_action<64>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, d_F);
+                lf_action<32>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, F);
             else
-                cuddh_error("LinearFunctional::action does not support quadrature rules with more than 64 points");
+                cuddh_error("LinearFunctional::action does not support quadrature rules with more than 32 points");
         }
     }
 } // namespace cuddh

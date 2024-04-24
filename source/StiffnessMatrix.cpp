@@ -18,7 +18,7 @@ namespace cuddh
         auto J = reshape(_J, 2, 2, n_quad, n_quad, n_elem);
         auto G = reshape(_G, 3, n_quad, n_quad, n_elem);
 
-        forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) -> void
+        forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) mutable -> void
         {
             const int i = threadIdx.x;
             const int j = threadIdx.y;
@@ -67,11 +67,10 @@ namespace cuddh
           n_quad{quad.size()},
           _P(n_quad * n_basis),
           _D(n_quad * n_basis),
-          _G(3 * n_quad * n_quad * n_elem),
-          _I{fem.global_indices()}
+          _G(3 * n_quad * n_quad * n_elem)
     {
-        fem.basis().eval(n_quad, quad.x(), P.host_write());
-        fem.basis().deriv(n_quad, quad.x(), D.host_write());
+        fem.basis().eval(n_quad, quad.x(), _P.host_write());
+        fem.basis().deriv(n_quad, quad.x(), _D.host_write());
 
         auto& metrics = fem.mesh().element_metrics(quad);
         const double * J = metrics.jacobians(MemorySpace::DEVICE);
@@ -205,7 +204,7 @@ namespace cuddh
                     }
                     Su *= c;
 
-                    AtomicAdd(d_out+idx, Su);
+                    atomicAdd(d_out+idx, Su);
                 }
             }
         });
@@ -216,7 +215,7 @@ namespace cuddh
         const double * d_P = _P.device_read();
         const double * d_D = _D.device_read();
         const double * d_G = _G.device_read();
-        const double * d_I = fem.global_indices(MemorySpace::DEVICE);
+        const int * d_I = fem.global_indices(MemorySpace::DEVICE);
 
         if (n_quad <= 4)
             stiffness_action<4>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
@@ -228,12 +227,8 @@ namespace cuddh
             stiffness_action<16>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
         else if (n_quad <= 24)
             stiffness_action<24>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
-        else if (n_quad <= 32)
-            stiffness_action<32>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
-        else if (n_quad <= 64)
-            stiffness_action<64>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
         else
-            cuddh_error("StiffnessMatrix::action does not support quadrature rules with more than 64 points.");
+            cuddh_error("StiffnessMatrix::action does not support quadrature rules with more than 24 points.");
     }
 
     void StiffnessMatrix::action(const double * x, double * y) const

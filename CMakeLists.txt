@@ -30,7 +30,7 @@ add_library(
     
     source/Basis.cpp
     source/cuddh_error.cpp
-    source/DDH.cpp
+    # source/DDH.cpp
     source/Element.cpp
     source/EnsembleSpace.cpp
     source/FaceLinearFunctional.cpp
@@ -45,10 +45,11 @@ add_library(
     source/StiffnessMatrix.cpp
 )
 
-target_compile_options(cuddh PRIVATE -x=cu)
+target_compile_options(cuddh PRIVATE -x=cu -dc)
+# target_link_options(cuddh PRIVATE -dlink)
 target_include_directories(cuddh PUBLIC . include)
 
-target_link_options(cuddh PUBLIC "-llapack -lblas")
+target_link_options(cuddh PUBLIC -llapack -lblas)
 # target_link_libraries(cuddh PUBLIC ${LAPACK_LIBRARIES})
 
 set_target_properties(cuddh PROPERTIES PUBLIC_HEADER cuddh.hpp)

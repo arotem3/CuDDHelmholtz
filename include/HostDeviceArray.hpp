@@ -178,7 +178,7 @@ namespace cuddh
             #ifdef CUDDH_LOG_MEMCPY
                 std::cout << "\tallocating new host array (" << size << " bytes)." << std::endl;
             #endif
-                host_array = new T[n];
+                host_array = new T[n]();
             }
             
             if (device_is_valid) // device data is most current, need to copy
@@ -212,7 +212,7 @@ namespace cuddh
         #ifdef CUDDH_LOG_MEMCPY
             std::cout << "\tallocating new host array (" << (n*sizeof(T)) << " bytes)." << std::endl;
         #endif
-            host_array = new T[n];
+            host_array = new T[n]();
         }
 
     #ifdef CUDDH_LOG_MEMCPY
@@ -256,7 +256,10 @@ namespace cuddh
             #ifdef CUDDH_LOG_MEMCPY
                 std::cout << "\tallocating new device array (" << size << " bytes)" << std::endl;
             #endif
-                cudaMalloc(&device_array, size);
+                cudaError_t error = cudaMalloc(&device_array, size);
+                if (error != cudaSuccess)
+                    throw std::runtime_error(cudaGetErrorString(error));
+                cudaMemset(device_array, 0, size);
             }
             if (host_is_valid) // host data is most current, need to copy
             {
@@ -290,7 +293,10 @@ namespace cuddh
         #ifdef CUDDH_LOG_MEMCPY
             std::cout << "\tallocating new device array (" << size << " bytes)" << std::endl;
         #endif
-            cudaMalloc(&device_array, size);
+            cudaError_t error = cudaMalloc(&device_array, size);
+            if (error != cudaSuccess)
+                    throw std::runtime_error(cudaGetErrorString(error));
+            cudaMemset(device_array, 0, size);
         }
 
     #ifdef CUDDH_LOG_MEMCPY

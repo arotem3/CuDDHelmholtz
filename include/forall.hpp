@@ -75,7 +75,7 @@ namespace cuddh
         if (n == 0) return;
 
         const dim3 block_size(bx, by, bz);
-        forall3d_kernel<<<n, dim3>>>(n, fun);
+        forall3d_kernel<<<n, block_size>>>(n, fun);
     }
 } // namespace cuddh
 

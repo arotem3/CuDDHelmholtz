@@ -3,7 +3,7 @@
 #include <iomanip>
 
 /// a function with zero normal derivative on boundary of [-1,1]x[-1,1] 
-static double __host__ __device__ func(const double X[2])
+__host__ __device__ static double func(const double X[2])
 {
     const double x = X[0], y = X[1];
     double x5 = std::pow(x, 5);
@@ -12,7 +12,7 @@ static double __host__ __device__ func(const double X[2])
 }
 
 // negative laplacian of func
-static double __host__ __device__ L(const double X[2])
+__host__ __device__ static double L(const double X[2])
 {
     const double x = X[0], y = X[1];
     double x3 = std::pow(x, 3);

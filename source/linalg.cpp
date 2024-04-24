@@ -1,10 +1,10 @@
 #include "linalg.hpp"
 
-
-// The ddot kernel performs the dot product via binary tree reduction. SZ is the
-// block size and NR is the number of reads performed by each thread
-template <int SZ, int NR>
-__global__ static void ddot_kernel(int n, const double * x, const double * y, double * result)
+// The reduction kernel performs a binary tree summation reduction. SZ is the
+// block size and NR is the number of reads performed by each thread.
+// result = sum_k op(k, x, y). e.g. for dot product op(k, x, y) = x[k] * y[k]
+template <int SZ, int NR, typename LAMBDA>
+__global__ static void sum_reduction_kernel(int n, const double * __restrict__ x, const double * __restrict__ y, double * __restrict__ result, LAMBDA op)
 {
 #ifndef CUDDH_DEBUG
     const int block_dim = blockDim.x;
@@ -22,7 +22,8 @@ __global__ static void ddot_kernel(int n, const double * x, const double * y, do
     for (int j = 0; j < NR; ++j)
     {
         const int k = thread_id + SZ * (j + NR * block_id);
-        dot += (k < n) ? ( x[k] * y[k] ) : 0.0;
+        if (k < n)
+            dot += op(k, x, y);
     }
 
     s[thread_id] = dot;
@@ -49,20 +50,33 @@ namespace cuddh
 {
     void axpby(int n, double a, const double * __restrict__ x, double b, double * __restrict__ y)
     {
-        forall(n, [=] __device__ (int i) -> void {
+        forall(n, [=] __device__ (int i) -> void
+        {
             y[i] = a * x[i] + b * y[i];
         });
     }
 
     double norm(int n, const double * x)
     {
-        double d = dot(n, x, x);
-        return std::sqrt(d);
+        host_device_dvec result(1);
+
+        constexpr int block_size = 32;
+        constexpr int num_reads = 8;
+        constexpr int data_per_block = block_size * num_reads;
+
+        const int n_blocks = (n + data_per_block - 1) / data_per_block;
+
+        double * d_result = result.device_read_write();
+        zeros(1, d_result);
+
+        sum_reduction_kernel<block_size, num_reads> <<< n_blocks, block_size >>>(n, x, nullptr, d_result, [] __device__ (int k, const double * X, const double * DUMMY) {double xk = X[k]; return xk * xk;});
+
+        return std::sqrt(*result.host_read());
     }
 
     double dot(int n, const double * x, const double * y)
     {
-        static host_device_dvec result(1);
+        host_device_dvec result(1);
 
         constexpr int block_size = 32;
         constexpr int num_reads = 8;
@@ -73,9 +87,27 @@ namespace cuddh
         double * d_result = result.device_read_write();
         zeros(1, d_result);
         
-        ddot_kernel<block_size, num_reads> <<< n_blocks, block_size >>>(n, x, y, d_result);
+        sum_reduction_kernel<block_size, num_reads> <<< n_blocks, block_size >>>(n, x, y, d_result, [] __device__ (int k, const double * X, const double * Y) {return X[k] * Y[k];});
 
         return *result.host_read();
+    }
+
+    double dist(int n, const double * x, const double * y)
+    {
+        host_device_dvec result(1);
+
+        constexpr int block_size = 32;
+        constexpr int num_reads = 8;
+        constexpr int data_per_block = block_size * num_reads;
+
+        const int n_blocks = (n + data_per_block - 1) / data_per_block;
+
+        double * d_result = result.device_read_write();
+        zeros(1, d_result);
+
+        sum_reduction_kernel<block_size, num_reads> <<< n_blocks, block_size >>>(n, x, y, d_result, [] __device__ (int k, const double * X, const double * Y) {double e = X[k]-Y[k]; return e*e;});
+
+        return std::sqrt(*result.host_read());
     }
 
     void copy(int n, const double * x, double * y)

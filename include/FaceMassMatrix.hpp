@@ -5,6 +5,7 @@
 #include "Operator.hpp"
 #include "HostDeviceArray.hpp"
 #include "forall.hpp"
+#include "linalg.hpp"
 
 namespace cuddh
 {

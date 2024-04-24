@@ -64,7 +64,10 @@ static inline double square(double x)
 static void gauss_legendre(int n, double * x, double * w)
 {
     if (n < 1)
-        cuddh::cuddh_error("QuadratureRule error: Guass-Legendre rules require n >= 1, but n = " + std::to_string(n) + ".");
+    {
+        std::string msg = "QuadratureRule error: Guass-Legendre rules require n >= 1, but n = " + std::to_string(n) + ".";
+        cuddh::cuddh_error(msg.c_str());
+    }
     
     static const std::unordered_map<int, std::vector<double>> cached_nodes = {
         {1, {0.0}},
@@ -131,7 +134,10 @@ static void gauss_legendre(int n, double * x, double * w)
 static void gauss_lobatto(int n, double * x, double * w)
 {
     if (n < 2)
-        cuddh::cuddh_error("QuadratureRule error: Gauss-Lobatto rules require n >= 2, but n =" + std::to_string(n) + ".");
+    {
+        std::string msg = "QuadratureRule error: Gauss-Lobatto rules require n >= 2, but n =" + std::to_string(n) + ".";
+        cuddh::cuddh_error(msg.c_str());
+    }
         
     static const std::unordered_map<int, std::vector<double>> cached_nodes = {
         {2, {-1,1}},

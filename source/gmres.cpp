@@ -217,6 +217,11 @@ namespace cuddh
     solver_out gmres(int n, double * x, const Operator * A, const double * b, const Operator * P, int m, int maxit, double tol, int verbose)
     {
         PreconditionedSystem PA(n, A, P);
-        return gmres(n, x, &PA, b, m, maxit, tol, verbose);
+        
+        host_device_dvec r0(n);
+        double * d_r0 = r0.device_write();
+        P->action(b, d_r0);
+
+        return gmres(n, x, &PA, d_r0, m, maxit, tol, verbose);
     }
 } // namespace cuddh

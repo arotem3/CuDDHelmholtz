@@ -62,8 +62,8 @@ namespace cuddh
         void action(const double * x, double * y) const override;
 
     private:
-        const int ndof;
         const H1Space& fem;
+        const int ndof;
 
         host_device_dvec _p;
     };

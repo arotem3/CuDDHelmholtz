@@ -7,7 +7,7 @@ static void init_geom_factors(int n_elem,
                               int n_basis,
                               const double * d_w,
                               const double * d_J,
-                              double * g_G)
+                              double * d_G)
 {
     auto w = reshape(d_w, n_basis);
     auto J = reshape(d_J, 2, 2, n_basis, n_basis, n_elem);
@@ -19,7 +19,7 @@ static void init_geom_factors(int n_elem,
         const int i = threadIdx.x;
         const int j = threadIdx.y;
 
-        const double W = q.w(i) * q.w(j);
+        const double W = w(i) * w(j);
         const double Y_eta = J(1, 1, i, j, el);
         const double X_eta = J(0, 1, i, j, el);
         const double Y_xi  = J(1, 0, i, j, el);
@@ -33,6 +33,7 @@ static void init_geom_factors(int n_elem,
     });
 }
 
+template <int NB>
 static void __device__ stiffness(int subsp,
                                 int n_elem,
                                 int n_basis,
@@ -40,7 +41,7 @@ static void __device__ stiffness(int subsp,
                                 const TensorWrapper<4,const int>& I,
                                 const const_imat_wrapper& elems,
                                 const dmat& D,
-                                double F[][][][2],
+                                double F[][NB][NB][2],
                                 const double * u,
                                 double * out)
 {
@@ -75,22 +76,23 @@ static void __device__ stiffness(int subsp,
         Su += D(i, k) * F[el][i][l][0] + D(i, l) * F[el][k][i][1];
     
     const int idx = I(k, l, el, subsp);
-    AtomicAdd(out+idx, Su);
+    atomicAdd(out+idx, Su);
 }
 
 template <int NB, int NEL>
-static void ddh_action(const EnsembleSpace * efem
+static void ddh_action(const EnsembleSpace * efem,
                        int g_ndof,
                        int g_elem,
+                       int n_domains,
                        int n_basis,
                        int n_lambda,
                        int nt,
                        double omega,
                        double dt,
                        const double * d_g,
-                       const double * d_whf
+                       const double * d_whf,
                        const double * d_cs,
-                       const double * d_sn
+                       const double * d_sn,
                        double c,
                        const double * x,
                        double * y,
@@ -136,7 +138,7 @@ static void ddh_action(const EnsembleSpace * efem
         forall_3d(NB, NB, NEL*NEL, n_domains, [=] __device__ (int subsp) -> void
         {
             // thread id
-            const int t = k + blockDim.x * (l + blockDim.y * el); // linear thread index
+            const int t = threadIdx.x + blockDim.x * (threadIdx.y + blockDim.y * threadIdx.z); // linear thread index
             const int inc = blockDim.x * blockDim.y * blockDim.z;
 
             // get subspace dimensions
@@ -540,38 +542,18 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
 
 void DDH::action(const double * x, double * y) const
 {
-    auto gI = efem->global_indices(MemorySpace::DEVICE); // global indices of subspace local dofs
-    auto s_dof = efem->sizes(MemorySpace::DEVICE);  // number of subdomain degrees of freedom
-    auto s_fdof = efem->fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
+    const double * d_g = _g_tensor.device_read();
+    const double * d_whf = _wh_filter.device_read();
+    const double * d_cs = _cs.device_read();
+    const double * d_sn = _sn.device_read();
+    double * d_lambda = _g_lambda.device_write();
 
-    auto elems = efem->elements(MemorySpace::DEVICE); // elements for each subdomain
-    auto faces = efem->faces(MemorySpace::DEVICE); // the lambda-faces for each subdomain
-
-    auto s_elem = efem->n_elems(MemorySpace::DEVICE); // number of elements for each subdomain
-    
-    auto subspace_indices = efem->subspace_indices(MemorySpace::DEVICE); // ((i,j,el), p) -> p-th subspace index for dof (i,j,el)
-    auto P = efem->face_proj(MemorySpace::DEVICE); // (i, p) -> p-th subspace's face space index to subspace index
-
-    auto g = reshape(_g_tensor.device_read(), 3, n_basis, n_basis, g_elem);
-    const double half_dt = 0.5 * dt;
-    const double rw = 1.0 / omega;
-
-    auto wh_filter = reshape(_wh_filter.device_read(), nt+1);
-    auto cs = reshape(_cs.device_read(), 2*nt+1);
-    auto sn = reshape(_sn.device_read(), 2*nt+1);
-
-    auto g_lambda = reshape(_g_lambda.device_write(), 2 * n_lambda);
-    zeros(2 * n_lambda, g_lambda);
-
-    auto g_F = reshape(x, g_ndof);
-    auto g_G = reshape(x+g_ndof, g_ndof);
-    auto U = reshape(y, g_ndof);
-    auto V = reshape(y+g_ndof, g_ndof);
-
-    constexpr int MX_NDOF = 1024;
-    constexpr int MX_FDOF = 124;
-    
-    
+    if (n_basis == 4)
+        ddh_action<4, 8>(efem.get(), g_ndof, g_elem, n_basis, n_lambda, nt, omega, dt, d_g, d_whf, d_cs, d_sn, c, x, y, d_lambda);
+    else if (n_basis == 8)
+        ddh_action<8, 4>(efem.get(), g_ndof, g_elem, n_basis, n_lambda, nt, omega, dt, d_g, d_whf, d_cs, d_sn, c, x, y, d_lambda);
+    else
+        cuddh_error("DDH::action only supports n_basis == 4 or 8.");
 }
 
 void DDH::action(double c, const double * x, double * y) const

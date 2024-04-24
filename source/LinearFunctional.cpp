@@ -26,7 +26,7 @@ namespace cuddh
           fast{false},
           metrics{fem.mesh().element_metrics(quad)},
           _w(n_quad),
-          _P(n_quad, n_basis)
+          _P(n_quad * n_basis)
     {
         fem.basis().eval(n_quad, quad.x(), _P.host_write());
 

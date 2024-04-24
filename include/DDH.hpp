@@ -1,10 +1,15 @@
 #ifndef CUDDH_DDH_HPP
 #define CUDDH_DDH_HPP
 
+#include <cuda_runtime.h>
+
 #include "Operator.hpp"
 #include "EnsembleSpace.hpp"
 #include "MassMatrix.hpp"
 #include "linalg.hpp"
+
+#include "HostDeviceArray.hpp"
+#include "forall.hpp"
 
 namespace cuddh
 {

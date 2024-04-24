@@ -21,6 +21,9 @@ namespace cuddh
     /// @brief the dot product between x and y 
     double dot(int n, const double * x, const double * y);
 
+    /// @brief ||x - y||
+    double dist(int n, const double * x, const double * y);
+
     /// @brief copy x into y 
     void copy(int n, const double * x, double * y);
 

@@ -1,6 +1,6 @@
 #include "test.hpp"
 
-static double __host__ __device__ func(const double X[2])
+ __host__ __device__ static double func(const double X[2])
 {
     const double x = X[0], y = X[1];
     return 3.0 * x * x - 2.0 * x * y + y + 1.0;
@@ -20,43 +20,53 @@ namespace cuddh_test
 
         host_device_dvec _u(ndof);
         host_device_dvec _f(ndof);
+        host_device_dvec _b(ndof);
+        host_device_dvec _Mf(ndof);
         
-        double * u = _u.device_write();
-        double * f = _f.device_write();
+        double * u = _u.device_write(); // projected func
+        double * f = _f.device_write(); // interpolated values of func
+        double * b = _b.device_write(); // (f, phi)
+        double * Mf = _Mf.device_write(); // mass matrix times f
 
+        auto X = fem.physical_coordinates(MemorySpace::DEVICE);
+
+        // evaluate f on nodes
+        forall(ndof, [=] __device__ (int i) -> void
+        {
+            double xy[2];
+            xy[0] = X(0, i);
+            xy[1] = X(1, i);
+            f[i] = func(xy);
+        });
+        
+        // evaluate (f, phi)
         LinearFunctional l(fem, quad);
-        l.action(1.0, func, f);
+        l.action(1.0, [] __device__ (double X[2]) {return func(X);}, b);
 
         MassMatrix m(fem);
         DiagInvMassMatrix p(fem);
 
-        const int gmres_m = 20;
-        const int maxiter = 10;
-        const double tol = 1e-12;
-        auto out = gmres(ndof, u, &m, f, &p, gmres_m, maxiter, tol);
+        m.action(f, Mf);
 
-        // verify correctness
-        const double * h_u = _u.host_read();
-        const double * h_f = _f.host_read();
-
-        auto I = fem.global_indices(MemorySpace::HOST);
-        auto x = fem.physical_coordinates(MemorySpace::HOST);
-
-        double max_err = 0.0;
-        for (int i = 0; i < ndof; ++i)
-        {
-            double xi[2];
-            xi[0] = x(0, i);
-            xi[1] = x(1, i);
-
-            double fi = func(xi);
-            double err = h_u[i] - fi;
-            max_err = std::max(std::abs(err), max_err);
-        }
+        double err = dist(ndof, Mf, b) / cuddh::norm(ndof, b);
 
         n_test++;
-        if (max_err > 1e-8)
-            std::cout << "\tt_mass(): test \"" << test_name << "\" failed with error " << max_err << "\n";
+        if (err > 1e-8)
+            std::cout << "\tt_mass(): test \"" << test_name << "\" failed forward problem with error ~ " << err << "\n";
+        else
+            n_passed++;
+        
+        // solve for u
+        const int gmres_m = 5;
+        const int maxiter = 10;
+        const double tol = 1e-12;
+        auto out = gmres(ndof, u, &m, b, &p, gmres_m, maxiter, tol);
+
+        err = dist(ndof, u, f) / cuddh::norm(ndof, f);
+
+        n_test++;
+        if (err > 1e-8)
+            std::cout << "\tt_mass(): test \"" << test_name << "\" failed inverse problem with error ~ " << err << "\n";
         else
             n_passed++;
     }

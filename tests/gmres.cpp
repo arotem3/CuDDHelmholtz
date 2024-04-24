@@ -55,10 +55,10 @@ namespace cuddh_test
 
         zeros(n, x);
 
-        const int m = 50;
+        const int m = 5;
         const int maxit = 100;
         const double tol = 1e-10;
-        auto out = cuddh::gmres(n, x, &a, y, m, maxit, tol, 2);
+        auto out = cuddh::gmres(n, x, &a, y, m, maxit, tol);
 
         n_test++;
         if (not out.success)

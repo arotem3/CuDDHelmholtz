@@ -61,28 +61,28 @@ namespace cuddh
         {
             __shared__ double g[NQ];
 
-            const int tx = threadIdx.x;
+            const int j = threadIdx.x;
 
             // evaluate on quadrature points and scale by w and jacobian
             double xi[2];
-            xi[0] = x(0, tx, e);
-            xi[1] = x(1, tx, e);
+            xi[0] = X(0, j, e);
+            xi[1] = X(1, j, e);
             
             double fi = f(xi);
-            g[i] = fi * w(i) * detJ(i, e);
+            g[j] = fi * w(j) * detJ(j, e);
 
             __syncthreads();
 
             // integrate
-            if (tx < n_basis)
+            if (j < n_basis)
             {
                 double qg = 0.0;
                 for (int i = 0; i < n_quad; ++i)
-                    qg += P(i, tx) * g[i];
+                    qg += P(i, j) * g[i];
                 qg *= c;
 
-                const int idx = I(tx, e);
-                AtomicAdd(d_F + idx, qg);
+                const int idx = I(j, e);
+                atomicAdd(d_F + idx, qg);
             }
         });
     }
@@ -108,14 +108,14 @@ namespace cuddh
             const int k = threadIdx.x;
 
             double xi[2];
-            xi[0] = x(0, k, e);
-            xi[1] = x(1, k, e);
+            xi[0] = X(0, k, e);
+            xi[1] = X(1, k, e);
 
             double fi = f(xi);
             fi *= c * w(k) * detJ(k, e);
 
             const int idx = I(k, e);
-            AtomicAdd(d_F + idx, fi);
+            atomicAdd(d_F + idx, fi);
         });
     }
 
@@ -128,7 +128,7 @@ namespace cuddh
         const double * d_detJ = metrics.measures(MemorySpace::DEVICE);
         const double * d_X = metrics.physical_coordinates(MemorySpace::DEVICE);
 
-        const int * I = fs.subspace_indices(MemorySpace::DEVICE);
+        const int * d_I = fs.subspace_indices(MemorySpace::DEVICE);
 
         if (fast)
             fl_fast(f, n_faces, n_basis, d_w, d_detJ, d_X, d_I, c, F);

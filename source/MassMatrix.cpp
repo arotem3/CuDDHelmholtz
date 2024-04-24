@@ -7,16 +7,17 @@ namespace cuddh
                                  int n_basis,
                                  int n_quad,
                                  const double * a, /* device */
-                                 const double * detJ_, /* device */
+                                 const double * d_detJ, /* device */
                                  const QuadratureRule& quad,
-                                 const int * I, /* device */
-                                 const double * _P, /* device */
-                                 double * op_ /* device */)
+                                 const int * d_I, /* device */
+                                 const double * d_P, /* device */
+                                 double * d_op /* device */)
     {
-        auto detJ = reshape(detJ_, n_quad, n_quad, n_elem);
-        auto op = reshape(op_, n_quad, n_quad, n_elem);
-        auto P_ = reshape(_P, n_quad, n_basis);
-        auto I = reshape(I, n_basis, n_basis, n_elem);
+        auto detJ = reshape(d_detJ, n_quad, n_quad, n_elem);
+        auto P_ = reshape(d_P, n_quad, n_basis);
+        auto I = reshape(d_I, n_basis, n_basis, n_elem);
+
+        auto op = reshape(d_op, n_quad, n_quad, n_elem);
 
         host_device_dvec _w(n_quad);
         double * h_w = _w.host_write();
@@ -25,68 +26,43 @@ namespace cuddh
         
         auto w = reshape(_w.device_read(), n_quad);
 
-        forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) -> void
+        forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) mutable -> void
         {
-            __shared__ double x[NQ][NQ];
+            __shared__ double Q[NQ][NQ];
             __shared__ double z[NQ][NQ];
             __shared__ double P[NQ][NQ];
 
-            const int x = threadIdx.x;
-            const int y = threadIdx.y;
-            const int dx = blockDim.x;
-            const int dy = blockDim.y;
+            const int tx = threadIdx.x;
+            const int ty = threadIdx.y;
 
             // copy P
-            for (int j = y; j < n_quad; j += dy)
-            {
-                for (int i = x; i < n_quad; i+= dx)
-                {
-                    P[i][j] = P_(i, j);
-                }
-            }
+            if (ty < n_basis)
+                P[tx][ty] = P_(tx, ty);
 
             // copy global a to element
-            for (int l = y; l < n_basis; l += dy)
+            if (tx < n_basis && ty < n_basis)
             {
-                for (int k = x; k < n_basis; l += dx)
-                {
-                    const idx = I(k, l, el);
-                    x[l][k] = (a) ? a[idx] : 1.0;
-                }
+                const int idx = I(tx, ty, el);
+                Q[tx][ty] = (a) ? a[idx] : 1.0;
             }
-
             __syncthreads();
 
             // evaluate on quadrature points
-            for (int i = x; i < n_quad; i += dx)
+            if (ty < n_basis)
             {
-                for (int l = y; l < n_basis; l += dy)
-                {
-                    double px = 0.0;
-                    for (int k = 0; k < n_basis; ++k)
-                    {
-                        px += P[i][k] * x[l][k];
-                    }
-                    z[i][l] = px;
-                }
+                double px = 0.0;
+                for (int k = 0; k < n_basis; ++k)
+                    px += P[tx][k] * Q[k][ty];
+                z[tx][ty] = px;
             }
-
             __syncthreads();
 
-            for (int j = x; j < n_quad; j += dx)
-            {
-                for (int i = y; i < n_quad; i += dy)
-                {
-                    double ppx = 0.0;
-                    for (int l = 0; l < n_basis; ++l)
-                    {
-                        ppx += P[j][l] * z[i][l];
-                    }
-                    ppx *= w(i) * w(j) * detJ(i, j, el);
+            double ppx = 0.0;
+            for (int l = 0; l < n_basis; ++l)
+                ppx += P[ty][l] * z[tx][l];
+            ppx *= w(tx) * w(ty) * detJ(tx, ty, el);
 
-                    op(i, j, el) = ppx;
-                }
-            }
+            op(tx, ty, el) = ppx;
         });
     }
 
@@ -100,30 +76,30 @@ namespace cuddh
           _P(n_quad * n_basis),
           _a(n_quad * n_quad * n_elem)
     {
-        const int * = fem.global_indices(MemorySpace::DEVICE);
-        const double * detJ = fem.mesh().element_metrics(quad).measures(MemorySpace::DEVICE);
-        double * op = _a.device_write();
+        const int * d_I = fem.global_indices(MemorySpace::DEVICE);
+        const double * d_detJ = fem.mesh().element_metrics(quad).measures(MemorySpace::DEVICE);
+        double * d_op = _a.device_write();
 
         fem.basis().eval(n_quad, quad.x(), _P.host_write());
 
+        const double * d_P = _P.device_read();
+
         if (n_quad <= 4)
-            init_mass_matrix<4>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
+            init_mass_matrix<4>(n_elem, n_basis, n_quad, nullptr, d_detJ, quad, d_I, d_P, d_op);
         else if (n_quad <= 8)
-            init_mass_matrix<8>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
+            init_mass_matrix<8>(n_elem, n_basis, n_quad, nullptr, d_detJ, quad, d_I, d_P, d_op);
         else if (n_quad <= 16)
-            init_mass_matrix<16>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
+            init_mass_matrix<16>(n_elem, n_basis, n_quad, nullptr, d_detJ, quad, d_I, d_P, d_op);
         else if (n_quad <= 24)
-            init_mass_matrix<24>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
+            init_mass_matrix<24>(n_elem, n_basis, n_quad, nullptr, d_detJ, quad, d_I, d_P, d_op);
         else if (n_quad <= 32)
-            init_mass_matrix<32>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
-        else if (n_quad <= 64)
-            init_mass_matrix<64>(n_elem, n_basis, n_quad, nullptr, detJ, quad, I, _P.device_read(), op);
+            init_mass_matrix<32>(n_elem, n_basis, n_quad, nullptr, d_detJ, quad, d_I, d_P, d_op);
         else
-            cuddh_error("MassMatrix error: quadrature rules with more than 64 points not yet supported.");
+            cuddh_error("MassMatrix error: quadrature rules with more than 32 points not yet supported.");
     }
 
     MassMatrix::MassMatrix(const double * a_, const H1Space& fem_)
-        : fem{fem_}
+        : fem{fem_},
           ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
@@ -132,26 +108,26 @@ namespace cuddh
           _P(n_quad * n_basis),
           _a(n_quad * n_quad * n_elem)
     {
-        const int * = fem.global_indices(MemorySpace::DEVICE);
-        const double * detJ = fem.mesh().element_metrics(quad).measures(MemorySpace::DEVICE);
-        double * op = _a.device_write();
+        const int * d_I = fem.global_indices(MemorySpace::DEVICE);
+        const double * d_detJ = fem.mesh().element_metrics(quad).measures(MemorySpace::DEVICE);
+        double * d_op = _a.device_write();
 
-        fem.basis().eval(n_quad, quad.x(), P.host_write());
+        fem.basis().eval(n_quad, quad.x(), _P.host_write());
+
+        const double * d_P = _P.device_read();
 
         if (n_quad <= 4)
-            init_mass_matrix<4>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
+            init_mass_matrix<4>(n_elem, n_basis, n_quad, a_, d_detJ, quad, d_I, d_P, d_op);
         else if (n_quad <= 8)
-            init_mass_matrix<8>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
+            init_mass_matrix<8>(n_elem, n_basis, n_quad, a_, d_detJ, quad, d_I, d_P, d_op);
         else if (n_quad <= 16)
-            init_mass_matrix<16>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
+            init_mass_matrix<16>(n_elem, n_basis, n_quad, a_, d_detJ, quad, d_I, d_P, d_op);
         else if (n_quad <= 24)
-            init_mass_matrix<24>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
+            init_mass_matrix<24>(n_elem, n_basis, n_quad, a_, d_detJ, quad, d_I, d_P, d_op);
         else if (n_quad <= 32)
-            init_mass_matrix<32>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
-        else if (n_quad <= 64)
-            init_mass_matrix<64>(n_elem, n_basis, n_quad, a_, detJ, quad, I, _P.device_read(), op);
+            init_mass_matrix<32>(n_elem, n_basis, n_quad, a_, d_detJ, quad, d_I, d_P, d_op);
         else
-            cuddh_error("MassMatrix error: quadrature rules with more than 64 points not yet supported.");
+            cuddh_error("MassMatrix error: quadrature rules with more than 32 points not yet supported.");
     }
 
     template <int NQ>
@@ -175,94 +151,57 @@ namespace cuddh
             __shared__ double Pu[NQ][NQ];
             __shared__ double P[NQ][NQ];
 
-            const int x = threadIdx.x;
-            const int y = threadIdx.y;
-            const int dx = blockDim.x;
-            const int dy = blockDim.y;
+            const int tx = threadIdx.x;
+            const int ty = threadIdx.y;
 
-            const int idx;
+            int idx;
 
             // copy P
-            for (int l = x; l < n_basis; l += dx)
-            {
-                for (int i = y; i < n_quad; i += dy)
-                {
-                    P[i][l] = P_(i, l);
-                }
-            }
+            if (ty < n_basis)
+                P[tx][ty] = P_(tx, ty);
 
             // copy global dofs to element
-            for (int l = x; l < n_basis; l += dx)
+            if (tx < n_basis && ty < n_basis)
             {
-                for (int k = y; k < n_basis; k += dy)
-                {
-                    idx = I(k, l, el);
-                    u[k][l] = x[idx];
-                }
+                idx = I(tx, ty, el);
+                u[tx][ty] = x[idx];
             }
-
             __syncthreads();
 
             // evaluate on quadrature points
-            for (int i = x; i < n_quad; i += dx)
+            if (ty < n_basis)
             {
-                for (int l = y; l < n_basis; y += dy)
-                {
-                    double pu = 0.0;
-                    for (int k = 0; k < n_basis; ++k)
-                    {
-                        pu += P[i][k] * u[k][l];
-                    }
-                    Pu[i][l] = pu;
-                }
+                double pu = 0.0;
+                for (int k = 0; k < n_basis; ++k)
+                    pu += P[tx][k] * u[k][ty];
+                Pu[tx][ty] = pu;
             }
-
             __syncthreads();
 
-            for (int i = x; i < n_quad; i += dx)
-            {
-                for (int j = y; j < n_quad; j += dy)
-                {
-                    double ppu = 0.0;
-                    for (int l = 0; l < n_basis; ++l)
-                    {
-                        ppu += P[j][l] * Pu[i][l];
-                    }
-                    u[i][j] = a(i, j, el) * ppu;
-                }
-            }
-
+            double ppu = 0.0;
+            for (int l = 0; l < n_basis; ++l)
+                ppu += P[ty][l] * Pu[tx][l];
+            u[tx][ty] = a(tx, ty, el) * ppu; // u(x) * a(x) * w_{ij} * detJ_{ij}
             __syncthreads();
 
             // integrate
-            for (int i = x; i < n_quad; i += dx)
+            if (ty < n_basis)
             {
-                for (int l = y; l < n_basis; y += dy)
-                {
-                    double qu = 0.0;
-                    for (int j = 0; j < n_quad; ++j)
-                    {
-                        qu += P[j][l] * u[i][j];
-                    }
-                    Pu[i][l] = qu;
-                }
+                double qu = 0.0;
+                for (int j = 0; j < n_quad; ++j)
+                    qu += P[j][ty] * u[tx][j];
+                Pu[tx][ty] = qu;
             }
-
             __syncthreads();
 
-            for (int l = x; l < n_basis; l += dx)
+            if (tx < n_basis && ty < n_basis)
             {
-                for (int k = y; k < n_basis; k += dy)
-                {
-                    double qqu = 0.0;
-                    for (int i = 0; i < n_quad; ++i)
-                    {
-                        qqu += P[i][k] * Pu[i][l];
-                    }
-                    qqu *= c;
+                double qqu = 0.0;
+                for (int i = 0; i < n_quad; ++i)
+                    qqu += P[i][tx] * Pu[i][ty];
+                qqu *= c;
 
-                    AtomicAdd(y + idx, qqu);
-                }
+                atomicAdd(y + idx, qqu);
             }
         });
     }
@@ -271,23 +210,22 @@ namespace cuddh
     {
         const int * I = fem.global_indices(MemorySpace::DEVICE);
         const double * a = _a.device_read();
+        const double * P = _P.device_read();
 
         if (n_quad <= 4)
-            mass_action<4>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
+            mass_action<4>(n_elem, n_quad, n_basis, I, P, a, c, x, y);
         else if (n_quad <= 8)
-            mass_action<8>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
+            mass_action<8>(n_elem, n_quad, n_basis, I, P, a, c, x, y);
         else if (n_quad <= 12)
-            mass_action<12>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
+            mass_action<12>(n_elem, n_quad, n_basis, I, P, a, c, x, y);
         else if (n_quad <= 16)
-            mass_action<16>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
+            mass_action<16>(n_elem, n_quad, n_basis, I, P, a, c, x, y);
         else if (n_quad <= 24)
-            mass_action<24>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
+            mass_action<24>(n_elem, n_quad, n_basis, I, P, a, c, x, y);
         else if (n_quad <= 32)
-            mass_action<32>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
-        else if (n_quad <= 64)
-            mass_action<64>(n_elem, n_quad, n_basis, I, _P.device_read(), a, c, x, y);
+            mass_action<32>(n_elem, n_quad, n_basis, I, P, a, c, x, y);
         else
-            cuddh_error("MassMatrix error: quadrature rules with more than 64 points not yet supported.");
+            cuddh_error("MassMatrix error: quadrature rules with more than 32 points not yet supported.");
     }
 
     void MassMatrix::action(const double * x, double * y) const
@@ -296,16 +234,17 @@ namespace cuddh
         action(1.0, x, y);
     }
 
-    static void init_diag_mass(int n_elem,
+    static void init_diag_mass(int ndof,
+                               int n_elem,
                                int n_basis,
                                const double * a,
-                               const double * _detJ,
+                               const double * d_detJ,
                                const QuadratureRule& quad,
-                               const int * _I,
+                               const int * d_I,
                                double * op)
     {
-        auto detJ = reshape(_detJ, n_basis, n_basis, n_elem);
-        auto I = reshape(_I, n_basis, n_basis, n_elem);
+        auto detJ = reshape(d_detJ, n_basis, n_basis, n_elem);
+        auto I = reshape(d_I, n_basis, n_basis, n_elem);
         
         host_device_dvec _w(n_basis);
         double * h_w = _w.host_write();
@@ -327,7 +266,7 @@ namespace cuddh
             if (a)
                 m *= a[idx];
 
-            AtomicAdd(op + idx, m);
+            atomicAdd(op + idx, m);
         });
 
         forall(ndof, [=] __device__ (int i) -> void
@@ -336,10 +275,10 @@ namespace cuddh
         });
     }
 
-    DiagInvMassMatrix::DiagInvMassMatrix(const H1Space& fem)
-        : ndof{fem.size()},
-          _p(ndof),
-          _I{fem.global_indices()}
+    DiagInvMassMatrix::DiagInvMassMatrix(const H1Space& fem_)
+        : fem{fem_},
+          ndof{fem.size()},
+          _p(ndof)
     {
         const int n_elem = fem.mesh().n_elem();
         const int n_basis = fem.basis().size();
@@ -350,13 +289,13 @@ namespace cuddh
         const int * I = fem.global_indices(MemorySpace::DEVICE);
         double * op = _p.device_write();
         
-        init_diag_mass(n_elem, n_basis, nullptr, detJ, q, I, op);
+        init_diag_mass(ndof, n_elem, n_basis, nullptr, detJ, q, I, op);
     }
 
-    DiagInvMassMatrix::DiagInvMassMatrix(const double * a, const H1Space& fem)
-        : ndof(fem.size()),
-          _p(ndof),
-          _I{fem.global_indices()}
+    DiagInvMassMatrix::DiagInvMassMatrix(const double * a, const H1Space& fem_)
+        : fem{fem_},
+          ndof(fem.size()),
+          _p(ndof)
     {
         const int n_elem = fem.mesh().n_elem();
         const int n_basis = fem.basis().size();
@@ -367,14 +306,15 @@ namespace cuddh
         const int * I = fem.global_indices(MemorySpace::DEVICE);
         double * op = _p.device_write();
 
-        init_diag_mass(n_elem, n_basis, a, detJ, q, I, op);
+        init_diag_mass(ndof, n_elem, n_basis, a, detJ, q, I, op);
     }
 
     void DiagInvMassMatrix::action(double c, const double * x, double * y) const
     {
         const double * p = _p.device_read();
 
-        forall(ndof, [=] __device__ (int i) -> void {
+        forall(ndof, [=] __device__ (int i) -> void
+        {
             y[i] += c * p[i] * x[i];
         });
     }
@@ -383,7 +323,8 @@ namespace cuddh
     {
         const double * p = _p.device_read();
 
-        forall(ndof, [=] __device__ (int i) -> void {
+        forall(ndof, [=] __device__ (int i) -> void
+        {
             y[i] = p[i] * x[i];
         });
     }

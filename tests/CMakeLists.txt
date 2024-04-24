@@ -9,5 +9,5 @@ add_executable(
     load_unstructured_square.cpp
     linalg.cpp
 )
-target_compile_options(test PRIVATE -x=cu)
+target_compile_options(test PRIVATE -x=cu -dc)
 target_link_libraries(test PUBLIC cuddh)

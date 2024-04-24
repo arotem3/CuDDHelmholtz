@@ -19,7 +19,7 @@ namespace cuddh
         auto I = reshape(d_I, n_basis, n_faces);
         auto op = reshape(d_op, n_quad, n_faces);
 
-        forall_1d(n_quad, n_faces, [=] __device__ (int e) -> void
+        forall_1d(n_quad, n_faces, [=] __device__ (int e) mutable -> void
         {
             __shared__ double a[NQ];
 
@@ -33,12 +33,12 @@ namespace cuddh
                 a[k] = (d_a) ? d_a[idx] : 1.0;
             }
 
-            __sync_threads();
+            __syncthreads();
 
             // eval on quadrature points
             double pa = 0.0;
             for (int l = 0; l < n_basis; ++l)
-                pa += P(i, l) * a[l];
+                pa += P(k, l) * a[l];
             
             // scale by weights and detJ
             pa *= w(k) * detJ(k, e);
@@ -62,7 +62,7 @@ namespace cuddh
         host_device_dvec _w(n_quad);
         double * h_w = _w.host_write();
         for (int i = 0; i < n_quad; ++i)
-            h_w = quad.w(i);
+            h_w[i] = quad.w(i);
 
         auto& basis = fs.h1_space().basis();
         basis.eval(n_quad, quad.x(), _P.host_write());
@@ -107,7 +107,7 @@ namespace cuddh
         host_device_dvec _w(n_quad);
         double * h_w = _w.host_write();
         for (int i = 0; i < n_quad; ++i)
-            h_w = quad.w(i);
+            h_w[i] = quad.w(i);
 
         auto& basis = fs.h1_space().basis();
         basis.eval(n_quad, quad.x(), _P.host_write());
@@ -182,12 +182,12 @@ namespace cuddh
             // integrate
             if (k < n_basis)
             {
-                Mu = 0.0;
+                double Mu = 0.0;
                 for (int i = 0; i < n_quad; ++i)
                     Mu += P(i, k) * Pu[i];
                 Mu *= c;
 
-                AtomicAdd(d_out + idx, Mu);
+                atomicAdd(d_out + idx, Mu);
             }
         });
     }
@@ -233,9 +233,9 @@ namespace cuddh
     {
         auto w = reshape(d_w, n_basis);
         auto detJ = reshape(d_detJ, n_basis, n_faces);
-        auto d_i = reshape(d_I, n_basis, n_faces);
+        auto I = reshape(d_I, n_basis, n_faces);
 
-        forall_1d(n_basis, nf, [=] __device__ (int f) -> void
+        forall_1d(n_basis, n_faces, [=] __device__ (int f) -> void
         {
             const int k = threadIdx.x;
             const int idx = I(k, f);
@@ -243,7 +243,7 @@ namespace cuddh
             double a = (d_a) ? d_a[idx] : 1.0;
             a *= w(k) * detJ(k, f);
 
-            AtomicAdd(d_op + idx, a);
+            atomicAdd(d_op + idx, a);
         });
 
         forall(ndof, [=] __device__ (int i) -> void
@@ -265,21 +265,21 @@ namespace cuddh
         host_device_dvec _w(n_basis);
         double * h_w = _w.host_write();
         for (int i = 0; i < n_basis; ++i)
-            h_w = q.w(i);
+            h_w[i] = q.w(i);
         const double * d_w = _w.device_read();
 
         auto& metrics = fs.metrics(q);
         auto d_detJ = metrics.measures(MemorySpace::DEVICE);
 
         auto d_I = fs.subspace_indices(MemorySpace::DEVICE);
-        const double * d_inv_m = inv_m.device_read();
+        double * d_inv_m = inv_m.device_write();
 
-        init_diag(ndof, n_faces, n_basis, d_w, d_detJ, nullptr, d_I, d_inv_m);
+        init_diag(ndof, nf, n_basis, d_w, d_detJ, nullptr, d_I, d_inv_m);
     }
 
-    DiagInvFaceMassMatrix::DiagInvFaceMassMatrix(const double * a, const FaceSapce& fs)
+    DiagInvFaceMassMatrix::DiagInvFaceMassMatrix(const double * a, const FaceSpace& fs)
         : ndof{fs.size()},
-          inv_m(ndf)
+          inv_m(ndof)
     {
         const int nf = fs.n_faces();
         auto& q = fs.h1_space().basis().quadrature();
@@ -288,16 +288,16 @@ namespace cuddh
         host_device_dvec _w(n_basis);
         double * h_w = _w.host_write();
         for (int i = 0; i < n_basis; ++i)
-            h_w = q.w(i);
+            h_w[i] = q.w(i);
         const double * d_w = _w.device_read();
 
         auto& metrics = fs.metrics(q);
         auto d_detJ = metrics.measures(MemorySpace::DEVICE);
 
         auto d_I = fs.subspace_indices(MemorySpace::DEVICE);
-        const double * d_inv_m = inv_m.device_read();
+        double * d_inv_m = inv_m.device_write();
 
-        init_diag(ndof, n_faces, n_basis, d_w, d_detJ, a, d_I, d_inv_m);
+        init_diag(ndof, nf, n_basis, d_w, d_detJ, a, d_I, d_inv_m);
     }
 
     void DiagInvFaceMassMatrix::action(double c, const double * x, double * y) const

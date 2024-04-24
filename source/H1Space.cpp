@@ -141,7 +141,7 @@ namespace cuddh
 
         const Mesh2D& mesh = fem.mesh();
         const int n_elem = mesh.n_elem();
-        auto K = reshape(fem.global_indices().host_read(), n_basis, n_basis, n_elem);
+        auto K = reshape(fem.global_indices(MemorySpace::HOST), n_basis, n_basis, n_elem);
 
         std::unordered_map<int, int> mask; // unique mapping from global DOFs to restricted DOFs
         std::vector<int> P;
@@ -159,7 +159,7 @@ namespace cuddh
         int l = 0;
         for (int f = 0; f < nf; ++f)
         {
-            const Edge * edge = mesh.edge(_faces(f));
+            const Edge * edge = mesh.edge(F(f));
             const int el = edge->elements[0];
             const int s = edge->sides[0];
 
@@ -181,7 +181,7 @@ namespace cuddh
         ndof = mask.size();
 
         _proj.resize(ndof);
-        auto proj = reshape(_proj, ndof);
+        auto proj = reshape(_proj.host_write(), ndof);
         for (int i = 0; i < ndof; ++i)
             proj(i) = P.at(i);
     }
@@ -191,7 +191,7 @@ namespace cuddh
         const int n = ndof;
         auto proj = global_indices(MemorySpace::DEVICE);
 
-        forall(n [=] __device__ (int i) -> void {
+        forall(n, [=] __device__ (int i) -> void {
             y[i] = x[proj(i)];
         });
     }
@@ -211,7 +211,7 @@ namespace cuddh
         auto key = quad.name();
         if (not contains(_metrics, key))
         {
-            _metrics.insert({key, Mesh2D::EdgeMetricCollection(fem.mesh(), _n_faces, _faces, quad)});
+            _metrics.insert({key, Mesh2D::EdgeMetricCollection(fem.mesh(), _n_faces, _faces.host_read(), quad)});
         }
         return _metrics.at(key);
     }

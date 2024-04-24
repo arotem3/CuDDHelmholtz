@@ -3,10 +3,14 @@
 
 #include <string>
 #include <stdexcept>
+#include <iostream>
+#include <assert.h>
+
+#include "cuddh_config.hpp"
 
 namespace cuddh
 {
-    void cuddh_error(const std::string&);
+    __host__ __device__ void cuddh_error(const char *);
 } // namespace cuddh
 
 #endif
