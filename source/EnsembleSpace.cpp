@@ -10,6 +10,7 @@ namespace cuddh
 {
     EnsembleSpace::EnsembleSpace(const H1Space& fem, int n_spaces_, const int * element_labels)
         : n_spaces{n_spaces_},
+          n_basis{fem.basis().size()},
           s_dof(n_spaces),
           s_elems(n_spaces),
           s_faces(n_spaces),
@@ -17,7 +18,6 @@ namespace cuddh
     {
         auto& mesh = fem.mesh();
         const int nel = mesh.n_elem();
-        const int n_basis = fem.basis().size();
 
         auto h_s_elems = reshape(s_elems.host_write(), n_spaces);
         auto h_s_faces = reshape(s_faces.host_write(), n_spaces);

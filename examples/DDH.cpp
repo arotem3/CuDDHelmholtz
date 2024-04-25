@@ -3,7 +3,7 @@
 
 using namespace cuddh;
 
-static double f(const double X[2])
+__device__ static double f(const double X[2])
 {
     const double x = X[0] + 0.5, y = X[1];
     const double r = x * x + y * y;
@@ -36,18 +36,28 @@ int main()
     
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
 
-    dvec U(N); // the solution vector [u; v]
-    dvec b(N); // the right hand side b(phi)
+    host_device_dvec U(N);
+    host_device_dvec b(N);
+
+    double * d_U = U.device_write(); // the solution vector [u; v]
+    double * d_b = b.device_write(); // the right hand side b(phi)
 
     LinearFunctional l(fem); // computes projections like (f, phi)
-    l.action(1.0, f, b); // bu[i] <- (f, phi[i])
+    l.action([] __device__ (const double X[2]) -> double {return f(X);}, d_b); // bu[i] <- (f, phi[i])
 
     DDH op(omega, fem, nx, nx);
 
-    op.action(b, U);
+    std::cout << cudaGetErrorString(cudaPeekAtLastError()) << std::endl;
+
+    op.action(d_b, d_U);
+
+    std::cout << cudaGetErrorString(cudaPeekAtLastError()) << std::endl;
+
+    // copy solution to host
+    const double * h_U = U.host_read();
 
     // save solution and collocation nodes to file
-    auto xy = fem.physical_coordinates();
-    to_file("solution/xy.00000", N, xy);
-    to_file("solution/ddh.00000", N, U);
+    auto xy = fem.physical_coordinates(MemorySpace::HOST);
+    to_file("solution/xy.0000", N, xy);
+    to_file("solution/ddh.0000", N, h_U);
 }

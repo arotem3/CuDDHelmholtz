@@ -118,8 +118,8 @@ namespace cuddh
         }
 
     private:
-        int n_spaces;
-        int n_basis;
+        const int n_spaces;
+        const int n_basis;
         int mx_elems;
         int mx_faces;
         int mx_ndof;
