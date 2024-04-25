@@ -42,7 +42,7 @@ namespace cuddh
 
         private:
             const Mesh2D& mesh;
-            const QuadratureRule& quad;
+            QuadratureRule quad;
 
             mutable host_device_dvec J;
             mutable host_device_dvec detJ;
@@ -78,7 +78,7 @@ namespace cuddh
 
         private:
             const Mesh2D& mesh;
-            const QuadratureRule& quad;
+            QuadratureRule quad;
             const FaceType edge_type;
 
             const bool face_subset;
@@ -300,11 +300,11 @@ namespace cuddh
 
     inline Mesh2D::ElementMetricCollection::ElementMetricCollection(const Mesh2D& mesh_, const QuadratureRule& quad_) : mesh(mesh_), quad{quad_} {}
 
-    inline Mesh2D::ElementMetricCollection::ElementMetricCollection(ElementMetricCollection&& a) : mesh(a.mesh), quad{a.quad}, J(std::move(a.J)), detJ(std::move(a.detJ)), x(std::move(a.x)) {}
+    inline Mesh2D::ElementMetricCollection::ElementMetricCollection(ElementMetricCollection&& a) : mesh(a.mesh), quad(std::move(a.quad)), J(std::move(a.J)), detJ(std::move(a.detJ)), x(std::move(a.x)) {}
 
     inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(const Mesh2D& mesh_, const FaceType edge_type_, const QuadratureRule& quad_) : mesh(mesh_), quad{quad_}, edge_type(edge_type_), face_subset{false}, _faces() {}
 
-    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(EdgeMetricCollection&& a) : mesh(a.mesh), quad{a.quad}, edge_type(a.edge_type), face_subset{a.face_subset}, _faces(std::move(a._faces)), detJ(std::move(a.detJ)), x(std::move(a.x)), n(std::move(a.n)) {}
+    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(EdgeMetricCollection&& a) : mesh(a.mesh), quad(std::move(a.quad)), edge_type(a.edge_type), face_subset{a.face_subset}, _faces(std::move(a._faces)), detJ(std::move(a.detJ)), x(std::move(a.x)), n(std::move(a.n)) {}
 
     inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(const Mesh2D& mesh_, int n_faces, const int * faces, const QuadratureRule& quad_) : mesh{mesh_}, quad{quad_}, edge_type{FaceType::INTERIOR}, face_subset{true}, _faces(faces, n_faces) {}
 

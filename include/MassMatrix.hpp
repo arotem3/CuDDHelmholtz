@@ -35,7 +35,6 @@ namespace cuddh
         const int n_elem;
         const int n_basis;
         const int n_quad;
-        const QuadratureRule quad;
         
         host_device_dvec _P;
         host_device_dvec _a; // a(x) * w(i) * w(j) * detJ

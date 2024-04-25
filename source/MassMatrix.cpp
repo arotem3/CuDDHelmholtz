@@ -72,12 +72,14 @@ namespace cuddh
           n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
           n_quad{n_basis + fem.mesh().max_element_order()},
-          quad(n_quad, QuadratureRule::GaussLegendre),
           _P(n_quad * n_basis),
           _a(n_quad * n_quad * n_elem)
     {
+        QuadratureRule quad(n_quad, QuadratureRule::GaussLegendre);
+        
         const int * d_I = fem.global_indices(MemorySpace::DEVICE);
-        const double * d_detJ = fem.mesh().element_metrics(quad).measures(MemorySpace::DEVICE);
+        auto& metrics = fem.mesh().element_metrics(quad);
+        const double * d_detJ = metrics.measures(MemorySpace::DEVICE);
         double * d_op = _a.device_write();
 
         fem.basis().eval(n_quad, quad.x(), _P.host_write());
@@ -103,13 +105,15 @@ namespace cuddh
           ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
-          n_quad(1 + 1.5*n_basis + fem.mesh().max_element_order()),
-          quad(n_quad, QuadratureRule::GaussLegendre),
+          n_quad(1 + 3*n_basis/2 + fem.mesh().max_element_order()),
           _P(n_quad * n_basis),
           _a(n_quad * n_quad * n_elem)
     {
+        QuadratureRule quad(n_quad, QuadratureRule::GaussLegendre);
+
         const int * d_I = fem.global_indices(MemorySpace::DEVICE);
-        const double * d_detJ = fem.mesh().element_metrics(quad).measures(MemorySpace::DEVICE);
+        auto& metrics = fem.mesh().element_metrics(quad);
+        const double * d_detJ = metrics.measures(MemorySpace::DEVICE);
         double * d_op = _a.device_write();
 
         fem.basis().eval(n_quad, quad.x(), _P.host_write());

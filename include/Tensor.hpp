@@ -321,7 +321,7 @@ namespace cuddh
     };
 
     template <int Dim, typename scalar>
-    Tensor<Dim, scalar>::Tensor(const Tensor<Dim, scalar>& t)
+    Tensor<Dim, scalar>::Tensor(const Tensor<Dim, scalar>& t) : TensorWrapper<Dim, scalar>()
     {
         this->len = 1;
         for (int d = 0; d < Dim; ++d)

@@ -203,6 +203,8 @@ static void gauss_lobatto(int n, double * x, double * w)
 
 namespace cuddh
 {
+    QuadratureRule::QuadratureRule() : _n{0}, _type{GaussLobatto}, _x(), _w() {}
+
     QuadratureRule::QuadratureRule(int n, QuadratureType type)
         : _n{n},
           _type{type},

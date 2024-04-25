@@ -191,7 +191,8 @@ namespace cuddh
         const int n = ndof;
         auto proj = global_indices(MemorySpace::DEVICE);
 
-        forall(n, [=] __device__ (int i) -> void {
+        forall(n, [=] __device__ (int i) -> void
+        {
             y[i] = x[proj(i)];
         });
     }
@@ -201,8 +202,19 @@ namespace cuddh
         const int n = ndof;
         auto proj = global_indices(MemorySpace::DEVICE);
 
-        forall(n, [=] __device__ (int i) -> void {
+        forall(n, [=] __device__ (int i) -> void
+        {
             y[proj(i)] += x[i];
+        });
+    }
+
+    void FaceSpace::orth(double * x) const
+    {
+        auto proj = global_indices(MemorySpace::DEVICE);
+
+        forall(ndof, [=] __device__ (int i) -> void
+        {
+            x[proj(i)] = 0.0;
         });
     }
 

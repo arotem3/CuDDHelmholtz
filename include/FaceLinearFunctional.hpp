@@ -4,6 +4,7 @@
 #include "H1Space.hpp"
 #include "HostDeviceArray.hpp"
 #include "forall.hpp"
+#include "linalg.hpp"
 
 namespace cuddh
 {
@@ -24,10 +25,14 @@ namespace cuddh
         template <typename Func>
         void action(double c, Func && f, double * F) const;
 
+        template <typename Func>
+        void action(Func && f, double * F) const;
+
     private:
         const FaceSpace& fs;
         const Mesh2D::EdgeMetricCollection& metrics;
 
+        const int fdof;
         const int n_faces;
         const int n_basis;
         const int n_quad;
@@ -146,13 +151,17 @@ namespace cuddh
                 fl_action<24>(f, n_faces, n_basis, n_quad, d_w, d_P, d_detJ, d_X, d_I, c, F);
             else if (n_quad <= 32)
                 fl_action<32>(f, n_faces, n_basis, n_quad, d_w, d_P, d_detJ, d_X, d_I, c, F);
-            else if (n_quad <= 64)
-                fl_action<64>(f, n_faces, n_basis, n_quad, d_w, d_P, d_detJ, d_X, d_I, c, F);
             else
-                cuddh_error("FaceLinearFunctional::action does not support quadrature points with more than 64 points");
+                cuddh_error("FaceLinearFunctional::action does not support quadrature points with more than 32 points");
         }
     }
 
+    template <typename Func>
+    void FaceLinearFunctional::action(Func && f, double * F) const
+    {
+        zeros(fdof, F);
+        action(1.0, f, F);
+    }
 } // namespace cuddh
 
 #endif

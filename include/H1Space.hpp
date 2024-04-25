@@ -119,6 +119,12 @@ namespace cuddh
         /// @param y DEVICE. H1Space vector. On exit, y <- y + P' * x where P is the restriction operator.
         void prolong(const double * x, double * y) const;
 
+        /// @brief Project H1Space space vector to orthogonal complement of
+        /// FaceSpace. I.e. set face values to zero.
+        /// @param x DEVICE. H1Space vector. On exit, x <- x - P' * P * x where
+        /// P is the restriction operator and P' is prolongation operator.
+        void orth(double * x) const;
+
         /// @brief returns the global H1Space
         const H1Space& h1_space() const
         {
@@ -139,30 +145,6 @@ namespace cuddh
         host_device_ivec _proj;
 
         mutable std::unordered_map<std::string, Mesh2D::EdgeMetricCollection> _metrics;
-    };
-
-    /// @brief projects an H1Space vector to H1_0
-    class H1_0
-    {
-    public:
-        /// @brief initialize projector
-        /// @param fs FaceSpace of all boundary Dirichlet faces
-        H1_0(const FaceSpace& fs_) : fs{fs_} {}
-
-        /// @brief projects an H1Space vector onto the H1_0 inplace. 
-        void action(double * y) const
-        {
-            const int ndof = fs.size();
-            const int * I = fs.global_indices(MemorySpace::DEVICE);
-
-            forall(ndof, [=] __device__ (int i) -> void
-            {
-                y[I[i]] = 0.0;
-            });
-        }
-
-    private:
-        const FaceSpace& fs;
     };
 } // namespace cuddh
 

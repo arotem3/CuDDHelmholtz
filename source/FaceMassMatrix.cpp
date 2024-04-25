@@ -98,7 +98,7 @@ namespace cuddh
           ndof{fs.size()},
           n_faces{fs.n_faces()},
           n_basis{fs.h1_space().basis().size()},
-          n_quad{fs.h1_space().mesh().max_element_order() + n_basis},
+          n_quad{fs.h1_space().mesh().max_element_order() + 3*n_basis/2 + 1},
           _a(n_quad * n_faces),
           _P(n_quad * n_basis)
     {
