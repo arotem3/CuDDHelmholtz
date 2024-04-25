@@ -29,8 +29,6 @@ namespace cuddh
         int n_domains;
         int n_lambda;
         int nt;
-        int wh_maxit;
-        int lambda_maxit;
         int mx_n_lambda;
         int mx_dof;
         int mx_fdof;

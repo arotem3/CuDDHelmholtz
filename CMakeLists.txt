@@ -29,7 +29,7 @@ add_library(
     
     source/Basis.cpp
     source/cuddh_error.cpp
-    # source/DDH.cpp
+    source/DDH.cpp
     source/Element.cpp
     source/EnsembleSpace.cpp
     source/FaceLinearFunctional.cpp
