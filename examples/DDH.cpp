@@ -3,11 +3,22 @@
 
 using namespace cuddh;
 
+// forcing
 __device__ static double f(const double X[2])
 {
     const double x = X[0] + 0.5, y = X[1];
     const double r = x * x + y * y;
     return 20.0 * std::exp(-400.0 * r);
+}
+
+// variable coefficient
+__host__ __device__ static double alpha(const double X[2])
+{
+    const double x = X[0], y = X[1];
+    if (x < 0)
+        return 1.0;
+    else
+        return 0.5;
 }
 
 int main()
@@ -38,14 +49,22 @@ int main()
 
     host_device_dvec U(N);
     host_device_dvec b(N);
+    host_device_dvec a(N);
 
     double * d_U = U.device_write(); // the solution vector [u; v]
     double * d_b = b.device_write(); // the right hand side b(phi)
+    double * d_a = a.device_write(); // the variable coefficient
 
     LinearFunctional l(fem); // computes projections like (f, phi)
+    DiagInvMassMatrix mi(fem);
     l.action([] __device__ (const double X[2]) -> double {return f(X);}, d_b); // bu[i] <- (f, phi[i])
 
-    DDH op(omega, fem, nx, nx);
+    l.action([] __device__ (const double X[2]) -> double {return alpha(X);}, d_a);
+    mi.action(d_a, d_a);
+
+    const double * h_a = a.host_read();
+
+    DDH op(omega, h_a, fem, nx, nx);
     
     op.action(d_b, d_U);
 
