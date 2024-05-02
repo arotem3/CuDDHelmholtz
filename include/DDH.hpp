@@ -41,24 +41,23 @@ namespace cuddh
         host_device_ivec _dualB;
         host_device_ivec _s_lambda;
 
-        host_device_dvec _D; // differentiation matrix
+        HostDeviceArray<float> _D; // differentiation matrix
 
         DiagInvMassMatrix g_inv_m; // global inverse mass matrix
         
-        host_device_dvec _g_tensor; // geometric factors for stiffness matrix computations
-        host_device_dvec _inv_m; // inverse mass matrix
-        host_device_dvec _m; // mass matrix 
-        host_device_dvec _H; // face mass matrix
-        host_device_dvec _wh_filter; // omega / pi * (cos(omega * t) - 0.25) scaled by quadrature weights
-        host_device_dvec _cs; // cos(omega t) on all half time steps
-        host_device_dvec _sn; // sin(omega t) on all half time steps
+        HostDeviceArray<float> _g_tensor; // geometric factors for stiffness matrix computations
+        HostDeviceArray<float> _inv_m; // inverse mass matrix
+        HostDeviceArray<float> _m; // mass matrix 
+        HostDeviceArray<float> _H; // face mass matrix
+        HostDeviceArray<float> _wh_filter; // omega / pi * (cos(omega * t) - 0.25) scaled by quadrature weights
+        HostDeviceArray<float> _cs; // cos(omega t) on all half time steps
+        HostDeviceArray<float> _sn; // sin(omega t) on all half time steps
 
-        mutable host_device_dvec _g_lambda; // global lambda vector
-        mutable host_device_dvec _g_update; // global lambda updates
+        mutable HostDeviceArray<float> _g_lambda; // global lambda vector
+        mutable HostDeviceArray<float> _g_update; // global lambda updates
 
         std::unique_ptr<EnsembleSpace> efem;
     };
 } // namespace cuddh
-
 
 #endif

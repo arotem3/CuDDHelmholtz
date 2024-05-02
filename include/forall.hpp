@@ -15,7 +15,7 @@ namespace cuddh
     }
 
     template <typename LAMBDA>
-    void forall(int n, LAMBDA && fun)
+    inline void forall(int n, LAMBDA && fun)
     {
         if (n == 0) return;
 
@@ -35,7 +35,7 @@ namespace cuddh
     }
 
     template <typename LAMBDA>
-    void forall_1d(int bx, int n, LAMBDA && fun)
+    inline void forall_1d(int bx, int n, LAMBDA && fun)
     {
         if (n == 0) return;
 
@@ -43,7 +43,7 @@ namespace cuddh
     }
 
     template <typename LAMBDA>
-    void forall_2d(int bx, int by, int n, LAMBDA && fun)
+    inline void forall_2d(int bx, int by, int n, LAMBDA && fun)
     {
         if (n == 0) return;
         
@@ -52,7 +52,7 @@ namespace cuddh
     }
 
     template <typename LAMBDA>
-    void forall_3d(int bx, int by, int bz, int n, LAMBDA && fun)
+    inline void forall_3d(int bx, int by, int bz, int n, LAMBDA && fun)
     {
         if (n == 0) return;
 

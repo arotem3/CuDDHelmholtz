@@ -1,6 +1,8 @@
 #include "DDH.hpp"
 #include <iostream>
 
+// one dimensional size of each domain decomp block. Each block has
+// DDH_BLOCK_SIZE * DDH_BLOCK_SIZE degrees of freedom.
 #define DDH_BLOCK_SIZE 16
 
 using namespace cuddh;
@@ -9,7 +11,7 @@ static void init_geom_factors(int n_elem,
                               int n_basis,
                               const double * d_w,
                               const double * d_J,
-                              double * d_G)
+                              float * d_G)
 {
     auto w = reshape(d_w, n_basis);
     auto J = reshape(d_J, 2, 2, n_basis, n_basis, n_elem);
@@ -39,7 +41,7 @@ template <int NB>
 static void __device__ stiffness(int subsp,
                                 int n_elem,
                                 int n_basis,
-                                const TensorWrapper<4,const double>& G,
+                                const TensorWrapper<4,const float>& G,
                                 const TensorWrapper<4,const int>& I,
                                 const const_imat_wrapper& elems,
                                 const float D[NB][NB],
@@ -58,10 +60,8 @@ static void __device__ stiffness(int subsp,
     float Dx = 0.0, Dy = 0.0;
     for (int i = 0; i < n_basis; ++i)
     {
-        const int il = I(i, l, el, subsp); // please be in L1
-        const int ki = I(k, i, el, subsp);
-        Dx += D[k][i] * u[il];
-        Dy += D[l][i] * u[ki];
+        Dx += D[k][i] * u[I(i, l, el, subsp)];
+        Dy += D[l][i] * u[I(k, i, el, subsp)];
     }
 
     __syncthreads(); // <- we overwrite u in a second so this is critical
@@ -101,21 +101,21 @@ static void ddh_action(const EnsembleSpace * efem,
                        const_ivec_wrapper s_lambda,
                        const_icube_wrapper B,
                        const_icube_wrapper dualB,
-                       const_dmat_wrapper _D,
-                       TensorWrapper<4, const double> g,
-                       const_dmat_wrapper m,
-                       const_dmat_wrapper inv_m,
-                       const_dmat_wrapper H,
-                       const_dvec_wrapper wh_filter,
-                       const_dvec_wrapper cs,
-                       const_dvec_wrapper sn,
+                       MatrixWrapper<const float> _D,
+                       TensorWrapper<4, const float> g,
+                       MatrixWrapper<const float> m,
+                       MatrixWrapper<const float> inv_m,
+                       MatrixWrapper<const float> H,
+                       VectorWrapper<const float> wh_filter,
+                       VectorWrapper<const float> cs,
+                       VectorWrapper<const float> sn,
                        const double * __restrict__ x,
                        double * __restrict__ y,
-                       double * __restrict__ d_lambda,
-                       double * __restrict__ d_update)
+                       float * __restrict__ d_lambda,
+                       float * __restrict__ d_update)
 {
-    constexpr int lambda_maxit = 1;
-    constexpr int wh_maxit = 10;
+    constexpr int lambda_maxit = 10;
+    constexpr int wh_maxit = 5;
 
     auto gI = efem->global_indices(MemorySpace::DEVICE); // global indices of subspace local dofs
     auto s_dof = efem->sizes(MemorySpace::DEVICE);  // number of subdomain degrees of freedom
@@ -129,8 +129,8 @@ static void ddh_action(const EnsembleSpace * efem,
     auto subspace_indices = efem->subspace_indices(MemorySpace::DEVICE); // ((i,j,el), p) -> p-th subspace index for dof (i,j,el)
     auto P = efem->face_proj(MemorySpace::DEVICE); // (i, p) -> p-th subspace's face space index to i-th subspace DOF
 
-    const double half_dt = 0.5 * dt;
-    const double rw = 1.0 / omega;
+    const float half_dt = 0.5 * dt;
+    const float rw = 1.0 / omega;
 
     auto g_lambda = reshape(d_lambda, n_lambda);
     auto g_mu = reshape(d_lambda + n_lambda, n_lambda);
@@ -188,11 +188,12 @@ static void ddh_action(const EnsembleSpace * efem,
             // FaceSpace DOF. The following variables are indices of those DOFs
             // in various arrays. Additionally, the elements of the (diagonal)
             // mass matrices are also kept.
-            int ugi; // subspace DOF[tid] global index. gI(tid, subsp)
+
+            int g_idx; // subspace DOF[tid] global index. gI(tid, subsp)
             int pi; // facespace DOF[tid] subspace index. P(tid, subsp)
+
             float Hi; // H(tid, subsp)
             float Mi; // inv_m(tid, subsp)
-            double M; // m(tid, subsp)
             float lambda; // lambda[tid]
             float mu; // mu[tid]
 
@@ -205,15 +206,14 @@ static void ddh_action(const EnsembleSpace * efem,
             // copy global x to forcing, init work variables
             if (tid < ndof)
             {
-                ugi = gI(tid, subsp);
-                F[tid] = g_F[ugi];
-                G[tid] = g_G[ugi];
+                g_idx = gI(tid, subsp);
+                F[tid] = g_F[g_idx];
+                G[tid] = g_G[g_idx];
 
                 u[tid] = 0.0f;
                 v[tid] = 0.0f;
 
                 Mi = inv_m(tid, subsp);
-                M = m(tid, subsp);
             }
             __syncthreads();
 
@@ -227,8 +227,10 @@ static void ddh_action(const EnsembleSpace * efem,
                 lambda = g_lambda[idx];
                 mu = g_mu[idx];
 
-                F[k] += Hi * lambda;
-                G[k] += Hi * mu;
+                float Hl = H(j, subsp);
+
+                F[k] += Hl * lambda;
+                G[k] += Hl * mu;
             }
 
             // WaveHoltz iteration
@@ -238,7 +240,7 @@ static void ddh_action(const EnsembleSpace * efem,
             {
                 __syncthreads();
                 
-                double dK = wh_filter(0); // please be in L1
+                float dK = wh_filter(0); // please be in L1
                 if (tid < ndof)
                 {
                     p[tid] = u[tid];
@@ -316,11 +318,12 @@ static void ddh_action(const EnsembleSpace * efem,
             {
                 v[tid] *= rw;
 
+                const double M  = m(tid, subsp);
                 const double m_u = M * u[tid];
                 const double m_v = M * v[tid];
                 
-                atomicAdd(U+ugi, m_u);
-                atomicAdd(V+ugi, m_v);
+                atomicAdd(U+g_idx, m_u);
+                atomicAdd(V+g_idx, m_v);
             }
             __syncthreads();
 
@@ -332,17 +335,17 @@ static void ddh_action(const EnsembleSpace * efem,
                 const int k = P(j, subsp); // volume index of trace
 
                 lambda_update[idx] = -lambda - 2.0 * omega * v[k];
-                mu_update[idx] = -mu + 2.0 * omega * u[k];
+                mu_update[idx]     = -mu     + 2.0 * omega * u[k];
             }
         });
 
         // update Lambdas
         copy(2 * n_lambda, d_update, d_lambda);
-    } // for lambda iteration
 
-    // multiply by inverse mass
-    g_inv_m.action(U, U);
-    g_inv_m.action(V, V);
+        // multiply by inverse mass
+        g_inv_m.action(U, U);
+        g_inv_m.action(V, V);
+    } // for lambda iteration
 }
 
 DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
@@ -377,9 +380,9 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
     _wh_filter.resize(nt+1);
     auto wh_filter = reshape(_wh_filter.host_write(), nt+1);
     for (int k = 0; k <= nt; ++k)
-        wh_filter(k) = dt * (omega / M_PI) * (std::cos(omega * k * dt) - 0.25);
-    wh_filter(0) *= 0.5;
-    wh_filter(nt) *= 0.5;
+        wh_filter[k] = dt * (omega / M_PI) * (std::cos(omega * k * dt) - 0.25);
+    wh_filter[0] *= 0.5;
+    wh_filter[nt] *= 0.5;
 
     _cs.resize(2*nt+1);
     _sn.resize(2*nt+1);
@@ -388,8 +391,8 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
     for (int k = 0; k <= 2*nt; ++k)
     {
         double t = 0.5 * k * dt;
-        cs(k) = std::cos(omega * t);
-        sn(k) = std::sin(omega * t);
+        cs[k] = std::cos(omega * t);
+        sn[k] = std::sin(omega * t);
     }
 
     // set up domain decomp
@@ -483,13 +486,17 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
     const double * d_w = _w.device_read();
     
     _D.resize(n_basis * n_basis);
-    basis.deriv(n_basis, q.x(), _D.host_write());
+    dmat D_temp(n_basis, n_basis);
+    basis.deriv(n_basis, q.x(), D_temp);
+    float * D = _D.host_write();
+    for (int i=0; i < n_basis*n_basis; ++i)
+        D[i] = D_temp[i];
 
     auto& metrics = fem.mesh().element_metrics(q);
     const double * d_J = metrics.jacobians(MemorySpace::DEVICE);
     
     _g_tensor.resize(3 * n_basis * n_basis * g_elem);
-    double * d_G = _g_tensor.device_write();
+    float * d_G = _g_tensor.device_write();
     init_geom_factors(g_elem, n_basis, d_w, d_J, d_G);
 
     auto g_inds = fem.global_indices(MemorySpace::HOST);
@@ -543,7 +550,7 @@ DDH::DDH(double omega_, const H1Space& fem, int nx, int ny)
 
         const int s_dof = sizes(subsp);
         for (int i = 0; i < s_dof; ++i)
-            inv_m(i, subsp) = 1.0 / m(i, subsp);
+            inv_m(i, subsp) = 1.0f / m(i, subsp);
         
         const int s_nf = n_faces(subsp);
         for (int f = 0; f < s_nf; ++f)
@@ -579,8 +586,8 @@ void DDH::action(const double * x, double * y) const
     auto cs = reshape(_cs.device_read(), 2*nt+1);
     auto sn = reshape(_sn.device_read(), 2*nt+1);
 
-    double * d_lambda = _g_lambda.device_write();
-    double * d_update = _g_update.device_write();
+    float * d_lambda = _g_lambda.device_write();
+    float * d_update = _g_update.device_write();
 
     if (n_basis == 4)
         ddh_action<4, DDH_BLOCK_SIZE/4>(efem.get(), g_ndof, g_elem, n_domains, n_basis, n_lambda, nt, omega, dt, g_inv_m, s_lambda, B, dualB, D, g, m, inv_m, H, wh_filter, cs, sn, x, y, d_lambda, d_update);
