@@ -6,8 +6,7 @@ We consider the Helmholtz equation with zero-order absorbing boundary conditions
 $$-\Delta U - \omega^2 \alpha(x) U=f, \qquad \forall x\in\Omega$$
 $$\partial_{\mathbf{n}} U + i \omega U=0, \qquad \forall x\in\partial\Omega$$
 
-Here $\Omega$ is an open and simply connected subset of $\R^2$, $\alpha$ is a real valued positive function, and $f$ is a real valued function.
-
+Here $\Omega$ is an open and simply connected subset of $\mathbb{R}^2$, $\alpha$ is a real valued positive function, and $f$ is a real valued function.
 We solve the Helmholtz equation via the finite element method.
 Let $U = u + i v$, the weak formulation is for all $\phi\in H^1(\Omega)$
 
@@ -23,20 +22,21 @@ $$S_{ij} = (\nabla \phi_i, \nabla \phi_j), \quad M_{ij} = (\alpha\phi_i, \phi_j)
 
 Let $F_i = (f, \phi_i)$. Then the solutions $u_h, v_h$ are given by
 
-$$u_h = \sum_{i=1}^n \hat{u}_i \phi_i, \qquad v_h = \sum_{i=1}^n \hat{v}_i \phi_i.$$
+$$u\_h = \sum\_{i=1}^n \hat{u}\_i \phi\_i, \qquad v\_h = \sum\_{i=1}^n \hat{v}\_i \phi\_i.$$
 
 With the coefficients $\hat{u}, \hat{v}$ satisfying
 
 $$\begin{pmatrix}
     S-\omega^2M & -\omega H \\
-    \omega H & S-\omega^2M
+    -\omega H & \omega^2M-S
 \end{pmatrix} \begin{pmatrix}
-    \hat{u} \\ \hat{v}
+    \hat{u} \\
+    \hat{v}
 \end{pmatrix} = \begin{pmatrix}
-    F \\ 0
+    F \\
+    0
 \end{pmatrix}.$$
 
-Clearly the linear system is not symmetric nor is it definite, so we solve it with the generalized minimum residual method (GMRES).
 Krylov space methods for solving the Helmholtz equation are known to converge very slowly.
 In addition, for high frequency problems, we must take $n$ very large, so GMRES must be restarted every $m \ll n$ Arnoldi iterations as the cost scales like $O(nm^2)$ per iteration.
 With restarts, however, convergence is slower still, so a good preconditioner is essential in order to solve the Helmholtz equation efficiently.
