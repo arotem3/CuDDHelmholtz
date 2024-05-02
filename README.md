@@ -3,20 +3,23 @@ CUDA implementation of parallel domain decomposition methods for preconditioning
 
 We consider the Helmholtz equation with zero-order absorbing boundary conditions:
 
-$$-\Delta U - \omega^2 \alpha(x) U=f, \qquad \forall x\in\Omega$$
-$$\partial_{\mathbf{n}} U + i \omega U=0, \qquad \forall x\in\partial\Omega$$
+$$-\Delta U - \omega^2 \alpha^2(x) U=f, \qquad \forall x\in\Omega,$$
+
+$$\partial\_{\mathbf{n}} U + i \alpha(x) \omega U=0, \qquad \forall x\in\partial\Omega.$$
 
 Here $\Omega$ is an open and simply connected subset of $\mathbb{R}^2$, $\alpha$ is a real valued positive function, and $f$ is a real valued function.
 We solve the Helmholtz equation via the finite element method.
 Let $U = u + i v$, the weak formulation is for all $\phi\in H^1(\Omega)$
 
-$$(\nabla u, \nabla\phi) - \omega^2 (\alpha u, \phi) - \omega\langle v,\phi\rangle = (f,\phi),$$
-$$(\nabla v, \nabla \phi) - \omega^2 (\alpha v, \phi) + \omega \langle u,\phi \rangle = 0.$$
+$$\begin{align*}
+(\nabla u, \nabla \phi) - \omega^2 (\alpha^2 u, \phi) - \omega \langle \alpha v,\phi \rangle &= (f,\phi), \\
+(\nabla v, \nabla \phi) - \omega^2 (\alpha^2 v, \phi) + \omega \langle \alpha u,\phi \rangle &= 0.
+\end{align*}$$
 
 Here
-$$(f, g) = \int_\Omega f g \, dx, \qquad \langle f, g \rangle = \int_{\partial\Omega} f g \, ds.$$
+$$(f, g) = \int_\Omega f g \\, dx, \qquad \langle f, g \rangle = \int_{\partial\Omega} f g \\, ds.$$
 
-Let $\{\phi_i\}_{i=1}^n$ be the FE basis functions, and define the matrices
+Let $\\{\phi_i\\}_{i=1}^n$ be the FE basis functions, and define the matrices
 
 $$S_{ij} = (\nabla \phi_i, \nabla \phi_j), \quad M_{ij} = (\alpha\phi_i, \phi_j), \quad H_{ij} = \langle \phi_i, \phi_j \rangle.$$
 
