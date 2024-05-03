@@ -3,6 +3,10 @@
 
 #include <cuda_runtime.h>
 
+#ifndef CUDDH_FORALL_BLOCK_SIZE
+#define CUDDH_FORALL_BLOCK_SIZE 1024
+#endif
+
 namespace cuddh
 {
     template <typename LAMBDA>
@@ -19,10 +23,9 @@ namespace cuddh
     {
         if (n == 0) return;
 
-        const int block_size = 256;
-        const int n_blocks = (n + block_size - 1) / block_size;
+        const int n_blocks = (n + CUDDH_FORALL_BLOCK_SIZE - 1) / CUDDH_FORALL_BLOCK_SIZE;
 
-        forall_kernel<<< n_blocks, block_size >>>(n, fun);
+        forall_kernel<<< n_blocks, CUDDH_FORALL_BLOCK_SIZE >>>(n, fun);
     }
 
     template <typename LAMBDA>

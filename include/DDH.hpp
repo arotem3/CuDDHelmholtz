@@ -3,6 +3,8 @@
 
 #include <cuda_runtime.h>
 #include <functional>
+#include <assert.h>
+#include <unordered_set>
 
 #include "Operator.hpp"
 #include "EnsembleSpace.hpp"
@@ -51,16 +53,15 @@ namespace cuddh
         double omega;
         double dt;
 
-        host_device_ivec _B;
-        host_device_ivec _dualB;
         host_device_ivec _s_lambda;
+        host_device_ivec _Bf;
+        host_device_ivec _gI;
+        host_device_ivec _sI;
 
         HostDeviceArray<float> _D; // differentiation matrix
-
-        DiagInvMassMatrix g_inv_m; // global inverse mass matrix
-        
         HostDeviceArray<float> _g_tensor; // geometric factors for stiffness matrix computations
         HostDeviceArray<float> _m; // mass matrix 
+        HostDeviceArray<float> _gmi; // global inverse mass
         HostDeviceArray<float> _H; // face mass matrix
         HostDeviceArray<float> _wh_filter; // omega / pi * (cos(omega * t) - 0.25) scaled by quadrature weights
         HostDeviceArray<float> _cs; // cos(omega t) on all half time steps

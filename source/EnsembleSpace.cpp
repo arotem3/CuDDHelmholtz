@@ -30,6 +30,8 @@ namespace cuddh
         for (int el = 0; el < nel; ++el)
         {
             const int p = element_labels[el];
+            if (p < 0 || p >= n_spaces)
+                cuddh_error("EnsembleSpace error: an element was illogically labeled.");
             E.at(p).push_back(el);
             el2s(el) = E.at(p).size()-1;
         }
@@ -250,11 +252,10 @@ namespace cuddh
         // determine the mapping between subdomain face spaces of the shared
         // degrees of freedom.
         int n_shared = shared_faces.size(); // total number of faces shared between subdomains
-        std::vector<std::array<int,4>> shared_dofs(n_spaces); // list of all pairs of shared DOFs identifying the respective subspaces
+        std::vector<std::array<int,4>> shared_dofs; // list of all pairs of shared DOFs identifying the respective subspaces
         std::unordered_map<int, std::unordered_set<int>> unique_shared; // maps pairs of subspaces to unique DOFs shared between them
-        for (int f = 0; f < n_shared; ++f)
+        for (auto [S0, S1, f0, f1] : shared_faces)
         {
-            auto [S0, S1, f0, f1] = shared_faces.at(f);
             const int key = (S0 < S1) ? (S0 + n_spaces * S1) : (S1 + n_spaces * S0); // key is same for (S0, S1) and (S1, S0) symmetric pairs
 
             auto& unq = unique_shared[key]; // unique face dofs

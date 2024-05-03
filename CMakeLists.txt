@@ -6,7 +6,7 @@ configure_file(config.in include/cuddh_config.hpp)
 
 set(CMAKE_CXX_COMPILER nvcc)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++17 --extended-lambda -arch=sm_80 --compiler-options -Wall,-Wextra,-Wno-unused-parameter")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++17 --extended-lambda -arch=sm_80 --compiler-options -Wall,-Wextra,-Wno-unused-parameter,-Wunused-variable")
 
 # LAPACK -- something funny is happening here with find package
 # find_package(LAPACK REQUIRED)

@@ -8,3 +8,5 @@ libcuddh.a
 *.py
 solution
 *.sh
+tmp
+ncu_*
