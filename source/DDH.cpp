@@ -118,7 +118,7 @@ static void ddh_action(const EnsembleSpace * efem,
                        const float omega,
                        const float dt,
                        const MatrixWrapper<const float> g_inv_m,
-                       const TensorWrapper<4,const int> B,
+                       const const_icube_wrapper B,
                        const const_imat_wrapper gI,
                        const TensorWrapper<4,const int> sI,
                        const MatrixWrapper<const float> D,
@@ -134,8 +134,8 @@ static void ddh_action(const EnsembleSpace * efem,
                        float * __restrict__ d_lambda,
                        float * __restrict__ d_update)
 {
-    constexpr int lambda_maxit = 5;
-    constexpr int wh_maxit = 10; // remarkably, 2 iterations seems to be good enough
+    constexpr int lambda_maxit = 1;
+    constexpr int wh_maxit = 2;
 
     auto s_dof = efem->sizes(MemorySpace::DEVICE);  // number of subdomain degrees of freedom
     auto s_fdof = efem->fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
@@ -205,8 +205,7 @@ static void ddh_action(const EnsembleSpace * efem,
             // (lambda, mu) are the variables of the substructured problem.
             // There are two of each because corners have two values associated
             // with the same degree of freedom (because two edges meet).
-            float lambda[2] = {0.0f, 0.0f};
-            float mu[2] = {0.0f, 0.0f};
+            float lambda, mu;
 
             const float g_tid[] = {g(0, tid, subsp),
                                    g(1, tid, subsp),
@@ -222,18 +221,14 @@ static void ddh_action(const EnsembleSpace * efem,
             // add lambda to forcing, init work variables
             if (tid < fdof)
             {
-                #pragma unroll 2
-                for (int i=0; i < 2; ++i)
+                int idx = B(tid, 0, subsp);
+                if (idx >= 0)
                 {
-                    int idx = B(tid, i, 0, subsp);
-                    if (idx >= 0)
-                    {
-                        lambda[i] = g_lambda[idx];
-                        mu[i] = g_mu[idx];
+                    lambda = g_lambda[idx];
+                    mu = g_mu[idx];
 
-                        F += Hi * lambda[i];
-                        G += Hi * mu[i];
-                    }
+                    F += Hi * lambda;
+                    G += Hi * mu;
                 }
             }
 
@@ -329,15 +324,11 @@ static void ddh_action(const EnsembleSpace * efem,
             // update Lambdas
             if (tid < fdof)
             {
-                #pragma unroll 2
-                for (int i = 0; i < 2; ++i)
+                int idx = B(tid, 1, subsp);
+                if (idx >= 0)
                 {
-                    int idx = B(tid, i, 1, subsp);
-                    if (idx >= 0)
-                    {
-                        lambda_update[idx] = -lambda[i] - 2.0f * ai * omega * v;
-                        mu_update[idx]     = -mu[i]     + 2.0f * ai * omega * u;
-                    }
+                    lambda_update[idx] = -lambda - 2.0f * ai * omega * v;
+                    mu_update[idx]     = -mu     + 2.0f * ai * omega * u;
                 }
             }
         });
@@ -448,7 +439,10 @@ DDH::DDH(double omega_, const double * h_a, const H1Space& fem, int nx, int ny)
     // Consequently, the indices of mu0 and mu1 are those of lambda0 and
     // lambda1, respectively, offset by n_lambda (=2*n_shared).
 
-    std::vector<std::vector<std::array<int,3>>> _b(n_domains);
+    _Bf.resize(2 * mx_fdof * n_domains);
+    auto B = reshape(_Bf.host_write(), mx_fdof, 2, n_domains);
+    std::fill(B.begin(), B.end(), -1);
+
     for (int k = 0; k < n_shared; ++k)
     {
         int subspace0 = cmap(0, k);
@@ -456,39 +450,10 @@ DDH::DDH(double omega_, const double * h_a, const H1Space& fem, int nx, int ny)
         int face_index0 = cmap(2, k);
         int face_index1 = cmap(3, k);
 
-        _b.at(subspace0).push_back({face_index0, k, n_shared + k}); // lambda0
-        _b.at(subspace1).push_back({face_index1, n_shared + k, k}); // lambda0 of subspace1 == lambda1 of subspace0
-    }
-
-    _s_lambda.resize(n_domains);
-    auto s_lambda = reshape(_s_lambda.host_write(), n_domains);
-    mx_n_lambda = 0;
-    for (int p = 0; p < n_domains; ++p)
-    {
-        const int n = _b.at(p).size();
-        s_lambda(p) = n;
-        mx_n_lambda = std::max(mx_n_lambda, n);
-    }
-
-    _Bf.resize(4 * mx_fdof * n_domains);
-    auto B = reshape(_Bf.host_write(), mx_fdof, 2, 2, n_domains);
-    std::fill(B.begin(), B.end(), -1);
-    
-    for (int subsp = 0; subsp < n_domains; ++subsp)
-    {
-        for (auto const& [j, lambda0, lambda1] : _b.at(subsp))
-        {
-            if (B(j, 0, 0, subsp) < 0)
-            {
-                B(j, 0, 0, subsp) = lambda0;
-                B(j, 0, 1, subsp) = lambda1;
-            }
-            else
-            {
-                B(j, 1, 0, subsp) = lambda0;
-                B(j, 1, 1, subsp) = lambda1;
-            }
-        }
+        B(face_index0, 0, subspace0) = k;
+        B(face_index0, 1, subspace0) = n_shared+k;
+        B(face_index1, 0, subspace1) = n_shared+k;
+        B(face_index1, 1, subspace1) = k;
     }
 
     // compute permutation of DOFs so that the face DOFs are first
@@ -667,7 +632,7 @@ DDH::DDH(double omega_, const double * h_a, const H1Space& fem, int nx, int ny)
 
 void DDH::action(const double * x, double * y) const
 {
-    auto B = reshape(_Bf.device_read(), mx_fdof, 2, 2, n_domains);
+    auto B = reshape(_Bf.device_read(), mx_fdof, 2, n_domains);
 
     auto gI = reshape(_gI.device_read(), mx_dof, n_domains);
     auto sI = reshape(_sI.device_read(), n_basis, n_basis, mx_elem_per_dom, n_domains);
