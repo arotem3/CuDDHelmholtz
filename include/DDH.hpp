@@ -59,7 +59,7 @@ namespace cuddh
         host_device_ivec _sI;
 
         HostDeviceArray<float> _D; // differentiation matrix
-        HostDeviceArray<float> _g_tensor; // geometric factors for stiffness matrix computations
+        HostDeviceArray<float3> _g_tensor; // geometric factors for stiffness matrix computations
         HostDeviceArray<float> _m; // mass matrix 
         HostDeviceArray<float> _gmi; // global inverse mass
         HostDeviceArray<float> _H; // face mass matrix
