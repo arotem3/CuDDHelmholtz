@@ -43,14 +43,14 @@ namespace cuddh
     void fill(int n, int a, int * x);
 
     /// @brief x[i] <- 0
-    inline void zeros(int n, double * x) {fill(n, 0.0, x);}
-    inline void zeros(int n, float * x) {fill(n, 0.0f, x);}
-    inline void zeros(int n, int * x) {fill(n, 0, x);}
+    inline void zeros(int n, double * x) {cudaMemset(x, 0, n*sizeof(double));}
+    inline void zeros(int n, float * x) {cudaMemset(x, 0, n*sizeof(float));}
+    inline void zeros(int n, int * x) {cudaMemset(x, 0, n*sizeof(int));}
 
     /// @brief x[i] <- 1
     inline void ones(int n, double * x) {fill(n, 1.0, x);}
     inline void ones(int n, float * x) {fill(n, 1.0f, x);}
-    inline void ones(int n, int * x) {fill(n, 1, x);}
+    inline void ones(int n, int * x) {cudaMemset(x, 1, n*sizeof(int));}
 } // namespace cuddh
 
 #endif

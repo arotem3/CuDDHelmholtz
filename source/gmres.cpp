@@ -2,17 +2,19 @@
 
 // lapack routine for triangular solve
 extern "C" void dtrsv_(char * uplo, char * trans, char * diag, int * n, const double * a, int * lda, double * x, int * inc_x);
+extern "C" void strsv_(char * uplo, char * trans, char * diag, int * n, const float * a, int * lda, float * x, int * inc_x);
 
-static void givens_rotations(double * h, double * cs, double * sn, int k)
+template <typename scalar>
+static void givens_rotations(scalar * h, scalar * cs, scalar * sn, int k)
 {
     for (int i = 0; i < k; ++i)
     {
-        const double h1 = h[i], h2 = h[i+1];
+        const scalar h1 = h[i], h2 = h[i+1];
         h[i] = cs[i] * h1 + sn[i] * h2;
         h[i+1] = -sn[i] * h1 + cs[i] * h2;
     }
 
-    double t = std::hypot(h[k], h[k+1]);
+    scalar t = std::hypot(h[k], h[k+1]);
     cs[k] = h[k]/t;
     sn[k] = h[k+1]/t;
 
@@ -28,6 +30,15 @@ static void solve_upper_triangular(int N, const double * R, int ldr, double * b)
     char trans[] = "n";
     char diag[] = "n";
     dtrsv_(uplo, trans, diag, &N, R, &ldr, b, &i_one);
+}
+
+static void solve_upper_triangular(int N, const float * R, int ldr, float * b)
+{
+    int i_one = 1.0;
+    char uplo[] = "u";
+    char trans[] = "n";
+    char diag[] = "n";
+    strsv_(uplo, trans, diag, &N, R, &ldr, b, &i_one);
 }
 
 class ProgressBar
@@ -77,29 +88,30 @@ namespace cuddh
         const Operator * P;
     };
 
-    solver_out gmres(int n, double * x, const Operator * A, const double * b, int m, int maxit, double tol, int verbose)
+    template <typename scalar,typename OpType>
+    solver_out t_gmres(int n, scalar * x, const OpType * A, const scalar * b, int m, int maxit, scalar tol, int verbose)
     {
-        const double one = 1.0, zero = 0.0;
+        constexpr scalar one = 1, zero = 0;
 
-        double bnrm = norm(n, b);
+        scalar bnrm = norm(n, b);
 
         const int m1 = m + 1;
 
-        // DEVICE data:
-        host_device_dvec _r(n);
-        double * r = _r.device_write();
-        
-        host_device_dvec _V(n * m1);
-        double * V =_V.device_write();
+        // DEVICE DATA:
+        HostDeviceArray<scalar> _r(n);
+        HostDeviceArray<scalar> _V(n * m1);
+        scalar * r = _r.device_write();
+        scalar * V = _V.device_write();
 
-        // HOST data:
-        dmat H(m1, m);
-        dvec sn(m);
-        dvec cs(m);
-        dvec eta(m1);
+        // HOST DATA
+        Matrix<scalar> H(m1, m);
+        Vec<scalar> sn(m);
+        Vec<scalar> cs(m);
+        Vec<scalar> eta(m1);
 
         solver_out out;
         out.res_norm.reserve(maxit+1);
+        out.time.reserve(maxit+1);
         out.num_matvec = 0;
         out.success = false;
 
@@ -107,13 +119,16 @@ namespace cuddh
         out.num_matvec++;
         axpby(n, one, b, -one, r); // r <- b - r = b - A * x
 
-        out.res_norm.push_back(norm(n, r));
+        scalar r_nrm = norm(n, r);
 
-        if (out.res_norm.at(0) < bnrm * tol)
+        out.res_norm.push_back((double)r_nrm);
+        out.time.push_back(0.0);
+        auto t0 = std::chrono::high_resolution_clock::now();
+
+        if (r_nrm < tol * bnrm)
         {
-            out.num_iter = 0;
             out.success = true;
-
+            
             if (verbose)
             {
                 std::cout << "After 0 iterations, GMRES achieved rel. residual of " << out.res_norm.back()/bnrm << std::endl;
@@ -122,18 +137,17 @@ namespace cuddh
 
             return out;
         }
-        
+
         ProgressBar bar(maxit);
         if (verbose)
             std::cout << std::setprecision(5) << std::scientific;
-
+        
         int it = 1;
         for (; it < maxit; ++it)
         {
-            double * vk = V;
-            double * vk1;
+            scalar * vk = V;
+            scalar * vk1;
 
-            const double r_nrm = out.res_norm.at(it-1);
             axpby(n, one/r_nrm, r, zero, vk); // v[0] <- r / ||r||
 
             // eta.zeros();
@@ -152,7 +166,7 @@ namespace cuddh
 
                 for (int j = 0; j < k1; ++j)
                 {
-                    const double * vj = V + j * n;
+                    const scalar * vj = V + j * n;
                     H(j, k) = dot(n, vk1, vj);
                     axpby(n, -H(j, k), vj, one, vk1); // v[k+1] <- v[k+1] - H(j, k) * v[j]
                 }
@@ -164,7 +178,7 @@ namespace cuddh
 
                 scal(n, one / H(k1, k), vk1); // v[k+1] <- v[k+1] / ||v[k+1]||
 
-                givens_rotations(&H(0, k), cs, sn, k);
+                givens_rotations(&H(0, k), (scalar*)cs, (scalar*)sn, k);
                 eta(k1) = -sn(k) * eta(k);
                 eta(k) = cs(k) * eta(k);
 
@@ -180,19 +194,23 @@ namespace cuddh
             out.num_matvec++;
             axpby(n, one, b, -one, r); // r <- b - r = b - A * x
             
-            out.res_norm.push_back(norm(n, r));
+            r_nrm = norm(n, r);
+            out.res_norm.push_back((double)r_nrm);
+            auto t1 = std::chrono::high_resolution_clock::now();
+            double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
+            out.time.push_back(dur);
 
             if (verbose == 1)
             {
                 ++bar;
-                std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it+1 << " / " << maxit << " || rel. res. = " << std::setw(10) << out.res_norm.back()/bnrm << "\r" << std::flush;
+                std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it+1 << " / " << maxit << " || rel. res. = " << std::setw(10) << r_nrm/bnrm << "\r" << std::flush;
             }
             else if (verbose >= 2)
             {
-                std::cout << "iteration " << std::setw(10) << it+1 << " / " << maxit << " || rel. res. = " << std::setw(10) << out.res_norm.back()/bnrm << std::endl;
+                std::cout << "iteration " << std::setw(10) << it+1 << " / " << maxit << " || rel. res. = " << std::setw(10) << r_nrm/bnrm << std::endl;
             }
 
-            if (out.res_norm.at(it) < tol * bnrm)
+            if (r_nrm < tol * bnrm)
             {
                 out.success = true;
                 break;
@@ -214,6 +232,11 @@ namespace cuddh
         return out;
     }
 
+    solver_out gmres(int n, double * x, const Operator * A, const double * b, int m, int maxit, double tol, int verbose)
+    {
+        return t_gmres<double>(n, x, A, b, m, maxit, tol, verbose);
+    }
+
     solver_out gmres(int n, double * x, const Operator * A, const double * b, const Operator * P, int m, int maxit, double tol, int verbose)
     {
         PreconditionedSystem PA(n, A, P);
@@ -222,6 +245,11 @@ namespace cuddh
         double * d_r0 = r0.device_write();
         P->action(b, d_r0);
 
-        return gmres(n, x, &PA, d_r0, m, maxit, tol, verbose);
+        return t_gmres<double>(n, x, &PA, d_r0, m, maxit, tol, verbose);
+    }
+
+    solver_out gmres(int n, float * x, const SinglePrecisionOperator * A, const float * b, int m, int maxit, float tol, int verbose)
+    {
+        return t_gmres<float>(n, x, A, b, m, maxit, tol, verbose);
     }
 } // namespace cuddh

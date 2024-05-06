@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <iomanip>
+#include <chrono>
 
 #include "Tensor.hpp"
 #include "linalg.hpp"
@@ -16,6 +17,7 @@ namespace cuddh
         int num_iter;
         int num_matvec;
         std::vector<double> res_norm;
+        std::vector<double> time;
     };
 
     /// @brief GMRES(m) for solving A * x == b
@@ -29,8 +31,9 @@ namespace cuddh
     /// @param[in] tol the relative tolerance for an acceptable solution. gmres stops when |A*x-b|/|b| < tol.
     /// @param[in] verbose if verbose == 1, gmres will print progress bar to cout; if verbose >= 2, gmres will print each iteration to cout; if verbose == 0, gmres is silent.
     solver_out gmres(int n, double * x, const Operator * A, const double * b, const Operator * Precond, int m, int maxit, double tol=1e-6, int verbose=0);
-
     solver_out gmres(int n, double * x, const Operator * A, const double * b, int m, int maxit, double tol=1e-6, int verbose=0);
+
+    solver_out gmres(int n, float * x, const SinglePrecisionOperator * A, const float * b, int m, int maxit, float tol=1e-4, int verbose=0);
 } // namespace cuddh
 
 

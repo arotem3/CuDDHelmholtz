@@ -10,3 +10,4 @@ solution
 *.sh
 tmp
 ncu_*
+benchmark*

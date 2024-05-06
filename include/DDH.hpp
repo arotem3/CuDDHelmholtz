@@ -14,9 +14,11 @@
 #include "HostDeviceArray.hpp"
 #include "forall.hpp"
 
+#include "gmres.hpp"
+
 namespace cuddh
 {
-    class DDH : public Operator
+    class DDH : public SinglePrecisionOperator
     {
     public:
         /// @brief initialize domain decomposition Helmholtz approximate solver.
@@ -27,16 +29,26 @@ namespace cuddh
         /// @param ny number of elements in y direction (as given to Mesh2D::uniform_rect)
         DDH(double omega, const double * h_a, const H1Space& fem, int nx, int ny);
 
-        /// @brief y <- A * x where A is the approximate inverse of the
-        /// Helmholtz equation estimated by a few iterations of the domain
-        /// decomposition method.
-        void action(const double * x, double * y) const override;
+        ~DDH() = default;
 
-        /// NOT IMPLEMENTED
-        void action(double c, const double * x, double * y) const override
+        /// return the number of degrees of freedom for the substructured problem.
+        int size() const
         {
-            cuddh_error("DDH::action(c, x, y) is not implemented");
+            return 2 * n_lambda;
         }
+
+        // Compute the right hand side `b` of the substructured problem from the
+        // forcing `f` of the Helmholtz problem (i.e. the right hand side of the
+        // finite element problem).
+        void rhs(const double * f, float * b) const;
+
+        // extract the finite element solution `u` from the solution of the
+        // substructured problem `lambda` and the Helmholtz forcing `f`.
+        void postprocess(const float * lambda, const double * f, double * u) const;
+
+        /// @brief y <- A * x where A is the approximate inverse of the
+        /// Helmholtz equation estimated the domain decomposition method.
+        void action(const float * x, float * y) const override;
 
     private:
         int g_ndof;
@@ -67,9 +79,6 @@ namespace cuddh
         HostDeviceArray<float> _cs; // cos(omega t) on all half time steps
         HostDeviceArray<float> _sn; // sin(omega t) on all half time steps
         HostDeviceArray<float> _a; // variable coefficient a(x)
-
-        mutable HostDeviceArray<float> _g_lambda; // global lambda vector
-        mutable HostDeviceArray<float> _g_update; // global lambda updates
 
         std::unique_ptr<EnsembleSpace> efem;
     };

@@ -1,6 +1,6 @@
 #include "test.hpp"
 
- __host__ __device__ static double func(const double X[2])
+ __device__ static double func(const double X[2])
 {
     const double x = X[0], y = X[1];
     return 3.0 * x * x - 2.0 * x * y + y + 1.0;
