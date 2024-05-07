@@ -2,36 +2,39 @@
 
 using namespace cuddh;
 
-/// @brief non-symmetric tridiagonal toeplitz matrix
-class TestMatrix : public cuddh::Operator
+namespace
 {
-public:
-    TestMatrix(int n_) : _n{n_} {}
-    ~TestMatrix() = default;
-
-    void action(const double * x, double * y) const override
+    /// @brief non-symmetric tridiagonal toeplitz matrix
+    class TestMatrix : public cuddh::Operator
     {
-        const int n = _n;
-        forall(n, [=] __device__ (int i) -> void {
-            constexpr double c[] = {1.0, -3.0, 1.5};
+    public:
+        TestMatrix(int n_) : _n{n_} {}
+        ~TestMatrix() = default;
 
-            if (i == 0)
-                y[0] = c[1] * x[0] + c[2] * x[1];
-            else if (i == n-1)
-                y[n-1] = c[0] * x[n-2] + c[1] * x[n-1];
-            else
-                y[i] = c[0] * x[i-1] + c[1] * x[i] + c[2] * x[i+1];
-        });
-    }
+        void action(const double * x, double * y) const override
+        {
+            const int n = _n;
+            forall(n, [=] __device__ (int i) -> void {
+                constexpr double c[] = {1.0, -3.0, 1.5};
 
-    void action(double c, const double * x, double * y) const override
-    {
-        // not needed
-    }
+                if (i == 0)
+                    y[0] = c[1] * x[0] + c[2] * x[1];
+                else if (i == n-1)
+                    y[n-1] = c[0] * x[n-2] + c[1] * x[n-1];
+                else
+                    y[i] = c[0] * x[i-1] + c[1] * x[i] + c[2] * x[i+1];
+            });
+        }
 
-private:
-    int _n;
-};
+        void action(double c, const double * x, double * y) const override
+        {
+            // not needed
+        }
+
+    private:
+        int _n;
+    };
+}
 
 namespace cuddh_test
 {

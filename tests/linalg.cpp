@@ -95,7 +95,7 @@ namespace cuddh_test
 
     static void t_dot(int& n_test, int& n_passed)
     {
-        const int n = 1000;
+        const int n = 1<<10;
 
         host_device_dvec x(n);
         host_device_dvec y(n);
@@ -122,12 +122,12 @@ namespace cuddh_test
         n_test++;
         if (error < 1e-12)
         {
-            std::cout << "\t[ + ] t_dot test successful." << std::endl;
+            std::cout << "\t[ + ] t_dot() test successful." << std::endl;
             n_passed++;
         }
         else
         {
-            std::cout << "\t[ - ] t_dot test failed.\n\t\tComputed error ~ " << error << "but should have been exact to machine prec." << std::endl;
+            std::cout << "\t[ - ] t_dot() test failed.\n\t\tComputed error ~ " << error << "but should have been exact to machine prec." << std::endl;
         }
     }
 

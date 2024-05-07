@@ -69,20 +69,28 @@
 using namespace cuddh;
 
 /// @brief forcing term, approximate point source
-__device__ static double f(const double X[2])
+__device__ static double f(const double X[2], double omega)
 {
-    constexpr double s = 20; // bigger s --> more localized
-    constexpr double sqrt_pi = 1.772453850905516;
-
-    const double x = X[0]-0.25, y = X[1];
-    double r = x * x + y * y;
-    return (s/sqrt_pi) * std::exp(-(s * s) * r);
+    const double x = X[0], y = X[1];
+    double s = omega * omega;
+    
+    double r = (x+0.5)*(x+0.5) + y * y;
+    double F = s / M_PI * std::exp(-s * r);
+    
+    r = (x-0.5)*(x-0.5) + (y+0.5)*(y+0.5);
+    F += s / M_PI * std::exp(-s * r);
+    return F;
 }
 
 /// @brief a(x) = 1/c(x) where c(x) is the wave-speed.
 __device__ static double a(const double X[2])
 {
-    return 1.0;
+    const double r = X[0]*X[0] + X[1]*X[1];
+    
+    if (r < 0.0625)
+        return 0.2;
+    else
+        return 1.0;
 }
 
 /// @brief projects the coefficient a^2(x) onto the H1Space and a(x) onto the FaceSpace
@@ -90,14 +98,15 @@ static void project_coefficients(const H1Space& fem, const FaceSpace& fs,  doubl
 
 int main()
 {
-    const double omega = 10.0; // Helmholtz frequency
     const int deg = 3; // polynomial degree of basis functions
-    const int nx = 16; // number of elements along each direction. Mesh will have nx^2 elements
+    const int nx = 128; // number of elements along each direction. Mesh will have nx^2 elements
+    const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
     
     const int m = 200; // number of vectors in the Krylov space used in each iteration of GMRES
-    const int maxit = 100; // maximum number of iterations of GMRES
+    const int maxit = 10'000; // maximum number of iterations of GMRES
     const double tol = 1e-6; // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
     const int verbose = 1; // 0: silent, 1: progress bar, 2: one line per iteration
+    const double max_seconds = 2*60*60;
     
     // Assemble the mesh
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
@@ -144,14 +153,22 @@ int main()
     project_coefficients(fem, fs, d_a2, d_a);
 
     LinearFunctional l(fem); // computes integrals: (f, phi)
-    l.action([] __device__ (const double X[2]) -> double {return f(X);}, d_b); // b[i] <- (f, phi[i])
+    l.action([=] __device__ (const double X[2]) -> double {return f(X, omega);}, d_b); // b[i] <- (f, phi[i])
 
     // The operator representing the bilinear form: a([u, v], phi)
     Helmholtz A(omega, d_a2, d_a, fem, fs);
 
     // solve a([u, v], phi) = b(phi)
     std::cout << "\nsolving with GMRES(" << m << ") ... \n";
-    auto out = gmres(N, d_U, &A, d_b, m, maxit, tol, verbose);
+    auto out = gmres(N, d_U, &A, d_b, m, maxit, tol, verbose, max_seconds);
+
+    std::ofstream fout("solution/h_" + std::to_string(nx) + "_" + std::to_string(deg) + ".txt");
+    fout << std::setprecision(10) << std::scientific;
+    for (int i=0; i < out.num_iter; ++i)
+    {
+        fout << out.res_norm.at(i) << " " << out.time.at(i) << "\n";
+    }
+    fout.close();
 
     // copy solution to host
     const double * h_U = U.host_read();

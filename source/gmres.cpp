@@ -89,7 +89,7 @@ namespace cuddh
     };
 
     template <typename scalar,typename OpType>
-    solver_out t_gmres(int n, scalar * x, const OpType * A, const scalar * b, int m, int maxit, scalar tol, int verbose)
+    solver_out t_gmres(int n, scalar * x, const OpType * A, const scalar * b, int m, int maxit, scalar tol, int verbose, double max_seconds)
     {
         constexpr scalar one = 1, zero = 0;
 
@@ -199,6 +199,8 @@ namespace cuddh
             auto t1 = std::chrono::high_resolution_clock::now();
             double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
             out.time.push_back(dur);
+            if (dur > max_seconds)
+                break;
 
             if (verbose == 1)
             {
@@ -232,12 +234,12 @@ namespace cuddh
         return out;
     }
 
-    solver_out gmres(int n, double * x, const Operator * A, const double * b, int m, int maxit, double tol, int verbose)
+    solver_out gmres(int n, double * x, const Operator * A, const double * b, int m, int maxit, double tol, int verbose, double max_seconds)
     {
-        return t_gmres<double>(n, x, A, b, m, maxit, tol, verbose);
+        return t_gmres<double>(n, x, A, b, m, maxit, tol, verbose, max_seconds);
     }
 
-    solver_out gmres(int n, double * x, const Operator * A, const double * b, const Operator * P, int m, int maxit, double tol, int verbose)
+    solver_out gmres(int n, double * x, const Operator * A, const double * b, const Operator * P, int m, int maxit, double tol, int verbose, double max_seconds)
     {
         PreconditionedSystem PA(n, A, P);
         
@@ -245,11 +247,11 @@ namespace cuddh
         double * d_r0 = r0.device_write();
         P->action(b, d_r0);
 
-        return t_gmres<double>(n, x, &PA, d_r0, m, maxit, tol, verbose);
+        return t_gmres<double>(n, x, &PA, d_r0, m, maxit, tol, verbose, max_seconds);
     }
 
-    solver_out gmres(int n, float * x, const SinglePrecisionOperator * A, const float * b, int m, int maxit, float tol, int verbose)
+    solver_out gmres(int n, float * x, const SinglePrecisionOperator * A, const float * b, int m, int maxit, float tol, int verbose, double max_seconds)
     {
-        return t_gmres<float>(n, x, A, b, m, maxit, tol, verbose);
+        return t_gmres<float>(n, x, A, b, m, maxit, tol, verbose, max_seconds);
     }
 } // namespace cuddh

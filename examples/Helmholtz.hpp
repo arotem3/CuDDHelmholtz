@@ -51,6 +51,8 @@ public:
         fs.restrict(u, d_xf);
         H.action(omega, d_xf, d_yf);
         fs.prolong(d_yf, Av);
+        
+        scal(ndof, -1.0, Av); // <- makes system symmetric
     }
 
     /// @brief y[i] <- y[i] + c * a(x, phi[i]) where a(u,v) = (grad u, grad v) - omega^2 (u, v) - i*omega <u, v> 
