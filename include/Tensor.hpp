@@ -5,12 +5,15 @@
 #include <stdexcept>
 #include <memory>
 
+#include <cuda_runtime.h>
+
+#include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
 
 namespace cuddh
 {
     template <typename Size, typename... Sizes>
-    inline int tensor_dims(int * dim, Size s, Sizes... shape)
+    __host__ __device__ inline int tensor_dims(int * dim, Size s, Sizes... shape)
     {
         if (s < 0)
             cuddh_error("Tensor error: tensor cannot have negative dimensions.");
@@ -26,7 +29,7 @@ namespace cuddh
     }
 
     template <typename Ind, typename... Inds>
-    inline int tensor_index(const int * shape, Ind idx, Inds... ids)
+    __host__ __device__ inline int tensor_index(const int * shape, Ind idx, Inds... ids)
     {
         #ifdef CUDDH_DEBUG
         if (idx < 0 || idx >= *shape)
@@ -57,7 +60,7 @@ namespace cuddh
     
     public:
         /// @brief empty tensor
-        TensorWrapper() : _shape{0}, len{0}, ptr(nullptr) {};
+        __host__ __device__ TensorWrapper() : _shape{0}, len{0}, ptr(nullptr) {};
 
         virtual ~TensorWrapper() = default;
         
@@ -75,7 +78,7 @@ namespace cuddh
         /// @param[in] data_ externally managed array
         /// @param[in] ...shape_ shape of array as a sequence of `int`s
         template <typename... Sizes>
-        inline explicit TensorWrapper(scalar * data_, Sizes... shape_) : ptr(data_)
+        __host__ __device__ inline explicit TensorWrapper(scalar * data_, Sizes... shape_) : ptr(data_)
         {
             static_assert(Dim > 0, "Tensor must have a positive number of dimensions");
             static_assert(sizeof...(shape_) == Dim, "Wrong number of dimensions specified.");
@@ -88,7 +91,7 @@ namespace cuddh
         /// @param[in] ...ids indices
         /// @return reference to data at index (`...ids`)
         template <typename... Indices>
-        inline scalar& at(Indices... ids)
+        __host__ __device__ inline scalar& at(Indices... ids)
         {
             static_assert(sizeof...(ids) == Dim, "Wrong number of indices specified.");
 
@@ -105,7 +108,7 @@ namespace cuddh
         /// @param[in] ...ids indices
         /// @return const reference to data at index (`...ids`)
         template <typename... Indices>
-        inline const scalar& at(Indices... ids) const
+        __host__ __device__ inline const scalar& at(Indices... ids) const
         {
             static_assert(sizeof...(ids) == Dim, "Wrong number of indices specified.");
 
@@ -122,7 +125,7 @@ namespace cuddh
         /// @param[in] ...ids indices
         /// @return reference to data at index (`...ids`)
         template <typename... Indices>
-        inline scalar& operator()(Indices... ids)
+        __host__ __device__ inline scalar& operator()(Indices... ids)
         {
             return at(std::forward<Indices>(ids)...);
         }
@@ -132,7 +135,7 @@ namespace cuddh
         /// @param[in] ...ids indices
         /// @return const reference to data at index (`...ids`)
         template <typename... Indices>
-        inline const scalar& operator()(Indices... ids) const
+        __host__ __device__ inline const scalar& operator()(Indices... ids) const
         {
             return at(std::forward<Indices>(ids)...);
         }
@@ -140,7 +143,7 @@ namespace cuddh
         /// @brief linear indexing. read/write access.
         /// @param[in] idx flattened index
         /// @return reference to data at linear index `idx`.
-        inline scalar& operator[](int idx)
+        __host__ __device__ inline scalar& operator[](int idx)
         {
             #ifdef CUDDH_DEBUG
             if (ptr == nullptr)
@@ -155,7 +158,7 @@ namespace cuddh
         /// @brief linear indexing. read only access.
         /// @param[in] idx flattened index
         /// @return const reference to data at linear index `idx`.
-        inline const scalar& operator[](int idx) const
+        __host__ __device__ inline const scalar& operator[](int idx) const
         {
             #ifdef CUDDH_DEBUG
             if (ptr == nullptr)
@@ -169,57 +172,57 @@ namespace cuddh
     
         /// @brief implicit conversion to scalar* where the returned pointer is
         /// the one managed by the tensor.
-        inline operator scalar*()
+        __host__ __device__ inline operator scalar*()
         {
             return ptr;
         }
 
         /// @brief implicit conversion to scalar* where the returned pointer is
         /// the one managed by the tensor.
-        inline operator const scalar*() const
+        __host__ __device__ inline operator const scalar*() const
         {
             return ptr;
         }
 
         /// @brief returns the externally managed array 
-        inline scalar * data()
+         __host__ __device__ inline scalar * data()
         {
             return ptr;
         }
 
         /// @brief returns read-only pointer to the externally managed array
-        inline const scalar * data() const
+        __host__ __device__ inline const scalar * data() const
         {
             return ptr;
         }
     
-        inline scalar * begin()
+        __host__ __device__ inline scalar * begin()
         {
             return ptr;
         }
 
-        inline scalar * end()
+        __host__ __device__ inline scalar * end()
         {
             return ptr + len;
         }
 
-        inline const scalar * begin() const
+        __host__ __device__ inline const scalar * begin() const
         {
             return ptr;
         }
 
-        inline const scalar * end() const
+        __host__ __device__ inline const scalar * end() const
         {
             return ptr + len;
         }
 
         /// @brief returns the shape of the tensor. Has length `Dim` 
-        inline const int * shape() const
+        __host__ __device__ inline const int * shape() const
         {
             return _shape;
         }    
 
-        inline int shape(int d) const
+        __host__ __device__ inline int shape(int d) const
         {
             #ifdef CUDDH_DEBUG
             if (d < 0 || d >= Dim)
@@ -229,27 +232,9 @@ namespace cuddh
         }
     
         /// @brief returns total size of tensor. The product of shape.
-        inline int size() const
+        __host__ __device__ inline int size() const
         {
             return len;
-        }
-    
-        inline void fill(scalar x) requires (!std::is_const_v<scalar>)
-        {
-            for (int i=0; i < len; ++i)
-            {
-                ptr[i] = x;
-            }
-        }
-
-        inline void zeros() requires (!std::is_const_v<scalar>)
-        {
-            fill(0);
-        }
-
-        inline void ones() requires (!std::is_const_v<scalar>)
-        {
-            fill(1);
         }
     };
 
@@ -260,7 +245,7 @@ namespace cuddh
     /// @param[in] data the array
     /// @param[in] ...shape the shape of the tensor
     template <typename scalar, typename... Sizes>
-    inline TensorWrapper<sizeof...(Sizes), scalar> reshape(scalar * data, Sizes... shape)
+    __host__ __device__ inline TensorWrapper<sizeof...(Sizes), scalar> reshape(scalar * data, Sizes... shape)
     {
         return TensorWrapper<sizeof...(Sizes), scalar>(data, shape...);
     }
@@ -272,7 +257,7 @@ namespace cuddh
     /// @param[in] tensor the array
     /// @param[in] ...shape the shape of the tensor
     template <typename scalar, int Dim, typename... Sizes>
-    inline TensorWrapper<sizeof...(Sizes), scalar> reshape(TensorWrapper<Dim, scalar> tensor, Sizes... shape)
+    __host__ __device__ inline TensorWrapper<sizeof...(Sizes), scalar> reshape(TensorWrapper<Dim, scalar> tensor, Sizes... shape)
     {
         return reshape(tensor.data(), std::forward<Sizes>(shape)...);
     }
@@ -336,7 +321,7 @@ namespace cuddh
     };
 
     template <int Dim, typename scalar>
-    Tensor<Dim, scalar>::Tensor(const Tensor<Dim, scalar>& t)
+    Tensor<Dim, scalar>::Tensor(const Tensor<Dim, scalar>& t) : TensorWrapper<Dim, scalar>()
     {
         this->len = 1;
         for (int d = 0; d < Dim; ++d)

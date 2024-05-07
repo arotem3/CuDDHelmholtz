@@ -1,5 +1,11 @@
 #include "Mesh2D.hpp"
 
+template <typename Map, typename Key>
+static bool contains(const Map & map, Key key)
+{
+    return map.find(key) != map.end();
+}
+
 namespace cuddh
 {
     Mesh2D Mesh2D::from_vertices(int nx, const double * x_, int nel, const int * elems_)
@@ -72,7 +78,7 @@ namespace cuddh
                 const int C1 = elems(l2, el);
 
                 const int k = key(C0, C1);
-                if (not edge_map.contains(k))
+                if (not contains(edge_map, k))
                 {
                     const double * x0 = x_ + 2*C0;
                     const double * x1 = x_ + 2*C1;
@@ -165,13 +171,13 @@ namespace cuddh
     }
 
     template <typename EvalMetric>
-    static void set_element_metric(std::unique_ptr<double[]>& metric_, int dim, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
+    static void set_element_metric(host_device_dvec& metric_, int dim, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
     {
         const int m = quad.size();
         const int nel = mesh.n_elem();
 
-        metric_.reset(new double[dim * m * m * nel]);
-        auto metric = reshape(metric_.get(), dim, m, m, nel);
+        metric_.resize(dim * m * m * nel);
+        auto metric = reshape(metric_.host_write(), dim, m, m, nel);
 
         double xi[2];
 
@@ -190,44 +196,44 @@ namespace cuddh
         }
     }
 
-    const double * Mesh2D::ElementMetricCollection::jacobians() const
+    const double * Mesh2D::ElementMetricCollection::jacobians(MemorySpace m) const
     {
-        if (not J)
+        if (J.size() == 0)
         {
             set_element_metric(J, 4, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {elem->jacobian(xi, metric);});
         }
 
-        return J.get();
+        return J.read(m);
     }
 
-    const double * Mesh2D::ElementMetricCollection::measures() const
+    const double * Mesh2D::ElementMetricCollection::measures(MemorySpace m) const
     {
-        if (not detJ)
+        if (detJ.size() == 0)
         {
             set_element_metric(detJ, 1, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {*metric = elem->measure(xi);});
         }
 
-        return detJ.get();
+        return detJ.read(m);
     }
 
-    const double * Mesh2D::ElementMetricCollection::physical_coordinates() const
+    const double * Mesh2D::ElementMetricCollection::physical_coordinates(MemorySpace m) const
     {
-        if (not x)
+        if (x.size() == 0)
         {
             set_element_metric(x, 2, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {elem->physical_coordinates(xi, metric);});
         }
 
-        return x.get();
+        return x.read(m);
     }
 
     template <typename EvalMetric>
-    static void set_edge_metric(std::unique_ptr<double[]>& metric_, int dim, FaceType edge_type, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
+    static void set_edge_metric(host_device_dvec& metric_, int dim, FaceType edge_type, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
     {
         const int m = quad.size();
         const int ne = mesh.n_edges(edge_type);
 
-        metric_.reset(new double[dim * m * ne]);
-        auto metric = reshape(metric_.get(), dim, m, ne);
+        metric_.resize(dim * m * ne);
+        auto metric = reshape(metric_.host_write(), dim, m, ne);
 
         for (int e = 0; e < ne; ++e)
         {
@@ -243,13 +249,13 @@ namespace cuddh
     }
 
     template <typename EvalMetric>
-    static void set_edge_metric(std::unique_ptr<double[]>& metric_, int dim, const_ivec_wrapper faces, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
+    static void set_edge_metric(host_device_dvec& metric_, int dim, const_ivec_wrapper faces, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
     {
         const int m = quad.size();
         const int ne = faces.size();
 
-        metric_.reset(new double[dim * m * ne]);
-        auto metric = reshape(metric_.get(), dim, m, ne);
+        metric_.resize(dim * m * ne);
+        auto metric = reshape(metric_.host_write(), dim, m, ne);
 
         for (int e = 0; e < ne; ++e)
         {
@@ -263,9 +269,9 @@ namespace cuddh
         }
     }
 
-    const double * Mesh2D::EdgeMetricCollection::measures() const
+    const double * Mesh2D::EdgeMetricCollection::measures(MemorySpace m) const
     {
-        if (not detJ)
+        if (detJ.size() == 0)
         {
             auto eval = [](double* metric, const Edge * E, double xi) -> void {*metric = E->measure(xi);};
             if (face_subset)
@@ -274,12 +280,12 @@ namespace cuddh
                 set_edge_metric(detJ, 1, edge_type, mesh, quad, eval);
         }
 
-        return detJ.get();
+        return detJ.read(m);
     }
 
-    const double * Mesh2D::EdgeMetricCollection::physical_coordinates() const
+    const double * Mesh2D::EdgeMetricCollection::physical_coordinates(MemorySpace m) const
     {
-        if (not x)
+        if (x.size() == 0)
         {
             auto eval = [](double * metric, const Edge * E, double xi) -> void {E->physical_coordinates(xi, metric);};
             if (face_subset)
@@ -288,12 +294,12 @@ namespace cuddh
                 set_edge_metric(x, 2, edge_type, mesh, quad, eval);
         }
 
-        return x.get();
+        return x.read(m);
     }
 
-    const double * Mesh2D::EdgeMetricCollection::normals() const
+    const double * Mesh2D::EdgeMetricCollection::normals(MemorySpace m) const
     {
-        if (not n)
+        if (n.size() == 0)
         {
             auto eval = [](double * metric, const Edge * E, double xi) -> void {E->normal(xi, metric);};
             if (face_subset)
@@ -302,7 +308,7 @@ namespace cuddh
                 set_edge_metric(n, 2, edge_type, mesh, quad, eval);
         }
 
-        return n.get();
+        return n.read(m);
     }
 
     double Mesh2D::min_h() const
@@ -337,7 +343,7 @@ namespace cuddh
     const Mesh2D::ElementMetricCollection& Mesh2D::element_metrics(const QuadratureRule& quad) const
     {
         auto id = quad.name();
-        if (not elem_collections.contains(id))
+        if (not contains(elem_collections, id))
         {
             elem_collections.insert({id, ElementMetricCollection(*this, quad)});
         }
@@ -350,7 +356,7 @@ namespace cuddh
         auto& collection = (edge_type == FaceType::INTERIOR) ? interior_edge_collections : boundary_edge_collections;
 
         auto id = quad.name();
-        if (not collection.contains(id))
+        if (not contains(collection, id))
         {
             collection.insert({id, EdgeMetricCollection(*this, edge_type, quad)});
         }

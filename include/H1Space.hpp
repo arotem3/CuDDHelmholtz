@@ -8,6 +8,9 @@
 #include "Basis.hpp"
 #include "Operator.hpp"
 
+#include "HostDeviceArray.hpp"
+#include "forall.hpp"
+
 namespace cuddh
 {
     /// @brief abstract representation of H1 finite element space on a mesh of
@@ -28,9 +31,9 @@ namespace cuddh
         /// @brief returns the inidices of the global degrees of freedom from
         /// element local indicies.
         /// The output has shape (n_basis, n_basis, n_elem).
-        const_icube_wrapper global_indices() const
+        const_icube_wrapper global_indices(MemorySpace m) const
         {
-            return const_icube_wrapper(I.data(), n_basis, n_basis, n_elem);
+            return reshape(_I.read(m), n_basis, n_basis, n_elem);
         }
 
         /// @brief returns a reference to the mesh
@@ -45,10 +48,11 @@ namespace cuddh
             return _basis;
         }
 
-        /// @brief returns the physical coordinates corresponding to collocation point of each nodal DOF 
-        const_dmat_wrapper physical_coordinates() const
+        /// @brief returns the physical coordinates corresponding to collocation
+        /// point of each nodal DOF. The output has shape (2, ndof).
+        const_dmat_wrapper physical_coordinates(MemorySpace m) const
         {
-            return reshape(xy.data(), 2, ndof);
+            return reshape(_xy.read(m), 2, ndof);
         }
 
     private:
@@ -56,9 +60,10 @@ namespace cuddh
         const int n_basis;
         const Mesh2D& _mesh;
         const Basis& _basis;
-        icube I;
         int ndof;
-        dmat xy;
+
+        host_device_ivec _I;
+        host_device_dvec _xy;
     };
 
     /// @brief abstract representation of a subspace of an H1Space spanned by
@@ -81,38 +86,44 @@ namespace cuddh
         }
 
         /// @brief returns the face indices of the faces in the space 
-        const_ivec_wrapper faces() const
+        const_ivec_wrapper faces(MemorySpace m) const
         {
-            return reshape(_faces.data(), _n_faces);
+            return reshape(_faces.read(m), _n_faces);
         }
 
         /// @brief returns the indices of the FaceSpace degrees of freedom
         /// corresponding to the local face indices. Specifically,
         /// subspace_indices(i, f) is the subspace index of the i-th basis
         /// function on face f. These indices range from 0 to this->size()-1.
-        const_imat_wrapper subspace_indices() const
+        const_imat_wrapper subspace_indices(MemorySpace m) const
         {
-            return reshape(I.data(), n_basis, _n_faces);
+            return reshape(_I.read(m), n_basis, _n_faces);
         }
 
         /// @brief returns the indicies of the global degrees of freedom in the
         /// H1Space relative to the FaceSpace. that is, global_indicies(i) is
         /// the index in H1Space corresponding to the i-th FaceSpace degree of
         /// freedom.
-        const_ivec_wrapper global_indices() const
+        const_ivec_wrapper global_indices(MemorySpace m) const
         {
-            return reshape(proj.data(), ndof);
+            return reshape(_proj.read(m), ndof);
         }
 
         /// @brief project H1Space vector to FaceSpace vector
-        /// @param x H1Space vector
-        /// @param y FaceSpace vector
+        /// @param x DEVICE. H1Space vector
+        /// @param y DEVICE. FaceSpace vector
         void restrict(const double * x, double * y) const;
 
         /// @brief Transpose of restrict. Extend FaceSpace vector to H1Space
-        /// @param x FaceSpace vector
-        /// @param y H1Space vector. On exit, y <- y + P' * x where P is the restriction operator.
+        /// @param x DEVICE. FaceSpace vector
+        /// @param y DEVICE. H1Space vector. On exit, y <- y + P' * x where P is the restriction operator.
         void prolong(const double * x, double * y) const;
+
+        /// @brief Project H1Space space vector to orthogonal complement of
+        /// FaceSpace. I.e. set face values to zero.
+        /// @param x DEVICE. H1Space vector. On exit, x <- x - P' * P * x where
+        /// P is the restriction operator and P' is prolongation operator.
+        void orth(double * x) const;
 
         /// @brief returns the global H1Space
         const H1Space& h1_space() const
@@ -129,31 +140,11 @@ namespace cuddh
         const int n_basis;
         int ndof;
 
-        ivec proj;
-        imat I;
-        ivec _faces;
+        host_device_ivec _I;
+        host_device_ivec _faces;
+        host_device_ivec _proj;
 
         mutable std::unordered_map<std::string, Mesh2D::EdgeMetricCollection> _metrics;
-    };
-
-    /// @brief projects an H1Space vector to H1_0
-    class H1_0
-    {
-    public:
-        /// @brief initialize projector
-        /// @param fs FaceSpace of all boundary Dirichlet faces
-        H1_0(const FaceSpace& fs) : I{fs.global_indices()} {}
-
-        /// @brief projects an H1Space vector onto the H1_0 inplace. 
-        void action(double * y) const
-        {
-            const int ndof = I.size();
-            for (int i = 0; i < ndof; ++i)
-                y[I(i)] = 0.0;
-        }
-
-    private:
-        const_ivec_wrapper I;
     };
 } // namespace cuddh
 

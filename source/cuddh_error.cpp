@@ -2,8 +2,9 @@
 
 namespace cuddh
 {
-    void cuddh_error(const std::string& msg)
+    __host__ __device__ void cuddh_error(const char * msg)
     {
-        throw std::runtime_error(msg);
+        printf("--- CUDDH ERROR ---\n\t%s\n-------------------\n", msg);
+        assert(0);
     }
 } // namespace cuddh

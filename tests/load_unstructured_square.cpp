@@ -9,7 +9,10 @@ namespace cuddh_test
         std::string dir = "meshes/unstructured_square";
         std::ifstream info(dir + "/info.txt");
         if (not info)
-            cuddh_error("cuddh_test::load_unstructured_square() error: cannot open file: " + dir + "/info.txt");
+        {
+            std::string err = "cuddh_test::load_unstructured_square() error: cannot open file: " + dir + "/info.txt";
+            cuddh_error(err.c_str());
+        }
 
         int n_pts, n_elem;
         info >> n_pts >> n_elem;
@@ -20,7 +23,10 @@ namespace cuddh_test
 
         std::ifstream coo(dir + "/coordinates.txt");
         if (not coo)
-            cuddh_error("cuddh_test::load_unstructured_square() error: cannot open file: " + dir + "/coordinates.txt");
+        {
+            std::string err = "cuddh_test::load_unstructured_square() error: cannot open file: " + dir + "/coordinates.txt";
+            cuddh_error(err.c_str());
+        }
 
         for (int i = 0; i < n_pts; ++i)
         {
@@ -30,7 +36,10 @@ namespace cuddh_test
 
         std::ifstream elements(dir + "/elements.txt");
         if (not coo)
-            cuddh_error("cuddh_test::load_unstructured_square() error: cannot open file: " + dir + "/elements.txt");
+        {
+            std::string err = "cuddh_test::load_unstructured_square() error: cannot open file: " + dir + "/elements.txt";
+            cuddh_error(err.c_str());
+        }
 
         for (int i = 0; i < n_elem; ++i)
         {

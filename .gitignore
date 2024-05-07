@@ -7,3 +7,7 @@ libcuddh.a
 .DS_Store
 *.py
 solution
+*.sh
+tmp
+ncu_*
+benchmark*

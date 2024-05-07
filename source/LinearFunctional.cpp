@@ -2,32 +2,38 @@
 
 namespace cuddh
 {
-    LinearFunctional::LinearFunctional(const H1Space& fem)
-        : n_elem{fem.mesh().n_elem()},
+    LinearFunctional::LinearFunctional(const H1Space& fem_)
+        : fem{fem_},
+          ndof{fem.size()},
+          n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
-          quad{fem.basis().quadrature()},
+          n_quad{n_basis},
           fast{true},
-          I(fem.global_indices(), n_basis, n_basis, n_elem)
-    {
-        auto& metrics = fem.mesh().element_metrics(quad);
-        detJ = reshape(metrics.measures(), n_basis, n_basis, n_elem);
-        x = reshape(metrics.physical_coordinates(), 2, n_basis, n_basis, n_elem);
-    }
+          metrics{fem.mesh().element_metrics(fem.basis().quadrature())},
+          _w(n_quad)
+{
+    auto& quad = fem.basis().quadrature();
 
-    LinearFunctional::LinearFunctional(const H1Space& fem, const QuadratureRule& quad_)
-        : n_elem{fem.mesh().n_elem()},
+    double * h_w = _w.host_write();
+    for (int i = 0; i < n_quad; ++i)
+        h_w[i] = quad.w(i);
+}
+
+    LinearFunctional::LinearFunctional(const H1Space& fem_, const QuadratureRule& quad)
+        : fem{fem_},
+          ndof{fem.size()},
+          n_elem{fem.mesh().n_elem()},
           n_basis{fem.basis().size()},
-          quad{quad_},
+          n_quad{quad.size()},
           fast{false},
-          I(fem.global_indices(), n_basis, n_basis, n_elem),
-          P(quad.size(), n_basis)
+          metrics{fem.mesh().element_metrics(quad)},
+          _w(n_quad),
+          _P(n_quad * n_basis)
     {
-        const int n_quad = quad.size();
+        fem.basis().eval(n_quad, quad.x(), _P.host_write());
 
-        fem.basis().eval(n_quad, quad.x(), P);
-        
-        auto& metrics = fem.mesh().element_metrics(quad);
-        detJ = reshape(metrics.measures(), n_quad, n_quad, n_elem);
-        x = reshape(metrics.physical_coordinates(), 2, n_quad, n_quad, n_elem);
+        double * h_w = _w.host_write();
+        for (int i = 0; i < n_quad; ++i)
+            h_w[i] = quad.w(i);
     }
 } // namespace cuddh

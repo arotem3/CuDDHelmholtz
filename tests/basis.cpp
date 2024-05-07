@@ -74,10 +74,15 @@ namespace cuddh_test
             }
 
             n_tests++;
-            if (max_error > 1e-10)
-                std::cout << "\tt_basis(): Basis of degree " << n-1 << " produced incorrect derivative matrix.\n";
-            else
+            if (max_error < 1e-10)
+            {
+                std::cout << "\t[ + ] t_basis(" << n << ") derivative test successful." << std::endl;
                 n_passed++;
+            }
+            else
+            {
+                std::cout << "\t[ - ] t_basis(" << n << ") derivative test failed.\n\t\tComputed derivative had error ~ " << max_error << "but should have been exact to machine prec." << std::endl;
+            }
             
             dmat P(m, n);
             b.eval(m, x, P);
@@ -96,10 +101,15 @@ namespace cuddh_test
             }
 
             n_tests++;
-            if (max_error > 1e-10)
-                std::cout << "\tt_basis(): Basis of degree " << n-1 << " produced incorrect interpolation matrix.\n";
-            else
+            if (max_error < 1e-10)
+            {
+                std::cout << "\t[ + ] t_basis(" << n << ") evaluation test successful." << std::endl;
                 n_passed++;
+            }
+            else
+            {
+                std::cout << "\t[ - ] t_basis(" << n << ") evaluation test failed.\n\t\tInterpolation had error ~ " << max_error << "but should have been exact to machine prec." << std::endl;
+            }
         }
     }
 } // namespace cuddh_test

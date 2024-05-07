@@ -9,6 +9,8 @@
 #include "Element.hpp"
 #include "QuadratureRule.hpp"
 
+#include "HostDeviceArray.hpp"
+
 namespace cuddh
 {
     /// @brief The 2D mesh.
@@ -28,23 +30,23 @@ namespace cuddh
 
             /// returns an array of the element jacobians evaluated on a quadrature rule.
             /// The output J has shape (2, 2, n, n, n_elem).
-            const double * jacobians() const;
+            const double * jacobians(MemorySpace m) const;
             
             /// returns an array of the element measures ie the determinant of the
             /// jacobians evaluated on a quadrature rule. The output detJ has shape (n, n, n_elem).
-            const double * measures() const;
+            const double * measures(MemorySpace m) const;
             
             /// returns an array of the physical coordinates of the quadrature rule on
             /// every element. The output x has shape (2, n, n, n_elem).
-            const double * physical_coordinates() const;
+            const double * physical_coordinates(MemorySpace m) const;
 
         private:
             const Mesh2D& mesh;
-            const QuadratureRule& quad;
+            QuadratureRule quad;
 
-            mutable std::unique_ptr<double[]> J;
-            mutable std::unique_ptr<double[]> detJ;
-            mutable std::unique_ptr<double[]> x;
+            mutable host_device_dvec J;
+            mutable host_device_dvec detJ;
+            mutable host_device_dvec x;
         };
 
         /// @brief manages arrays of element metric information
@@ -63,28 +65,28 @@ namespace cuddh
 
             /// return an array of the edge measures on the quadrature rule for edges of
             /// the requested types. The output has shape (n, n_edges).
-            const double * measures() const;
+            const double * measures(MemorySpace m) const;
 
             /// returns an array of the physical coordinates of the quadrature rule on
             /// every edge of the requested type. The output has shape (2, n, n_edges)
-            const double * physical_coordinates() const;
+            const double * physical_coordinates(MemorySpace m) const;
 
             /// returns an array of the normal derivatives of all of the edges of the
             /// requested FaceType evaluated on the quadrature rule. The output has shape
             /// (2, n, n_edges).
-            const double * normals() const;
+            const double * normals(MemorySpace m) const;
 
         private:
             const Mesh2D& mesh;
-            const QuadratureRule& quad;
+            QuadratureRule quad;
             const FaceType edge_type;
 
             const bool face_subset;
             const_ivec_wrapper _faces;
 
-            mutable std::unique_ptr<double[]> detJ;
-            mutable std::unique_ptr<double[]> x;
-            mutable std::unique_ptr<double[]> n;
+            mutable host_device_dvec detJ;
+            mutable host_device_dvec x;
+            mutable host_device_dvec n;
         };
 
         /// @brief constructs empty mesh
@@ -298,11 +300,11 @@ namespace cuddh
 
     inline Mesh2D::ElementMetricCollection::ElementMetricCollection(const Mesh2D& mesh_, const QuadratureRule& quad_) : mesh(mesh_), quad{quad_} {}
 
-    inline Mesh2D::ElementMetricCollection::ElementMetricCollection(ElementMetricCollection&& a) : mesh(a.mesh), quad{a.quad}, J(std::move(a.J)), detJ(std::move(a.detJ)), x(std::move(a.x)) {}
+    inline Mesh2D::ElementMetricCollection::ElementMetricCollection(ElementMetricCollection&& a) : mesh(a.mesh), quad(std::move(a.quad)), J(std::move(a.J)), detJ(std::move(a.detJ)), x(std::move(a.x)) {}
 
     inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(const Mesh2D& mesh_, const FaceType edge_type_, const QuadratureRule& quad_) : mesh(mesh_), quad{quad_}, edge_type(edge_type_), face_subset{false}, _faces() {}
 
-    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(EdgeMetricCollection&& a) : mesh(a.mesh), quad{a.quad}, edge_type(a.edge_type), face_subset{a.face_subset}, _faces(std::move(a._faces)), detJ(std::move(a.detJ)), x(std::move(a.x)), n(std::move(a.n)) {}
+    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(EdgeMetricCollection&& a) : mesh(a.mesh), quad(std::move(a.quad)), edge_type(a.edge_type), face_subset{a.face_subset}, _faces(std::move(a._faces)), detJ(std::move(a.detJ)), x(std::move(a.x)), n(std::move(a.n)) {}
 
     inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(const Mesh2D& mesh_, int n_faces, const int * faces, const QuadratureRule& quad_) : mesh{mesh_}, quad{quad_}, edge_type{FaceType::INTERIOR}, face_subset{true}, _faces(faces, n_faces) {}
 

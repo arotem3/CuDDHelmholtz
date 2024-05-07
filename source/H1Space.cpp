@@ -1,5 +1,11 @@
 #include "H1Space.hpp"
 
+template <typename Map, typename Key>
+static bool contains(const Map & map, Key key)
+{
+    return map.find(key) != map.end();
+}
+
 namespace cuddh
 {
     H1Space::H1Space(const Mesh2D& mesh_, const Basis& basis_)
@@ -7,8 +13,10 @@ namespace cuddh
           n_basis{basis_.size()},
           _mesh{mesh_},
           _basis{basis_},
-          I(n_basis, n_basis, n_elem)
+          _I(n_basis * n_basis * n_elem)
     {
+        icube_wrapper I(_I.host_write(), n_basis, n_basis, n_elem);
+
         std::unordered_map<int, int> mask;
         
         const int n_edges = _mesh.n_edges(FaceType::INTERIOR);
@@ -85,7 +93,7 @@ namespace cuddh
         int l = 0;
         for (int i = 0; i < N; ++i)
         {
-            if (not mask.contains(i))
+            if (not contains(mask, i))
             {
                 I[i] = l;
                 ++l;
@@ -97,7 +105,9 @@ namespace cuddh
             I[v1] = I[v0];
         }
 
-        xy.reshape(2, ndof);
+        _xy.resize(2 * ndof);
+        auto xy = reshape(_xy.host_write(), 2, ndof);
+
         for (int el = 0; el < n_elem; ++el)
         {
             const Element * elem = _mesh.element(el);
@@ -120,13 +130,18 @@ namespace cuddh
         : fem{fem_},
           _n_faces{nf},
           n_basis{fem.basis().size()},
-          I(n_basis, nf),
+          _I(n_basis * nf),
           _faces(nf)
     {
-        for (int i = 0; i < nf; ++i)
-            _faces(i) = faces_[i];
+        auto F = reshape(_faces.host_write(), nf);
+        auto I = reshape(_I.host_write(), n_basis, nf);
 
-        auto K = fem.global_indices();
+        for (int i = 0; i < nf; ++i)
+            F(i) = faces_[i];
+
+        const Mesh2D& mesh = fem.mesh();
+        const int n_elem = mesh.n_elem();
+        auto K = reshape(fem.global_indices(MemorySpace::HOST), n_basis, n_basis, n_elem);
 
         std::unordered_map<int, int> mask; // unique mapping from global DOFs to restricted DOFs
         std::vector<int> P;
@@ -144,7 +159,7 @@ namespace cuddh
         int l = 0;
         for (int f = 0; f < nf; ++f)
         {
-            const Edge * edge = fem.mesh().edge(_faces(f));
+            const Edge * edge = mesh.edge(F(f));
             const int el = edge->elements[0];
             const int s = edge->sides[0];
 
@@ -152,7 +167,7 @@ namespace cuddh
             {
                 const int idx = K[E2V(i, s, el)];
 
-                if (not mask.contains(idx))
+                if (not contains(mask, idx))
                 {
                     mask[idx] = l;
                     P.push_back(idx);
@@ -165,32 +180,51 @@ namespace cuddh
 
         ndof = mask.size();
 
-        proj.reshape(ndof);
+        _proj.resize(ndof);
+        auto proj = reshape(_proj.host_write(), ndof);
         for (int i = 0; i < ndof; ++i)
             proj(i) = P.at(i);
     }
 
-    void FaceSpace::restrict(const double * x, double * y) const
+    void FaceSpace::restrict(const double * __restrict__ x, double * __restrict__ y) const
     {
-        for (int i = 0; i < ndof; ++i)
+        const int n = ndof;
+        auto proj = global_indices(MemorySpace::DEVICE);
+
+        forall(n, [=] __device__ (int i) -> void
+        {
             y[i] = x[proj(i)];
+        });
     }
 
-    void FaceSpace::prolong(const double * x, double * y) const
+    void FaceSpace::prolong(const double * __restrict__ x, double * __restrict__ y) const
     {
-        for (int i = 0; i < ndof; ++i)
+        const int n = ndof;
+        auto proj = global_indices(MemorySpace::DEVICE);
+
+        forall(n, [=] __device__ (int i) -> void
+        {
             y[proj(i)] += x[i];
+        });
+    }
+
+    void FaceSpace::orth(double * x) const
+    {
+        auto proj = global_indices(MemorySpace::DEVICE);
+
+        forall(ndof, [=] __device__ (int i) -> void
+        {
+            x[proj(i)] = 0.0;
+        });
     }
 
     const Mesh2D::EdgeMetricCollection& FaceSpace::metrics(const QuadratureRule& quad) const
     {
         auto key = quad.name();
-        if (not _metrics.contains(key))
+        if (not contains(_metrics, key))
         {
-            _metrics.insert({key, Mesh2D::EdgeMetricCollection(fem.mesh(), _n_faces, _faces, quad)});
+            _metrics.insert({key, Mesh2D::EdgeMetricCollection(fem.mesh(), _n_faces, _faces.host_read(), quad)});
         }
         return _metrics.at(key);
     }
-
-    
 } // namespace cuddh

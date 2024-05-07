@@ -21,6 +21,12 @@ namespace cuddh
             GaussLobatto
         };
 
+        QuadratureRule();
+        QuadratureRule(const QuadratureRule&) = default;
+        QuadratureRule(QuadratureRule&&) = default;
+        QuadratureRule& operator=(const QuadratureRule&) = default;
+        QuadratureRule& operator=(QuadratureRule&&) = default;
+
         /// @brief initialize a quadrature rule with n points of type Guass-Lobatto or Gauss-Legendre
         QuadratureRule(int n, QuadratureType type=GaussLobatto);
 
@@ -64,8 +70,8 @@ namespace cuddh
         }
 
     private:
-        const int _n;
-        const QuadratureType _type;
+        int _n;
+        QuadratureType _type;
         dvec _x;
         dvec _w;
     };

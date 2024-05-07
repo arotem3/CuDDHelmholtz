@@ -63,15 +63,15 @@ public:
 private:
     const int ndof;
     StiffnessMatrix a;
-    H1_0 pr;
+    const FaceSpace& fs;
 };
 
-static double f(const double X[2])
+__device__ static double f(const double X[2])
 {
     return 1.0;
 }
 
-static double g(const double X[2])
+__device__ static double g(const double X[2])
 {
     const double x = X[0], y = X[1];
     if (std::abs(x - 1.0) < 1e-12)
@@ -89,6 +89,7 @@ int main()
     const int gmres_m = 20; // number of vectors in the Krylov space used in each iteration of GMRES
     const int gmres_maxit = 20; // maximum number of iterations of GMRES
     const double gmres_tol = 1e-6; // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
+    const int gmres_verbose = 1; // 0: silent, 1: progress bar, 2: one line per iteration
     
     // Assemble the mesh
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
@@ -105,73 +106,89 @@ int main()
     std::cout << "Solving the Poisson equation...\n"
               << "\t#elements = " << mesh.n_elem() << "\n"
               << "\tpolynomial degree = " << deg << "\n"
-              << "\t#dof = " << ndof << "\n"
-              << "\tgmres m = " << gmres_m << "\n";
+              << "\t#dof = " << ndof << "\n";
 
     // identify the boundary faces in the mesh in order to define the FaceSpace
     // and FaceMassMatrix
     ivec boundary_faces = mesh.boundary_edges();
 
     // The FaceSpace is a subspace of the H1Space used to identify the degrees
-    // of freedom needed in the computation of trace terms: <u, phi>
+    // of freedom needed on the boundary of the domain. In particular, we use
+    // this object to restrict the solution to H1_0.
     FaceSpace fs(fem, boundary_faces.size(), boundary_faces);
     const int fdof = fs.size();
 
-    dvec u(ndof); // the solution vector
-    dvec b(ndof); // the right hand side: (f, phi) - (grad g, grad phi)
+    // To manage memory between host and device, we use the HostDeviceArray class.
+    host_device_dvec _u(ndof);
+    host_device_dvec _b(ndof);
+    host_device_dvec _G(ndof);
+
+    host_device_dvec _q(fdof);
+    host_device_dvec _y(fdof);
+
+    double * u = _u.device_write(); // the solution vector
+    double * b = _b.device_write(); // the right hand side: (f, phi) - (grad g, grad phi)
+    double * q = _q.device_write(); // projection of g onto face space
+    double * y = _y.device_write(); // <g, phi>
+    double * G = _G.device_write(); // the extension of q to H1
 
     // linear system
     Poisson A(fem, fs);
 
     // set up right hand side
     LinearFunctional l(fem);
-    l.action(1.0, f, b); // (f, phi)
+    l.action(1.0, [] __device__ (const double X[2]) -> double {return f(X);}, b); // (f, phi)
+    fs.orth(b); // zero out boundary terms
 
+    // We project g onto the FaceSpace by solving <q, phi> = <g, phi> for the projection q.
     FaceLinearFunctional fl(fs);
-    dvec q(fdof);
-    dvec y(fdof); // (g, phi)
-    fl.action(1.0, g, y);
+    fl.action([] __device__ (const double X[2]) -> double {return g(X);}, y); // y <- <g, phi>
 
     FaceMassMatrix m(fs);
-    DiagInvFaceMassMatrix p(fs);
-    auto out = gmres(fdof, q, &m, y, &p, 10, 10, 1e-12);
+    DiagInvFaceMassMatrix p(fs); // we can precondition the solve with a diagonal approximate inverse.
+    auto out = gmres(fdof, q, &m, y, &p, 5, 10, 1e-12); // solve <q, phi> = <g, phi>
 
-    dvec G(ndof);
-    fs.prolong(q, G); // G
+    fs.prolong(q, G); // extend q to H1
 
-    A.action(-1.0, G, b); // b <- b + (grad G, grad phi)
-
-    // dummy preconditioner
-    Identity Id(ndof);
+    A.action(-1.0, G, b); // b <- b - (grad G, grad phi)
 
     // solve for u
-    out = gmres(ndof, u, &A, b, &Id, gmres_m, gmres_maxit, gmres_tol, 1);
+    std::cout << "\nsolving with GMRES(" << gmres_m << ") ... \n";
+    out = gmres(ndof, u, &A, b, gmres_m, gmres_maxit, gmres_tol, gmres_verbose);
 
     // add G to u
-    for (int i = 0; i < ndof; ++i)
-        u[i] += G[i];
+    axpby(ndof, 1.0, G, 1.0, u); // u <- u + G
+
+    // copy to host
+    const double * h_u = _u.host_read();
 
     // save solution and collocation nodes to file
-    auto xy = fem.physical_coordinates();
-    to_file("solution/xy.0000", 2*ndof, xy);
-    to_file("solution/poisson.0000", ndof, u);
+    auto xy = fem.physical_coordinates(MemorySpace::HOST);
+    
+    const char xy_file[] = "solution/xy.0000";
+    const char sol_file[] = "solution/poisson.0000";
+    to_file(xy_file, 2*ndof, xy);
+    to_file(sol_file, ndof, h_u);
+
+    std::cout << "\nSolution written to: " << sol_file
+              << "\nCoordinates written to: " << xy_file << "\n";
 
     return 0;
 }
 
-Poisson::Poisson(const H1Space& fem, const FaceSpace& fs)
+Poisson::Poisson(const H1Space& fem, const FaceSpace& fs_)
     : ndof{fem.size()},
       a(fem),
-      pr(fs) {}
+      fs{fs_} {}
 
 void Poisson::action(double c, const double * x, double * y) const
 {
     a.action(c, x, y);
-    pr.action(y);
+    fs.orth(y);
 }
 
 void Poisson::action(const double * x, double * y) const
 {
     a.action(x, y);
-    pr.action(y);
+    fs.orth(y);
 }

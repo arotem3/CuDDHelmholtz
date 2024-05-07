@@ -1,61 +1,77 @@
 #include "test.hpp"
 
-/// @brief non-symmetric tridiagonal toeplitz matrix
-class TestMatrix : public cuddh::Operator
+using namespace cuddh;
+
+namespace
 {
-public:
-    TestMatrix(int n_) : n{n_} {}
-    ~TestMatrix() = default;
-
-    void action(const double * x, double * y) const override
+    /// @brief non-symmetric tridiagonal toeplitz matrix
+    class TestMatrix : public cuddh::Operator
     {
-        constexpr double c[] = {1.0, -3.0, 1.5};
+    public:
+        TestMatrix(int n_) : _n{n_} {}
+        ~TestMatrix() = default;
 
-        y[0] = c[1] * x[0] + c[2] * x[1];
-        for (int i = 1; i < n-1; ++i)
+        void action(const double * x, double * y) const override
         {
-            y[i] = c[0] * x[i-1] + c[1] * x[i] + c[2] * x[i+1];
+            const int n = _n;
+            forall(n, [=] __device__ (int i) -> void {
+                constexpr double c[] = {1.0, -3.0, 1.5};
+
+                if (i == 0)
+                    y[0] = c[1] * x[0] + c[2] * x[1];
+                else if (i == n-1)
+                    y[n-1] = c[0] * x[n-2] + c[1] * x[n-1];
+                else
+                    y[i] = c[0] * x[i-1] + c[1] * x[i] + c[2] * x[i+1];
+            });
         }
-        y[n-1] = c[0] * x[n-2] + c[1] * x[n-1];
-    }
 
-    void action(double c, const double * x, double * y) const override
-    {
-        // not needed
-    }
+        void action(double c, const double * x, double * y) const override
+        {
+            // not needed
+        }
 
-private:
-    int n;
-};
+    private:
+        int _n;
+    };
+}
 
 namespace cuddh_test
 {
     void t_gmres(int& n_test, int& n_passed)
     {
-        const int n = 1000;
+        const int n = 1<<10;
 
-        cuddh::dvec x(n);
+        host_device_dvec _x(n);
+
+        dvec_wrapper h_x(_x.host_write(), n);
         for (int i = 0; i < n; ++i)
-            x(i) = (double)rand() / RAND_MAX;
+            h_x(i) = (double)rand() / RAND_MAX;
 
-        cuddh::dvec y(n);
+        host_device_dvec _y(n);
+        double * y = _y.device_write();
+
+        double * x = _x.device_read_write();
 
         TestMatrix a(n);
-        a.action(x, y);
+        a.action(x, y); // y <- A * random
 
-        x.zeros();
+        zeros(n, x);
 
-        cuddh::Identity P(n);
-
-        const int m = 50;
+        const int m = 5;
         const int maxit = 100;
         const double tol = 1e-10;
-        auto out = cuddh::gmres(n, x, &a, y, &P, m, maxit, tol);
+        auto out = cuddh::gmres(n, x, &a, y, m, maxit, tol);
 
         n_test++;
-        if (not out.success)
-            std::cout << "\tt_gmres(): gmres failed to solve linear system. Final residual = " << out.res_norm.back() << "\n";
-        else
+        if (out.success)
+        {
+            std::cout << "\t[ + ] t_gmres() test successful." << std::endl;
             n_passed++;
+        }
+        else
+        {
+            std::cout << "\t[ - ] t_gmres() test failed.\n\t\tFinal residual ~ " << out.res_norm.back() << " > specified tol. (" << tol << ")" << std::endl;
+        }
     }
 } // namespace cuddh_test

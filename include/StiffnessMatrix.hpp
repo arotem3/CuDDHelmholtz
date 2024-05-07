@@ -3,6 +3,7 @@
 
 #include "Operator.hpp"
 #include "H1Space.hpp"
+#include "linalg.hpp"
 
 namespace cuddh
 {
@@ -24,16 +25,17 @@ namespace cuddh
         void action(const double * x, double * y) const override;
 
     private:
+        const H1Space& fem;
+
         const int ndof;
         const int n_elem;
         const int n_basis;
         const int n_quad;
 
-        dmat P;
-        dmat D;
+        host_device_dvec _P;
+        host_device_dvec _D;
 
-        Tensor<4, double> G;
-        const_icube_wrapper I;
+        host_device_dvec _G;
     };
 } // namespace cuddh
 

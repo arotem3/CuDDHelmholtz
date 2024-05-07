@@ -1,6 +1,6 @@
 #include "test.hpp"
 
-static double func(const double X[2])
+ __device__ static double func(const double X[2])
 {
     const double x = X[0], y = X[1];
     return 3.0 * x * x - 2.0 * x * y + y + 1.0;
@@ -12,53 +12,74 @@ namespace cuddh_test
 {
     void t_mass(int& n_test, int& n_passed, const Mesh2D& mesh, const Basis& basis, const QuadratureRule& quad, const std::string& test_name)
     {
+        constexpr double tol = 1e-8;
         const int n_elem = mesh.n_elem();
         const int n_basis = basis.size();
 
         H1Space fem(mesh, basis);
         const int ndof = fem.size();
 
-        dvec u(ndof);
-        dvec f(ndof);
+        host_device_dvec _u(ndof);
+        host_device_dvec _f(ndof);
+        host_device_dvec _b(ndof);
+        host_device_dvec _Mf(ndof);
+        
+        double * u = _u.device_write(); // projected func
+        double * f = _f.device_write(); // interpolated values of func
+        double * b = _b.device_write(); // (f, phi)
+        double * Mf = _Mf.device_write(); // mass matrix times f
 
+        auto X = fem.physical_coordinates(MemorySpace::DEVICE);
+
+        // evaluate f on nodes
+        forall(ndof, [=] __device__ (int i) -> void
+        {
+            double xy[2];
+            xy[0] = X(0, i);
+            xy[1] = X(1, i);
+            f[i] = func(xy);
+        });
+        
+        // evaluate (f, phi)
         LinearFunctional l(fem, quad);
-        l.action(1.0, func, f);
+        l.action([] __device__ (double X[2]) {return func(X);}, b);
 
         MassMatrix m(fem);
         DiagInvMassMatrix p(fem);
 
-        const int gmres_m = 20;
-        const int maxiter = 10;
-        const double tol = 1e-12;
-        auto out = gmres(ndof, u, &m, f, &p, gmres_m, maxiter, tol);
+        m.action(f, Mf);
 
-        // verify correctness
-        auto I = fem.global_indices();
-        auto x = reshape(mesh.element_metrics(basis.quadrature()).physical_coordinates(), 2, n_basis, n_basis, n_elem);
-
-        double max_err = 0.0;
-        for (int el = 0; el < n_elem; ++el)
-        {
-            for (int j = 0; j < n_basis; ++j)
-            {
-                for (int i = 0; i < n_basis; ++i)
-                {
-                    double xij[2];
-                    xij[0] = x(0, i, j, el);
-                    xij[1] = x(1, i, j, el);
-
-                    double fij = func(xij);
-                    double err = u[I(i, j, el)] - fij;
-                    max_err = std::max(std::abs(err), max_err);
-                }
-            }
-        }
+        double err = dist(ndof, Mf, b) / cuddh::norm(ndof, b);
 
         n_test++;
-        if (max_err > 1e-8)
-            std::cout << "\tt_mass(): test \"" << test_name << "\" failed with error " << max_err << "\n";
-        else
+        if (err < tol)
+        {
+            std::cout << "\t[ + ] t_mass(" << test_name << ") forward error test successful." << std::endl;
             n_passed++;
+        }
+        else
+        {
+            std::cout << "\t[ - ] t_mass(" << test_name << ") test failed.\n\t\tForward error ~ " << err << " > tol (" << tol << ")" << std::endl;
+        }
+        
+        // solve for u
+        const int gmres_m = 5;
+        const int maxiter = 10;
+        const double gmres_tol = 1e-12;
+        auto out = gmres(ndof, u, &m, b, &p, gmres_m, maxiter, gmres_tol);
+
+        err = dist(ndof, u, f) / cuddh::norm(ndof, f);
+
+        n_test++;
+        if (err < tol)
+        {
+            std::cout << "\t[ + ] t_mass(" << test_name << ") backward error test successful." << std::endl;
+            n_passed++;
+        }
+        else
+        {
+            std::cout << "\t[ - ] t_mass(" << test_name << ") backward error test failed.\n\t\tBackward error ~ " << err << "> tol (" << tol << ")" << std::endl;
+        }
     }
 
     void t_mass(int& n_test, int& n_passed)

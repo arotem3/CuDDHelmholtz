@@ -16,26 +16,13 @@ namespace cuddh
         virtual void action(const double * x, double * y) const = 0;
     };
 
-    class Identity : public Operator
+    class SinglePrecisionOperator
     {
     public:
-        Identity(int n_) : n{n_} {}
-        ~Identity() = default;
+        SinglePrecisionOperator() = default;
+        virtual ~SinglePrecisionOperator() = default;
 
-        void action(double c, const double * x, double * y) const override
-        {
-            for (int i = 0; i < n; ++i)
-                y[i] += c * x[i];
-        }
-
-        void action(const double * x, double * y) const override
-        {
-            for (int i = 0; i < n; ++i)
-                y[i] = x[i];
-        }
-
-    private:
-        const int n;
+        virtual void action(const float * x, float * y) const = 0;
     };
 } // namespace cuddh
 

@@ -5,8 +5,8 @@
  * @details This file is a driver for solving the Helmholtz equation with
  * approximate absorbing boundary conditions:
  *
- *      -div(grad U) - omega^2 U == f    in  D := [-1, 1]x[-1, 1]
- *      i omega U + dU/dn == 0           on boundary of D
+ *      -div(grad U) - omega^2 a^2(x) U == f    in  D := [-1, 1]x[-1, 1]
+ *      i a(x) omega U + dU/dn == 0             on boundary of D
  *
  * Here omega is the frequency. We assume f is real valued, and U is complex
  * valued.
@@ -17,8 +17,8 @@
  *
  * The bilinear form a is defined as
  *
- *      a([u, v], phi) = [ (grad u, grad phi) - omega^2 (u, phi) - omega <v, phi>;
- *                         (grad v, grad phi) - omega^2 (v, phi) + omega <u, phi> ]
+ *      a([u, v], phi) = [ (grad u, grad phi) - omega^2 (a^2(x) u, phi) - omega <a(x) v, phi>;
+ *                         (grad v, grad phi) - omega^2 (a^2(x) v, phi) + omega <a(x) u, phi> ]
  *
  * And the linear operator b is defined b(phi) = [ (f, phi); 0 ]
  * 
@@ -28,12 +28,12 @@
  *      S.action(c, x, y); // y[i] <- y[i] + c * (grad x, grad phi[i]) where phi[i] is the i-th basis function
  *      
  *      MassMatrix M;
- *      M.action(c, x, y); // y[i] <- y[i] + c * (x, phi[i])
+ *      M.action(c, x, y); // y[i] <- y[i] + c * (a(x)^2 x, phi[i])
  *      
  *      FaceMassMatrix H;
- *      H.action(c, x, y); // y[i] <- y[i] + c * <x, phi[i]>
+ *      H.action(c, x, y); // y[i] <- y[i] + c * <a(x)  x, phi[i]>
  * 
- * The bilinear form combines these operations in the Helmholtz class.
+ * The Helmholtz class combines these operations to define the bilinear form a(*,*).
  * 
  * To compile & run this program:
  *  (1) From the CuDDHelmholtz directory, compile the library:
@@ -64,59 +64,49 @@
 
 #include "cuddh.hpp"
 #include "examples.hpp"
+#include "Helmholtz.hpp"
 
 using namespace cuddh;
 
-/// @brief FEM discretization of the Helmholtz equation -div(grad u) - omega^2 u == f
-/// with boundary conditions: du/dn + i omega u == 0.
-class Helmholtz : public Operator
-{
-public:
-    Helmholtz(double omega, const H1Space& fem, const FaceSpace& fs);
-
-    /// @brief y[i] = a(x, phi[i]) where a(u,v) = (grad u, grad v) - omega^2 (u, v) - i*omega <u, v> 
-    /// @param x the real and imaginary part of the solution
-    /// @param y on exit y[i] <- a(x, v[i]) for each v
-    void action(const double * x, double * y) const;
-
-    /// @brief y[i] <- y[i] + c * a(x, phi[i]) where a(u,v) = (grad u, grad v) - omega^2 (u, v) - i*omega <u, v> 
-    /// @param c
-    /// @param x the real and imaginary part of the solution
-    /// @param y on exit y[i] <- a(x, v[i]) for each v
-    void action(double c, const double * x, double * y) const;
-
-private:
-    const double omega;
-    const int ndof;
-    
-    const H1Space& fem;
-    const FaceSpace& fs;
-    
-    StiffnessMatrix S;
-    MassMatrix M;
-    FaceMassMatrix H;
-    
-    mutable dvec xf;
-    mutable dvec yf;
-};
-
-/// @brief forcing term
-static double f(const double X[2])
+/// @brief forcing term, approximate point source
+__device__ static double f(const double X[2], double omega)
 {
     const double x = X[0], y = X[1];
-    double r = x * x + y * y;
-    return 20 * std::exp(-400 * r);
+    double s = omega * omega;
+    
+    double r = (x+0.5)*(x+0.5) + y * y;
+    double F = s / M_PI * std::exp(-s * r);
+    
+    r = (x-0.5)*(x-0.5) + (y+0.5)*(y+0.5);
+    F += s / M_PI * std::exp(-s * r);
+    return F;
 }
+
+/// @brief a(x) = 1/c(x) where c(x) is the wave-speed.
+__device__ static double a(const double X[2])
+{
+    const double r = X[0]*X[0] + X[1]*X[1];
+    
+    if (r < 0.0625)
+        return 0.2;
+    else
+        return 1.0;
+}
+
+/// @brief projects the coefficient a^2(x) onto the H1Space and a(x) onto the FaceSpace
+static void project_coefficients(const H1Space& fem, const FaceSpace& fs,  double * a2x, double * ax);
 
 int main()
 {
-    const double omega = 10.0; // Helmholtz frequency
     const int deg = 3; // polynomial degree of basis functions
-    const int nx = 15; // number of elements along each direction. Mesh will have nx^2 elements
+    const int nx = 128; // number of elements along each direction. Mesh will have nx^2 elements
+    const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
     
     const int m = 200; // number of vectors in the Krylov space used in each iteration of GMRES
-    const int maxit = 20; // maximum number of iterations of GMRES
+    const int maxit = 10'000; // maximum number of iterations of GMRES
     const double tol = 1e-6; // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
+    const int verbose = 1; // 0: silent, 1: progress bar, 2: one line per iteration
+    const double max_seconds = 2*60*60;
     
     // Assemble the mesh
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
@@ -134,8 +124,7 @@ int main()
               << "\tomega = " << omega << "\n"
               << "\t#elements = " << mesh.n_elem() << "\n"
               << "\tpolynomial degree = " << deg << "\n"
-              << "\t#dof = " << ndof << "\n"
-              << "\tgmres m = " << m << "\n";
+              << "\t#dof = " << 2 * ndof << "\n";
 
     // identify the boundary faces in the mesh in order to define the FaceSpace
     // and FaceMassMatrix
@@ -144,72 +133,86 @@ int main()
     // The FaceSpace is a subspace of the H1Space used to identify the degrees
     // of freedom needed in the computation of trace terms: <u, phi>
     FaceSpace fs(fem, boundary_faces.size(), boundary_faces);
+    const int fdof = fs.size();
 
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
 
-    dvec U(N); // the solution vector [u; v]
-    dvec b(N); // the right hand side b(phi)
+    // To manage memory between host and device, we use the HostDeviceArray class.
+    host_device_dvec U(N);
+    host_device_dvec b(N);
+    host_device_dvec a2x(ndof);
 
-    LinearFunctional l(fem); // computes projections like (f, phi)
-    dvec_wrapper bu(b.data(), ndof); // bu <- (f, phi)
-    l.action(1.0, f, bu); // bu[i] <- (f, phi[i])
+    host_device_dvec ax(fdof);
+    
+    double * d_U = U.device_write(); // the solution vector [u; v]
+    double * d_b = b.device_write(); // the right hand side b(phi)
+    double * d_a2 = a2x.device_write(); // a^2(x) projected onto H1Space
+    
+    double * d_a = ax.device_write(); // a(x) projected onto FaceSpace
+    
+    project_coefficients(fem, fs, d_a2, d_a);
+
+    LinearFunctional l(fem); // computes integrals: (f, phi)
+    l.action([=] __device__ (const double X[2]) -> double {return f(X, omega);}, d_b); // b[i] <- (f, phi[i])
 
     // The operator representing the bilinear form: a([u, v], phi)
-    Helmholtz A(omega, fem, fs);
-
-    // dummy preconditioner
-    Identity Id(N);
+    Helmholtz A(omega, d_a2, d_a, fem, fs);
 
     // solve a([u, v], phi) = b(phi)
-    auto out = gmres(N, U, &A, b, &Id, m, maxit, tol, 1);
+    std::cout << "\nsolving with GMRES(" << m << ") ... \n";
+    auto out = gmres(N, d_U, &A, d_b, m, maxit, tol, verbose, max_seconds);
+
+    std::ofstream fout("solution/h_" + std::to_string(nx) + "_" + std::to_string(deg) + ".txt");
+    fout << std::setprecision(10) << std::scientific;
+    for (int i=0; i < out.num_iter; ++i)
+    {
+        fout << out.res_norm.at(i) << " " << out.time.at(i) << "\n";
+    }
+    fout.close();
+
+    // copy solution to host
+    const double * h_U = U.host_read();
 
     // save solution and collocation nodes to file
-    auto xy = fem.physical_coordinates();
-    to_file("solution/xy.0000", N, xy);
-    to_file("solution/helmholtz.0000", N, U);
+    auto xy = fem.physical_coordinates(MemorySpace::HOST);
+
+    const char xy_file[] = "solution/xy.0000";
+    const char sol_file[] = "solution/helmholtz.0000";
+    to_file(xy_file, N, xy);
+    to_file(sol_file, N, h_U);
+
+    std::cout << "\nSolution written to: " << sol_file
+              << "\nCoordinates written to: " << xy_file << "\n";
 
     return 0;
 }
 
-Helmholtz::Helmholtz(double w, const H1Space& fem_, const FaceSpace& fs_)
-    : omega{w},
-      ndof{fem_.size()},
-      fem{fem_},
-      fs{fs_},
-      S(fem),
-      M(fem),
-      H(fs),
-      xf(fs.size()),
-      yf(fs.size()) {}
-
-void Helmholtz::action(double c, const double * x, double * y) const
+void project_coefficients(const H1Space& fem, const FaceSpace& fs,  double * a2x, double * ax)
 {
-    const double * u = x;
-    const double * v = x + ndof;
-    double * Au = y;
-    double * Av = y + ndof;
+    int n_basis = fem.basis().size();
+    QuadratureRule q(2 * n_basis, QuadratureRule::GaussLegendre);
+
+    int ndof = fem.size();
+    host_device_dvec pa2(ndof);
+
+    double * d_pa2 = pa2.device_write();
     
-    S.action(1.0, u, Au);
-    S.action(1.0, v, Av);
+    MassMatrix m(fem);
+    DiagInvMassMatrix mi(fem);
+    LinearFunctional l(fem, q);
 
-    M.action(-omega*omega, u, Au);
-    M.action(-omega*omega, v, Av);
+    l.action([] __device__ (const double X[2]) -> double {double aX = a(X); return aX*aX;}, d_pa2);
+    gmres(ndof, a2x, &m, d_pa2, &mi, 5, 10, 1e-12);
 
-    yf.zeros();
-    fs.restrict(v, xf);
-    H.action(-omega, xf, yf);
-    fs.prolong(yf, Au);
+    int fdof = fs.size();
+    host_device_dvec pa(fdof);
 
-    yf.zeros();
-    fs.restrict(u, xf);
-    H.action(omega, xf, yf);
-    fs.prolong(yf, Av);
-}
+    double * d_pa = pa.device_write();
 
-void Helmholtz::action(const double * x, double * y) const
-{
-    const int N = 2 * ndof;
-    for (int i = 0; i < N; ++i)
-        y[i] = 0.0;
-    action(1.0, x, y);
+    FaceMassMatrix fm(fs);
+    DiagInvFaceMassMatrix fmi(fs);
+    FaceLinearFunctional fl(fs, q);
+
+    fl.action([] __device__ (const double X[2]) -> double {return a(X);}, d_pa);
+    gmres(fdof, ax, &fm, d_pa, &fmi, 5, 10, 1e-12);
 }
