@@ -1,25 +1,30 @@
-##### --- examples --- #####
+cmake_minimum_required(VERSION 3.18)
 
-##### DDH #####
-add_executable(DDH DDH.cpp)
-target_compile_options(DDH PRIVATE -x=cu -dc)
-target_link_libraries(DDH PUBLIC cuddh)
-add_custom_command(TARGET DDH POST_BUILD COMMAND ${CMAKE_COMMAND} -E make_directory ../solution)
+# Set include directories
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+)
 
-##### Helmholtz #####
-add_executable(Helmholtz Helmholtz.cpp)
-target_compile_options(Helmholtz PRIVATE -x=cu -dc)
-target_link_libraries(Helmholtz PUBLIC cuddh)
-add_custom_command(TARGET Helmholtz POST_BUILD COMMAND ${CMAKE_COMMAND} -E make_directory ../solution)
+# Gather all .cpp files in the examples directory
+file(GLOB_RECURSE EXAMPLE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 
-##### Poisson #####
-add_executable(Poisson Poisson.cpp)
-target_compile_options(Poisson PRIVATE -x=cu -dc)
-target_link_libraries(Poisson PUBLIC cuddh)
-add_custom_command(TARGET Poisson POST_BUILD COMMAND ${CMAKE_COMMAND} -E make_directory ../solution)
+# Create an executable for each .cpp file
+foreach(EXAMPLE_FILE ${EXAMPLE_SOURCES})
+    # Get the filename without directory and extension
+    get_filename_component(EXAMPLE_NAME ${EXAMPLE_FILE} NAME_WE)
 
-##### WaveHoltz #####
-add_executable(WaveHoltz WaveHoltz.cpp)
-target_compile_options(WaveHoltz PRIVATE -x=cu -dc)
-target_link_libraries(WaveHoltz PUBLIC cuddh)
-add_custom_command(TARGET WaveHoltz POST_BUILD COMMAND ${CMAKE_COMMAND} -E make_directory ../solution)
+    # Add executable target
+    add_executable(${EXAMPLE_NAME} ${EXAMPLE_FILE})
+
+    # Set the source file to be treated as CUDA code
+    set_source_files_properties(${EXAMPLE_FILE} PROPERTIES LANGUAGE CUDA)
+
+    # Link against cuddh
+    target_link_libraries(${EXAMPLE_NAME} PRIVATE cuddh)
+
+    # Add post-build command to create the ../solution directory
+    add_custom_command(TARGET ${EXAMPLE_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_SOURCE_DIR}/../solution
+    )
+endforeach()

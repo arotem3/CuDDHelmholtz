@@ -1,12 +1,16 @@
 #include "test.hpp"
 
+#ifndef UNSTRUCTURED_SQUARE_MESH_DIR
+#error "UNSTRUCTURED_SQUARE_MESH_DIR is not defined: this should be defined by the build system"
+#endif
+
 using namespace cuddh;
 
 namespace cuddh_test
 {
     Mesh2D load_unstructured_square()
     {
-        std::string dir = "meshes/unstructured_square";
+        std::string dir = UNSTRUCTURED_SQUARE_MESH_DIR;
         std::ifstream info(dir + "/info.txt");
         if (not info)
         {

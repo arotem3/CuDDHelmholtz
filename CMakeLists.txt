@@ -1,56 +1,60 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.18)
 
+# Project setup
 project(cuddh LANGUAGES CXX CUDA)
 
-configure_file(config.in include/cuddh_config.hpp)
-
-set(CMAKE_CXX_COMPILER nvcc)
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --std=c++17 --extended-lambda -arch=sm_80 --compiler-options -Wall,-Wextra,-Wno-unused-parameter,-Wunused-variable")
 
-# LAPACK -- something funny is happening here with find package
-# find_package(LAPACK REQUIRED)
-# find_package(BLAS REQUIRED)
+# CUDA settings
+set(CMAKE_CUDA_ARCHITECTURES 86)
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --extended-lambda --compiler-options -Wall,-Wextra,-Wno-unused-parameter,-Wunused-variable")
 
-# specify which version of waveDG to make
-option(CUDDH_DEBUG "compiles library in debug mode and add extra checks for correctness (like index bounds, etc.)")
-option(CUDDH_LOG_MEMCPY "HostDeviceArray will log every cuda memcpy to stdout")
+# Options
+option(CUDDH_DEBUG "Enable debug mode" OFF)
+option(CUDDH_LOG_MEMCPY "Enable logging of memory copies" OFF)
 
-if (CUDDH_DEBUG)
-    add_compile_options(-g)
+# Set compile options based on CUDDH_DEBUG
+if(CUDDH_DEBUG)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -g")
 else()
-    add_compile_options(-O3)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
 endif()
 
-add_library(
-    cuddh STATIC
-    
-    cuddh.hpp
-    
-    source/Basis.cpp
-    source/cuddh_error.cpp
-    source/DDH.cpp
-    source/Element.cpp
-    source/EnsembleSpace.cpp
-    source/FaceLinearFunctional.cpp
-    source/FaceMassMatrix.cpp
-    source/gmres.cpp
-    source/H1Space.cpp
-    source/linalg.cpp
-    source/LinearFunctional.cpp
-    source/MassMatrix.cpp
-    source/Mesh2D.cpp
-    source/QuadratureRule.cpp
-    source/StiffnessMatrix.cpp
+# Output configuration file
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/config.in
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/cuddh_config.hpp
+    @ONLY
 )
 
-target_compile_options(cuddh PRIVATE -x=cu -dc)
-target_include_directories(cuddh PUBLIC . include)
+# Include directories
+include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
 
-target_link_options(cuddh PUBLIC -llapack -lblas) # temp fix
-# target_link_libraries(cuddh PUBLIC ${LAPACK_LIBRARIES})
+# Library setup
+file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/source/*.cpp)
+set_source_files_properties(${SOURCES} PROPERTIES LANGUAGE CUDA)
+add_library(cuddh STATIC ${SOURCES})
 
-set_target_properties(cuddh PROPERTIES PUBLIC_HEADER cuddh.hpp)
+# Find and link LAPACK
+find_package(LAPACK REQUIRED)
+if(LAPACK_FOUND)
+    message(STATUS "Found LAPACK: ${LAPACK_LIBRARIES}")
+    target_link_libraries(cuddh PRIVATE ${LAPACK_LIBRARIES})
+else()
+    message(FATAL_ERROR "LAPACK not found")
+endif()
 
+# Specify the public header
+set_target_properties(cuddh PROPERTIES PUBLIC_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/include/cuddh.hpp)
+
+# Subdirectories
 add_subdirectory(tests)
 add_subdirectory(examples)
