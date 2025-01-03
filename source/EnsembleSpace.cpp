@@ -8,69 +8,78 @@ static bool contains(const Map & map, Key key)
 
 namespace cuddh
 {
-    EnsembleSpace::EnsembleSpace(const H1Space& fem, int n_spaces_, const int * element_labels)
-        : n_spaces{n_spaces_},
-          n_basis{fem.basis().size()},
-          s_dof(n_spaces),
-          s_elems(n_spaces),
-          s_faces(n_spaces),
-          s_fdof(n_spaces)
+    static auto compute_subspace_elements(int nel, int n_spaces, const int *element_labels)
     {
-        auto& mesh = fem.mesh();
-        const int nel = mesh.n_elem();
-
-        auto h_s_elems = reshape(s_elems.host_write(), n_spaces);
-        auto h_s_faces = reshape(s_faces.host_write(), n_spaces);
-        auto h_s_dof = reshape(s_dof.host_write(), n_spaces);
-        auto h_s_fdof = reshape(s_fdof.host_write(), n_spaces);
-
-        // determine elements in each subspace
         std::vector<std::vector<int>> E(n_spaces); // elements
-        ivec el2s(nel); // maps global element index to subspace element index
+
         for (int el = 0; el < nel; ++el)
         {
             const int p = element_labels[el];
             if (p < 0 || p >= n_spaces)
                 cuddh_error("EnsembleSpace error: an element was illogically labeled.");
             E.at(p).push_back(el);
-            el2s(el) = E.at(p).size()-1;
         }
 
-        int min_elems = 1;
-        mx_elems = 0;
-        for (int p = 0; p < n_spaces; ++p)
-        {
-            const int n = E.at(p).size();
-            min_elems = std::min(min_elems, n);
-            mx_elems = std::max(mx_elems, n);
-            h_s_elems(p) = n;
-        }
+        return E;
+    }
 
-        if (min_elems < 1)
-            cuddh_error("EnsembleSpace error: atleast one space is empty");
-        
-        // sI maps element local indices in subspace (with respect to subspace
-        // element index) to subspace degree of freedom.
-        sI.resize(n_basis * n_basis * mx_elems * n_spaces);
-        auto h_sI = reshape(sI.host_write(), n_basis, n_basis, mx_elems, n_spaces);
-        std::fill(h_sI.begin(), h_sI.end(), -1);
-        
-        // maps subspace element index to global element index
-        elems.resize(mx_elems * n_spaces);
-        auto h_elems = reshape(elems.host_write(), mx_elems, n_spaces);
-        std::fill(h_elems.begin(), h_elems.end(), -1);
-        
+    static ivec global_element_to_subspace_element(int nel, const std::vector<std::vector<int>> &E)
+    {
+        ivec el2s(nel); // maps global element index to subspace element index
+        const int n_spaces = E.size();
+
         for (int p = 0; p < n_spaces; ++p)
         {
-            auto& _elems = E.at(p);
-            const int n = h_s_elems(p);
+            auto &elems = E.at(p);
+            const int n = elems.size();
             for (int i = 0; i < n; ++i)
             {
-                h_elems(i, p) = _elems.at(i);
+                el2s(elems.at(i)) = i;
             }
         }
 
-        // determine faces in each subspace
+        return el2s;
+    }
+
+    static int set_subdomain_num_elements(ivec_wrapper &h_s_elems, const std::vector<std::vector<int>> &E)
+    {
+        int mx = 0;
+        int mn = 1;
+
+        int n_spaces = E.size();
+        for (int p = 0; p < n_spaces; ++p)
+        {
+            const int n = E.at(p).size();
+            h_s_elems(p) = n;
+            mx = std::max(mx, n);
+            mn = std::min(mn, n);
+        }
+
+        if (mn < 1)
+            cuddh_error("EnsembleSpace error: atleast one space is empty");
+
+        return mx;
+    }
+
+    static void set_subdomain_elements(imat_wrapper &h_elems, const std::vector<std::vector<int>> &E)
+    {
+        const int n_spaces = E.size();
+
+        std::fill(h_elems.begin(), h_elems.end(), -1);
+
+        for (int p = 0; p < n_spaces; ++p)
+        {
+            auto &elems = E.at(p);
+            const int n = elems.size();
+            for (int i = 0; i < n; ++i)
+            {
+                h_elems(i, p) = elems.at(i);
+            }
+        }
+    }
+
+    static auto compute_subdomain_boundary_faces(const Mesh2D &mesh, int n_spaces, const int *element_labels)
+    {
         std::vector<std::vector<std::pair<int,int>>> F(n_spaces); // faces in each subspace
         std::vector<std::array<int,4>> shared_faces; // {subdomain0, subdomain1, subdomain face index0, ..face..1}
         const int g_faces = mesh.n_edges(); // global number of faces
@@ -106,103 +115,140 @@ namespace cuddh
             }
         }
 
-        mx_faces = 0;
+        return std::make_pair(std::move(F), std::move(shared_faces));
+    }
+
+    static int set_subdomain_num_boundary_faces(ivec_wrapper &h_s_faces, const std::vector<std::vector<std::pair<int,int>>> &F)
+    {
+        const int n_spaces = F.size();
+
+        int mx = 0;
         for (int p = 0; p < n_spaces; ++p)
         {
             const int n = F.at(p).size();
-            mx_faces = std::max(mx_faces, n);
             h_s_faces(p) = n;
+            mx = std::max(mx, n);
         }
 
-        // fI maps the face local indices (with respect to subdomain face index)
-        // to face space degrees of freedom
-        fI.resize(n_basis * mx_faces * n_spaces);
-        auto h_fI = reshape(fI.host_write(), n_basis, mx_faces, n_spaces);
-        std::fill(h_fI.begin(), h_fI.end(), -1);
+        return mx;
+    }
 
-        _faces.resize(mx_faces * n_spaces);
-        auto h_faces = reshape(_faces.host_write(), mx_faces, n_spaces);
+    static void set_subdomain_face_indices(imat_wrapper &h_faces, const std::vector<std::vector<std::pair<int,int>>> &F)
+    {
+        const int n_spaces = F.size();
         std::fill(h_faces.begin(), h_faces.end(), -1);
 
-        imat face_side(mx_faces, n_spaces);
-        std::fill(face_side.begin(), face_side.end(), -1);
-
         for (int p = 0; p < n_spaces; ++p)
         {
-            const int n = h_s_faces(p);
+            auto &Fp = F.at(p);
+            const int n = Fp.size();
             for (int i = 0; i < n; ++i)
             {
-                auto [f, side] = F.at(p).at(i);
+                auto [f, side] = Fp.at(i);
                 h_faces(i, p) = f;
-                face_side(i, p) = side;
             }
         }
+    }
 
-        // determine the mapping from subspace indices to global indices.
+    static auto set_subdomain_dof_indices(TensorWrapper<4,int> &h_sI, const H1Space &fem, const std::vector<std::vector<int>> &E)
+    {
+        const int n_spaces = E.size();
+        const int n_basis = fem.basis().size();
+
+        std::fill(h_sI.begin(), h_sI.end(), -1);
+
         std::vector<std::vector<int>> s2g(n_spaces); // subspace index to global index
         auto g_inds = fem.global_indices(MemorySpace::HOST); // global element indices
-        mx_ndof = 0;
+
         for (int p = 0; p < n_spaces; ++p)
         {
-            std::unordered_map<int, int> s_unique;
-            auto& s_s2g = s2g.at(p);
+            std::unordered_map<int, int> unique; // global index to subspace index
+            auto &s2g_p = s2g.at(p);
+
+            auto& subdomain_elements = E.at(p);
+            const int n = subdomain_elements.size();
 
             int l = 0; // running index of subspace indices
-            const int n = h_s_elems(p);
             for (int el = 0; el < n; ++el)
             {
-                const int g_el = h_elems(el, p); // global element label
+                const int g_el = subdomain_elements.at(el); // global element label
                 for (int j = 0; j < n_basis; ++j)
                 {
                     for (int i = 0; i < n_basis; ++i)
                     {
                         const int g_idx = g_inds(i, j, g_el); // global index
-                        if (not contains(s_unique, g_idx))
+                        if (not contains(unique, g_idx))
                         {
-                            s_unique[g_idx] = l;
-                            s_s2g.push_back(g_idx);
+                            unique[g_idx] = l;
+                            s2g_p.push_back(g_idx);
                             ++l;
                         }
 
-                        h_sI(i, j, el, p) = s_unique[g_idx];
+                        h_sI(i, j, el, p) = unique[g_idx];
                     }
                 }
             }
-
-            const int ndof = s_unique.size(); // number of DOFs in subspace
-            mx_ndof = std::max(mx_ndof, ndof);
-            h_s_dof(p) = ndof;
         }
-        
-        // maps subspace indices to global indices
-        gI.resize(mx_ndof * n_spaces);
-        auto h_gI = reshape(gI.host_write(), mx_ndof, n_spaces);
+
+        return s2g;
+    }
+
+    static int set_subspace_sizes(ivec_wrapper &h_s_dof, const std::vector<std::vector<int>> &s2g)
+    {
+        const int n_spaces = s2g.size();
+
+        int mx = 0;
+        for (int p = 0; p < n_spaces; ++p)
+        {
+            const int n = s2g.at(p).size();
+            h_s_dof(p) = n;
+            mx = std::max(mx, n);
+        }
+
+        return mx;
+    }
+
+    static void set_global_indices(imat_wrapper &h_gI, const std::vector<std::vector<int>> &s2g)
+    {
+        const int n_spaces = s2g.size();
+
         std::fill(h_gI.begin(), h_gI.end(), -1);
 
         for (int p = 0; p < n_spaces; ++p)
         {
             auto& s_s2g = s2g.at(p);
-            const int n = h_s_dof(p);
+            const int n = s_s2g.size();
             for (int i = 0; i < n; ++i)
             {
                 h_gI(i, p) = s_s2g.at(i);
             }
         }
+    }
 
-        // determine the mapping from subdomain face space indices to subspace indices
+    static auto compute_subdomain_fdof_indices(TensorWrapper<3, int> &h_fI, const H1Space &fem, const std::vector<std::vector<std::pair<int, int>>> &F, const ivec &el2s, const TensorWrapper<4, int> &h_sI)
+    {
+        const Mesh2D &mesh = fem.mesh();
+
+        const int n_spaces = F.size();
+        const int n_basis = fem.basis().size();
+
+        std::fill(h_fI.begin(), h_fI.end(), -1);
+
         std::vector<std::vector<int>> f2s(n_spaces);
-        mx_fdof = 0;
         for (int p = 0; p < n_spaces; ++p)
         {
             std::unordered_map<int, int> s_unique; // unique face indices
             auto& s_f2s = f2s.at(p);
 
+            auto &Fp = F.at(p);
+            const int nf = Fp.size();
+
             int l = 0;
-            const int nf = h_s_faces(p);
             for (int f = 0; f < nf; ++f)
             {
-                const Edge * edge = mesh.edge(h_faces(f, p));
-                const int side = face_side(f, p);
+                const auto [g_f, side] = Fp.at(f);
+
+                const Edge * edge = mesh.edge(g_f);
                 const int g_el = edge->elements[side];
                 const int s = edge->sides[side];
                 const bool reversed = (side == 1 && edge->delta < 0);
@@ -227,30 +273,45 @@ namespace cuddh
                     h_fI(i, f, p) = s_unique.at(idx);
                 }
             }
-
-            const int fdof = s_unique.size();
-            h_s_fdof(p) = fdof;
-            mx_fdof = std::max(mx_fdof, fdof);
         }
 
-        // pI maps the subdomain face space degree of freedom to the subspace
-        // degree of freedom
-        pI.resize(mx_fdof * n_spaces);
-        auto h_pI = reshape(pI.host_write(), mx_fdof, n_spaces);
+        return f2s;
+    }
+
+    static int set_subdomain_num_fdofs(ivec_wrapper &h_s_fdof, const std::vector<std::vector<int>> &f2s)
+    {
+        const int n_spaces = h_s_fdof.size();
+
+        int mx = 0;
+        for (int p = 0; p < n_spaces; ++p)
+        {
+            const int fdof = f2s.at(p).size();
+            h_s_fdof(p) = fdof;
+            mx = std::max(mx, fdof);
+        }
+
+        return mx;
+    }
+
+    static void map_dof_to_fdof(imat_wrapper &h_pI, const std::vector<std::vector<int>> &f2s)
+    {
+        const int n_spaces = f2s.size();
+
         std::fill(h_pI.begin(), h_pI.end(), -1);
         
         for (int p = 0; p < n_spaces; ++p)
         {
             auto& s_f2s = f2s.at(p);
-            const int fdof = h_s_fdof(p);
+            const int fdof = s_f2s.size();
             for (int i = 0; i < fdof; ++i)
             {
                 h_pI(i, p) = s_f2s.at(i);
             }
         }
+    }
 
-        // determine the mapping between subdomain face spaces of the shared
-        // degrees of freedom.
+    static int compute_shared_dof_map(HostDeviceArray<int> &cmap, const std::vector<std::array<int,4>> &shared_faces, const TensorWrapper<3,int> &h_fI, int n_spaces, int n_basis)
+    {
         int n_shared = shared_faces.size(); // total number of faces shared between subdomains
         std::vector<std::array<int,4>> shared_dofs; // list of all pairs of shared DOFs identifying the respective subspaces
         std::unordered_map<int, std::unordered_set<int>> unique_shared; // maps pairs of subspaces to unique DOFs shared between them
@@ -273,7 +334,7 @@ namespace cuddh
             }
         }
 
-        n_shared_dofs = shared_dofs.size();
+        int n_shared_dofs = shared_dofs.size();
         cmap.resize(4 * n_shared_dofs);
         auto h_cmap = reshape(cmap.host_write(), 4, n_shared_dofs);
         for (int i = 0; i < n_shared_dofs; ++i)
@@ -284,5 +345,75 @@ namespace cuddh
             h_cmap(2, i) = j0;
             h_cmap(3, i) = j1;
         }
+
+        return n_shared_dofs;
+    }
+
+    EnsembleSpace::EnsembleSpace(const H1Space& fem, int n_spaces_, const int * element_labels)
+        : n_spaces{n_spaces_},
+          n_basis{fem.basis().size()},
+          s_dof(n_spaces),
+          s_elems(n_spaces),
+          s_faces(n_spaces),
+          s_fdof(n_spaces)
+    {
+        auto& mesh = fem.mesh();
+        const int nel = mesh.n_elem();
+
+        auto h_s_elems = reshape(s_elems.host_write(), n_spaces);
+        auto h_s_faces = reshape(s_faces.host_write(), n_spaces);
+        auto h_s_dof = reshape(s_dof.host_write(), n_spaces);
+        auto h_s_fdof = reshape(s_fdof.host_write(), n_spaces);
+
+        // determine elements in each subspace
+        auto E = compute_subspace_elements(nel, n_spaces, element_labels);
+        auto el2s = global_element_to_subspace_element(nel, E);
+
+        mx_elems = set_subdomain_num_elements(h_s_elems, E);
+        
+        // maps subspace element index to global element index
+        elems.resize(mx_elems * n_spaces);
+        auto h_elems = reshape(elems.host_write(), mx_elems, n_spaces);
+        set_subdomain_elements(h_elems, E);
+
+        // computes subdomain indices
+        sI.resize(n_basis * n_basis * mx_elems * n_spaces);
+        auto h_sI = reshape(sI.host_write(), n_basis, n_basis, mx_elems, n_spaces);
+        auto s2g = set_subdomain_dof_indices(h_sI, fem, E);
+
+        // determine the sizes of the subspaces
+        mx_ndof = set_subspace_sizes(h_s_dof, s2g);
+
+        // maps subspace indices to global indices
+        gI.resize(mx_ndof * n_spaces);
+        auto h_gI = reshape(gI.host_write(), mx_ndof, n_spaces);
+        set_global_indices(h_gI, s2g);
+
+        // determine faces in each subspace
+        auto [F, shared_faces] = compute_subdomain_boundary_faces(mesh, n_spaces, element_labels);
+        mx_faces = set_subdomain_num_boundary_faces(h_s_faces, F);
+
+        // populate h_faces
+        _faces.resize(mx_faces * n_spaces);
+        auto h_faces = reshape(_faces.host_write(), mx_faces, n_spaces);
+        set_subdomain_face_indices(h_faces, F);
+
+        // fI maps the face local indices (with respect to subdomain face index)
+        // to face space degrees of freedom
+        fI.resize(n_basis * mx_faces * n_spaces);
+        auto h_fI = reshape(fI.host_write(), n_basis, mx_faces, n_spaces);
+        
+        auto f2s = compute_subdomain_fdof_indices(h_fI, fem, F, el2s, h_sI);
+        mx_fdof = set_subdomain_num_fdofs(h_s_fdof, f2s);
+
+        // pI maps the subdomain face space degree of freedom to the subspace
+        // degree of freedom
+        pI.resize(mx_fdof * n_spaces);
+        auto h_pI = reshape(pI.host_write(), mx_fdof, n_spaces);
+        map_dof_to_fdof(h_pI, f2s);
+
+        // determine the mapping between subdomain face spaces of the shared
+        // degrees of freedom.
+        n_shared_dofs = compute_shared_dof_map(cmap, shared_faces, h_fI, n_spaces, n_basis);
     }
 } // namespace cuddh

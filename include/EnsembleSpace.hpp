@@ -6,6 +6,7 @@
 #include <algorithm>
 
 #include "H1Space.hpp"
+#include "Tensor.hpp"
 
 namespace cuddh
 {
