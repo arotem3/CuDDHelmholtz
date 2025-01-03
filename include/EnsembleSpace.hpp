@@ -41,6 +41,12 @@ namespace cuddh
             return reshape(s_dof.read(m), n_spaces);
         }
 
+        /// @brief returns the maximum size of any subspace. That is, the maximum of sizes.
+        int max_size() const
+        {
+            return mx_ndof;
+        }
+
         /// @brief returns the elements in each subspace. That is elements(el, p)
         /// is the element index of the el-th element in subspace p. 
         const_imat_wrapper elements(MemorySpace m) const
@@ -53,6 +59,12 @@ namespace cuddh
         const_ivec_wrapper n_elems(MemorySpace m) const
         {
             return reshape(s_elems.read(m), n_spaces);
+        }
+
+        /// @brief returns the maximum number of elements in any subspace. That is, the maximum of n_elems.
+        int max_n_elem() const
+        {
+            return mx_elems;
         }
 
         /// @brief returns the boundary faces of each subspace.
@@ -68,6 +80,12 @@ namespace cuddh
         const_ivec_wrapper n_faces(MemorySpace m) const
         {
             return reshape(s_faces.read(m), n_spaces);
+        }
+
+        /// @brief returns the maximum number of faces in any subspace.  That is, the maximum of n_faces.
+        int max_n_faces() const
+        {
+            return mx_faces;
         }
 
         /// @brief returns the indices of subspace degrees of freedom
@@ -105,6 +123,12 @@ namespace cuddh
         const_ivec_wrapper fsizes(MemorySpace m) const
         {
             return reshape(s_fdof.read(m), n_spaces);
+        }
+
+        /// @brief returns the maximum number of face space degrees of freedom. That is, the maximum of fsizes.
+        int max_fsize() const
+        {
+            return mx_fdof;
         }
 
         /// @brief connectivity_map(:, k) = [p, q, i, j] indicating the

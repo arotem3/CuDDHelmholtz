@@ -6,6 +6,8 @@
 #include <assert.h>
 #include <unordered_set>
 
+#include "cuddh_config.hpp"
+#include "cuddh_error.hpp"
 #include "Operator.hpp"
 #include "EnsembleSpace.hpp"
 #include "MassMatrix.hpp"
@@ -18,6 +20,18 @@
 
 namespace cuddh
 {
+    struct WaveHoltz
+    {
+        double omega; // frequency
+        double dt; // time step
+        int nt; // number of time steps
+        HostDeviceArray<float> K; // omega / pi * (cos(omega * t) - 0.25) scaled by quadrature weights
+        HostDeviceArray<float> cs; // cos(omega t) on all half time steps
+        HostDeviceArray<float> sn; // sin(omega t) on all half time steps
+    };
+
+    WaveHoltz init_waveholtz(double omega, double dt);
+
     class DDH : public SinglePrecisionOperator
     {
     public:
@@ -56,16 +70,10 @@ namespace cuddh
         int n_basis;
         int n_domains;
         int n_lambda;
-        int nt;
-        int mx_n_lambda;
         int mx_dof;
         int mx_fdof;
         int mx_elem_per_dom;
 
-        double omega;
-        double dt;
-
-        host_device_ivec _s_lambda;
         host_device_ivec _Bf;
         host_device_ivec _gI;
         host_device_ivec _sI;
@@ -75,10 +83,9 @@ namespace cuddh
         HostDeviceArray<float> _m; // mass matrix 
         HostDeviceArray<float> _gmi; // global inverse mass
         HostDeviceArray<float> _H; // face mass matrix
-        HostDeviceArray<float> _wh_filter; // omega / pi * (cos(omega * t) - 0.25) scaled by quadrature weights
-        HostDeviceArray<float> _cs; // cos(omega t) on all half time steps
-        HostDeviceArray<float> _sn; // sin(omega t) on all half time steps
         HostDeviceArray<float> _a; // variable coefficient a(x)
+
+        WaveHoltz W;
 
         std::unique_ptr<EnsembleSpace> efem;
     };
