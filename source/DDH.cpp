@@ -12,17 +12,26 @@ inline static bool contains(const Map &map, Key key)
     return map.find(key) != map.end();
 }
 
+// computes the complex multiplication (c + i*s) * (x + i*y) and stores the result in x and y.
+__device__ __forceinline__ static void cxmult(float &x, float &y, float c, float s)
+{
+    float tmp = x;
+    x = c * x - s * y;
+    y = s * tmp + c * y;
+}
+
 template <int NB>
-__device__ __forceinline__ static void stiffness(const int k,
-                                                 const int l,
-                                                 const int el,
-                                                 const float3 G,
+__device__ __forceinline__ static void stiffness(const float3 G,
                                                  const int s_I[][NB][NB],
                                                  const float s_D[NB][NB],
                                                  float *const __restrict__ s_w, /* <- work */
                                                  float *const __restrict__ s_u, /* input and work */
                                                  float *const __restrict__ s_out)
 {
+    const int k = threadIdx.x;
+    const int l = threadIdx.y;
+    const int el = threadIdx.z;
+
     // compute covariant derivatives
     float Ux = 0.0f, Uy = 0.0f;
     int idx;
@@ -76,7 +85,7 @@ static void ddh_action(const EnsembleSpace *efem,
                        const MatrixWrapper<const float> g_inv_m,  /* global inverse mass matrix coefficients (mapped to subdomain index) */
                        const MatrixWrapper<const float> a,        /* variable coefficient */
                        const MatrixWrapper<const float> H,        /* subdomain boundary mass matrices */
-                       const WaveHoltz::KernelWaveHoltz W,        /* WaveHoltz on device */
+                       const WaveHoltz W,                         /* WaveHoltz data */
                        const double *const __restrict__ x,        /* input */
                        double *const __restrict__ y,              /* output */
                        const float *const __restrict__ d_lambda,  /* substructured problem variables */
@@ -100,6 +109,10 @@ static void ddh_action(const EnsembleSpace *efem,
     float *mu_update = (d_update) ? (d_update + n_lambda) : nullptr;
 
     constexpr int MX_NDOF = NB * NB * NEL * NEL; // == DDH_BLOCK_SIZE^2
+
+    // R = Rx + i Ry = exp(i * omega * dt / 2) used in the short term recurrence: z(t + 0.5 * dt) = R * z(t) where z(t) = exp(i * omega * t).
+    const float Rx = std::cos(0.5f * W.omega * W.dt);
+    const float Ry = std::sin(0.5f * W.omega * W.dt);
 
     forall_3d(NB, NB, NEL*NEL, n_domains, [=] __device__ (const int subsp) mutable -> void
     {
@@ -186,12 +199,16 @@ static void ddh_action(const EnsembleSpace *efem,
         // WaveHoltz iteration
         for (int whit=0; whit < wh_maxit; ++whit)
         {
-            float dK = W.K[0];
+            float cs = 1.0f;
+            float sn = 0.0f;
+
+            float K = W.K(cs);
+            
             p = u;
             q = v;
 
-            u *= dK;
-            v *= dK;
+            u *= K;
+            v *= K;
 
             // time stepping
             for (int it=1; it < W.nt; ++it)
@@ -207,14 +224,13 @@ static void ddh_action(const EnsembleSpace *efem,
                 __syncthreads();
 
                 // z <- z + S * p, overwrites p and uses s_q_half as a work variable
-                stiffness(k, l, el, g_tid, s_I, s_D, s_q_half, s_p_half, s_z);
+                stiffness(g_tid, s_I, s_D, s_q_half, s_p_half, s_z);
                 __syncthreads();
 
                 s_z[tid] -= Hi * q;
 
                 // half time step
-                float dq = s_z[tid] + W.cs[2*it-2] * F;
-                dq += W.sn[2*it-2] * G;
+                float dq = s_z[tid] - cs * F + sn * G;
                 dq *= inv_mi;
                 
                 s_p_half[tid] = p - half_dt * q;
@@ -226,19 +242,22 @@ static void ddh_action(const EnsembleSpace *efem,
                 s_z[tid] -= Hi * s_q_half[tid];
                 __syncthreads();
 
-                stiffness(k, l, el, g_tid, s_I, s_D, s_q_half, s_p_half, s_z);
+                stiffness(g_tid, s_I, s_D, s_q_half, s_p_half, s_z);
                 __syncthreads();
 
                 // full time step + WaveHoltz update
-                dq = s_z[tid] + W.cs[2*it-1] * F;
-                dq += W.sn[2*it-1] * G;
+                cxmult(cs, sn, Rx, Ry); // update cos and sin
+
+                dq = s_z[tid] - cs * F + sn * G;
                 dq *= inv_mi;
 
                 q += W.dt * dq;
 
-                dK = W.K[it];
-                u += dK * p;
-                v += dK * q;
+                K = W.K(cs);
+                u += K * p;
+                v += K * q;
+
+                cxmult(cs, sn, Rx, Ry); // update cos and sin
             } // time stepping
         } // WaveHoltz
 
@@ -391,7 +410,7 @@ DDH::DDH(double omega, const double *h_a, const H1Space &fem, const EnsembleSpac
 
     _a.resize(mx_dof * n_domains);
     DD_gridfun(_a.host_write(), h_a, &efem);
-    const double amax = *std::max_element(h_a, h_a + g_ndof);
+    const double reciprocal_max_vel = *std::min_element(h_a, h_a + g_ndof);
 
     dvec mi(fem.size());
     mass_matrix(mi.data(), fem);
@@ -402,11 +421,9 @@ DDH::DDH(double omega, const double *h_a, const H1Space &fem, const EnsembleSpac
     _gmi.resize(mx_dof * n_domains);
     DD_gridfun(_gmi.host_write(), mi.data(), &efem);
 
-    // Setup WaveHoltz by determining the time step and precomputing the time
-    // filter K(t) scaled by the quadrature weights (trapezoid rule), and also
-    // the time dependency of the forcing (sines and cosines).
+    // time step determined by CFL condition: dt = sqrt(1/2) * h / (n_basis * n_basis * max_vel)
     double h = fem.mesh().min_h();
-    double dt = 0.2 * 0.5 * h / (n_basis * n_basis); // TODO: incorporate amax
+    double dt = M_SQRT1_2 * reciprocal_max_vel * h / (n_basis * n_basis);
     W = init_waveholtz(omega, dt);
 }
 
@@ -424,12 +441,10 @@ void DDH::action(const float *d_lambda, float *d_update) const
     auto a = reshape(_a.device_read(), mx_dof, n_domains);
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
-    auto d_W = W.to_device();
-
     if (n_basis == 4)
-        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
+        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
     else if (n_basis == 8)
-        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
+        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
     else
         cuddh_error("DDH::action only supports n_basis == 4 or 8.");
 
@@ -450,12 +465,10 @@ void DDH::rhs(const double *f, float *b) const
     auto a = reshape(_a.device_read(), mx_dof, n_domains);
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
-    auto d_W = W.to_device();
-
     if (n_basis == 4)
-        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, f, (double *)nullptr, (const float *)nullptr, b);
+        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, f, (double *)nullptr, (const float *)nullptr, b);
     else if (n_basis == 8)
-        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, f, (double *)nullptr, (const float *)nullptr, b);
+        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, f, (double *)nullptr, (const float *)nullptr, b);
     else
         cuddh_error("DDH::action only supports n_basis == 4 or 8.");
 }
@@ -474,12 +487,10 @@ void DDH::postprocess(const float *d_lambda, const double *f, double *y) const
     auto a = reshape(_a.device_read(), mx_dof, n_domains);
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
-    auto d_W = W.to_device();
-
     if (n_basis == 4)
-        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, f, y, d_lambda, (float *)nullptr);
+        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, f, y, d_lambda, (float *)nullptr);
     else if (n_basis == 8)
-        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, f, y, d_lambda, (float *)nullptr);
+        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, f, y, d_lambda, (float *)nullptr);
     else
         cuddh_error("DDH::action only supports n_basis == 4 or 8.");
 }
