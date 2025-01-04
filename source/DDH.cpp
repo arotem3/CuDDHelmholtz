@@ -342,96 +342,6 @@ static int partition_structured_mesh(std::unique_ptr<EnsembleSpace> &efem, const
 }
 
 /**
- * @brief computes permuation of indices to natural ordering (face DOFs first).
- * 
- * @param h_gI Host array of size mx_dof * n_domains. gI maps subspace DOFs to global DOFs
- * @param h_sI Host array of size n_basis * n_basis * mx_elem * n_domains. sI maps local element DOFs to subspace DOFs
- * @param efem 
- */
-static void natural_ordering(int *h_gI, int *h_sI, const EnsembleSpace *efem)
-{
-    const int n_domains = efem->size();
-    const int mx_dof = efem->max_size();
-    const int mx_elem = efem->max_n_elem();
-
-    imat perm(mx_dof, n_domains);
-    imat inv_perm(mx_dof, n_domains);
-
-    auto P = efem->face_proj(MemorySpace::HOST);
-    auto sizes = efem->sizes(MemorySpace::HOST);
-    auto fsizes = efem->fsizes(MemorySpace::HOST);
-
-    for (int subsp = 0; subsp < n_domains; ++subsp)
-    {
-        const int ndof = sizes(subsp);
-        const int fdof = fsizes(subsp);
-
-        for (int i = 0; i < ndof; ++i)
-        {
-            perm(i, subsp) = -1;
-            inv_perm(i, subsp) = -1;
-        }
-
-        std::unordered_set<int> pp;
-        int l = 0;
-        for (; l < fdof; ++l)
-        {
-            int j = P(l, subsp);
-
-            pp.insert(j);
-            perm(l, subsp) = j;
-        }
-
-        for (int i = 0; i < ndof; ++i)
-        {
-            if (contains(pp, i))
-                continue;
-
-            perm(l, subsp) = i;
-            ++l;
-        }
-
-        for (int i = 0; i < ndof; ++i)
-        {
-            int j = perm(i, subsp);
-            inv_perm(j, subsp) = i;
-        }
-    }
-
-    auto h_n_elems = efem->n_elems(MemorySpace::HOST);
-
-    auto g_inds = efem->global_indices(MemorySpace::HOST);
-    auto s_inds = efem->subspace_indices(MemorySpace::HOST);
-    const int n_basis = s_inds.shape(0);
-
-    auto gI = reshape(h_gI, mx_dof, n_domains);
-    auto sI = reshape(h_sI, n_basis, n_basis, mx_elem, n_domains);
-
-    std::fill(gI.begin(), gI.end(), -1);
-    std::fill(sI.begin(), sI.end(), -1);
-
-    for (int subsp = 0; subsp < n_domains; ++subsp)
-    {
-        const int ndof = sizes[subsp];
-
-        for (int i = 0; i < ndof; ++i)
-            gI(i, subsp) = g_inds(perm(i, subsp), subsp);
-
-        const int nel = h_n_elems[subsp];
-        for (int el = 0; el < nel; ++el)
-        {
-            for (int l = 0; l < n_basis; ++l)
-            {
-                for (int k = 0; k < n_basis; ++k)
-                {
-                    sI(k, l, el, subsp) = inv_perm(s_inds(k, l, el, subsp), subsp);
-                }
-            }
-        }
-    }
-}
-
-/**
  * Lambdas are ordered like: lambda = (lambda0, lambda1, mu0, mu1) where lambda0 is the "interior"
  * trace for each subspace and lambda1 is the "external" trace. cmap is a one-to-one map
  * between lambda1 and lambda2 in the respective face spaces of each subspace, so we assign
@@ -479,7 +389,7 @@ static void diffmat(float *h_D, const Basis &basis)
         h_D[i] = D[i];
 }
 
-static void DD_mass(float *h_m, const H1Space &fem, const EnsembleSpace *efem, const TensorWrapper<4, const int> &sI)
+static void DD_mass(float *h_m, const H1Space &fem, const EnsembleSpace *efem)
 {
     const Mesh2D &mesh = fem.mesh();
     const Basis &basis = fem.basis();
@@ -492,6 +402,7 @@ static void DD_mass(float *h_m, const H1Space &fem, const EnsembleSpace *efem, c
 
     auto h_n_elems = efem->n_elems(MemorySpace::HOST);
     auto h_elems = efem->elements(MemorySpace::HOST);
+    auto sI = efem->subspace_indices(MemorySpace::HOST);
 
     const double *h_detJ = mesh.element_metrics(q).measures(MemorySpace::HOST);
     auto detJ = reshape(h_detJ, n_basis, n_basis, mesh.n_elem());
@@ -586,12 +497,13 @@ static void mass_matrix(double *h_m, const H1Space &fem)
 
 // map a global dofs to the subdomain dofs
 template <typename T1, typename T2>
-static void DD_gridfun(T1 *h_u_dd, const T2 *h_u_mesh, const EnsembleSpace *efem, const TensorWrapper<2, const int> &gI)
+static void DD_gridfun(T1 *h_u_dd, const T2 *h_u_mesh, const EnsembleSpace *efem)
 {
     const int n_domains = efem->size();
     const int mx_dof = efem->max_size();
     
     auto sizes = efem->sizes(MemorySpace::HOST);
+    auto gI = efem->global_indices(MemorySpace::HOST);
 
     auto dd = reshape(h_u_dd, mx_dof, n_domains);
 
@@ -684,14 +596,6 @@ DDH::DDH(double omega, const double *h_a, const H1Space &fem, int nx, int ny)
     _Bf.resize(2 * mx_fdof * n_domains);
     n_lambda = lambda_dofs(_Bf.host_write(), efem.get());
 
-    // Permute global-to-subdomain and subspace-to-subdomain index mappings to natural ordering
-    _gI.resize(mx_dof * n_domains);
-    _sI.resize(n_basis * n_basis * mx_elem_per_dom * n_domains);
-    natural_ordering(_gI.host_write(), _sI.host_write(), efem.get());
-
-    auto sI = reshape(_sI.host_read(), n_basis, n_basis, mx_elem_per_dom, n_domains);
-    auto gI = reshape(_gI.host_read(), mx_dof, n_domains);
-
     // Set up subspace finite element operators
     _D.resize(n_basis * n_basis);
     diffmat(_D.host_write(), fem.basis());
@@ -700,13 +604,13 @@ DDH::DDH(double omega, const double *h_a, const H1Space &fem, int nx, int ny)
     DD_geom_factors(_g_tensor.device_write(), fem, efem.get());
 
     _m.resize(mx_dof * n_domains);
-    DD_mass(_m.host_write(), fem, efem.get(), sI);
+    DD_mass(_m.host_write(), fem, efem.get());
 
     _H.resize(mx_fdof * n_domains);
     DD_face_mass(_H.host_write(), fem, efem.get());
 
     _a.resize(mx_dof * n_domains);
-    DD_gridfun(_a.host_write(), h_a, efem.get(), gI);
+    DD_gridfun(_a.host_write(), h_a, efem.get());
     const double amax = *std::max_element(h_a, h_a + g_ndof);
 
     dvec mi(fem.size());
@@ -716,7 +620,7 @@ DDH::DDH(double omega, const double *h_a, const H1Space &fem, int nx, int ny)
         m = 1.0 / m;
 
     _gmi.resize(mx_dof * n_domains);
-    DD_gridfun(_gmi.host_write(), mi.data(), efem.get(), gI);
+    DD_gridfun(_gmi.host_write(), mi.data(), efem.get());
 
     // Setup WaveHoltz by determining the time step and precomputing the time
     // filter K(t) scaled by the quadrature weights (trapezoid rule), and also
@@ -730,8 +634,8 @@ void DDH::action(const float *d_lambda, float *d_update) const
 {
     auto B = reshape(_Bf.device_read(), mx_fdof, 2, n_domains);
 
-    auto gI = reshape(_gI.device_read(), mx_dof, n_domains);
-    auto sI = reshape(_sI.device_read(), n_basis, n_basis, mx_elem_per_dom, n_domains);
+    auto gI = efem->global_indices(MemorySpace::DEVICE);
+    auto sI = efem->subspace_indices(MemorySpace::DEVICE);
 
     auto D = reshape(_D.device_read(), n_basis, n_basis);
 
@@ -742,9 +646,6 @@ void DDH::action(const float *d_lambda, float *d_update) const
     auto H = reshape(_H.device_read(), mx_fdof, n_domains);
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
-    // const float *wh_filter = _wh_filter.device_read();
-    // const float *cs = _cs.device_read();
-    // const float *sn = _sn.device_read();
     const float *wh_filter = W.K.device_read();
     const float *cs = W.cs.device_read();
     const float *sn = W.sn.device_read();
@@ -763,8 +664,8 @@ void DDH::rhs(const double *f, float *b) const
 {
     auto B = reshape(_Bf.device_read(), mx_fdof, 2, n_domains);
 
-    auto gI = reshape(_gI.device_read(), mx_dof, n_domains);
-    auto sI = reshape(_sI.device_read(), n_basis, n_basis, mx_elem_per_dom, n_domains);
+    auto gI = efem->global_indices(MemorySpace::DEVICE);
+    auto sI = efem->subspace_indices(MemorySpace::DEVICE);
 
     auto D = reshape(_D.device_read(), n_basis, n_basis);
 
@@ -775,9 +676,6 @@ void DDH::rhs(const double *f, float *b) const
     auto H = reshape(_H.device_read(), mx_fdof, n_domains);
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
-    // const float *wh_filter = _wh_filter.device_read();
-    // const float *cs = _cs.device_read();
-    // const float *sn = _sn.device_read();
     const float *wh_filter = W.K.device_read();
     const float *cs = W.cs.device_read();
     const float *sn = W.sn.device_read();
@@ -794,8 +692,8 @@ void DDH::postprocess(const float *d_lambda, const double *f, double *y) const
 {
     auto B = reshape(_Bf.device_read(), mx_fdof, 2, n_domains);
 
-    auto gI = reshape(_gI.device_read(), mx_dof, n_domains);
-    auto sI = reshape(_sI.device_read(), n_basis, n_basis, mx_elem_per_dom, n_domains);
+    auto gI = efem->global_indices(MemorySpace::DEVICE);
+    auto sI = efem->subspace_indices(MemorySpace::DEVICE);
 
     auto D = reshape(_D.device_read(), n_basis, n_basis);
 
@@ -806,9 +704,6 @@ void DDH::postprocess(const float *d_lambda, const double *f, double *y) const
     auto H = reshape(_H.device_read(), mx_fdof, n_domains);
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
-    // const float *wh_filter = _wh_filter.device_read();
-    // const float *cs = _cs.device_read();
-    // const float *sn = _sn.device_read();
     const float *wh_filter = W.K.device_read();
     const float *cs = W.cs.device_read();
     const float *sn = W.sn.device_read();

@@ -75,8 +75,6 @@ namespace cuddh
         int mx_elem_per_dom;
 
         host_device_ivec _Bf;
-        host_device_ivec _gI;
-        host_device_ivec _sI;
 
         HostDeviceArray<float> _D; // differentiation matrix
         HostDeviceArray<float3> _g_tensor; // geometric factors for stiffness matrix computations

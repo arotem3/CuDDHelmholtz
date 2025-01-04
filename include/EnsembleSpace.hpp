@@ -108,16 +108,6 @@ namespace cuddh
             return reshape(fI.read(m), n_basis, mx_faces, n_spaces);
         }
 
-        /// @brief returns the indices of the subspace degrees of freedom from
-        /// the face space degrees of freedom.
-        ///
-        /// That is face_proj(i, p) is the p-th subspace index of the i-th face
-        /// space degree of freedom
-        const_imat_wrapper face_proj(MemorySpace m) const
-        {
-            return reshape(pI.read(m), mx_fdof, n_spaces);
-        }
-
         /// @brief returns the number of face spaces degrees of freedom
         /// associated with each space. That is fsizes(p) is the number of
         /// degrees of freedom in the face space of subspace p.
@@ -159,7 +149,6 @@ namespace cuddh
         host_device_ivec s_faces;
         host_device_ivec sI;
         host_device_ivec fI;
-        host_device_ivec pI;
         host_device_ivec s_fdof;
         host_device_ivec cmap;
     };
