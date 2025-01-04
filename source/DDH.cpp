@@ -101,9 +101,9 @@ static void ddh_action(const EnsembleSpace *efem,
 
     constexpr int MX_NDOF = NB * NB * NEL * NEL; // == DDH_BLOCK_SIZE^2
 
-    forall_1d(MX_NDOF, n_domains, [=] __device__(const int subsp) mutable -> void
-              {
-        const int tid = threadIdx.x; // thread id
+    forall_3d(NB, NB, NEL*NEL, n_domains, [=] __device__ (const int subsp) mutable -> void
+    {
+        const int tid = threadIdx.x + NB * (threadIdx.y + NB * threadIdx.z); // linearized thread id
         
         // get subspace dimensions
         const int fdof = s_fdof(subsp); // dimension of facespace
@@ -121,9 +121,9 @@ static void ddh_action(const EnsembleSpace *efem,
         __shared__ int s_I[NEL*NEL][NB][NB];
 
         // convinient indicies
-        const int k = tid % NB;
-        const int l = (tid % (NB * NB)) / NB;
-        const int el = tid / (NB * NB);
+        const int k = threadIdx.x;
+        const int l = threadIdx.y;
+        const int el = threadIdx.z;
 
         // copy D
         if (tid < NB * NB)
@@ -194,7 +194,7 @@ static void ddh_action(const EnsembleSpace *efem,
             v *= dK;
 
             // time stepping
-            for (int it=1; it <= W.nt; ++it)
+            for (int it=1; it < W.nt; ++it)
             {
                 // to save shared memory we use s_p_half and s_q_half as work
                 // variables in the computation of the stiffness action. So
@@ -266,7 +266,8 @@ static void ddh_action(const EnsembleSpace *efem,
                 lambda_update[idx] = -lambda - S * v;
                 mu_update[idx]     = -mu     + S * u;
             }
-        } });
+        }
+    });
 }
 
 /**

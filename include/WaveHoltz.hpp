@@ -29,9 +29,9 @@ namespace cuddh
 
         KernelWaveHoltz to_device() const
         {
-            auto Kvec = reshape(K.device_read(), nt + 1);
-            auto csvec = reshape(cs.device_read(), 2 * nt + 1);
-            auto snvec = reshape(sn.device_read(), 2 * nt + 1);
+            auto Kvec = reshape(K.device_read(), nt);
+            auto csvec = reshape(cs.device_read(), 2 * nt - 1);
+            auto snvec = reshape(sn.device_read(), 2 * nt - 1);
             return {(float)omega, (float)dt, nt, Kvec, csvec, snvec};
         }
     };
