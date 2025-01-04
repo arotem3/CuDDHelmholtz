@@ -19,9 +19,9 @@ namespace cuddh
         /// @param n_spaces number of spaces in ensemble
         /// @param element_labels has length n_elem. element_labels[el]
         /// indicates which subspace element el belongs to.
-        EnsembleSpace(const H1Space& fem, int n_spaces, const int * element_labels);
+        EnsembleSpace(const H1Space &fem, int n_spaces, const int *element_labels);
 
-        /// @brief returns the number of subspaces 
+        /// @brief returns the number of subspaces
         int size() const
         {
             return n_spaces;
@@ -49,14 +49,14 @@ namespace cuddh
         }
 
         /// @brief returns the elements in each subspace. That is elements(el, p)
-        /// is the element index of the el-th element in subspace p. 
+        /// is the element index of the el-th element in subspace p.
         const_imat_wrapper elements(MemorySpace m) const
         {
             return reshape(elems.read(m), mx_elems, n_spaces);
         }
 
         /// @brief returns the number of elements in each subspace. That is
-        /// n_elems(p) is the number of elements in subspace p. 
+        /// n_elems(p) is the number of elements in subspace p.
         const_ivec_wrapper n_elems(MemorySpace m) const
         {
             return reshape(s_elems.read(m), n_spaces);
@@ -77,7 +77,7 @@ namespace cuddh
         }
 
         /// @brief returns the number of boundary faces in each subspace. That
-        /// is n_faces(p) is the number of faces in subspace p. 
+        /// is n_faces(p) is the number of faces in subspace p.
         const_ivec_wrapper n_faces(MemorySpace m) const
         {
             return reshape(s_faces.read(m), n_spaces);
@@ -152,6 +152,8 @@ namespace cuddh
         host_device_ivec s_fdof;
         host_device_ivec cmap;
     };
+
+    EnsembleSpace partition_uniform_rect(const H1Space &fem, int nx, int ny, int max_dof_1d = 16);
 } // namespace cuddh
 
 #endif

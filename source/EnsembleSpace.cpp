@@ -82,6 +82,35 @@ EnsembleSpace::EnsembleSpace(const H1Space &fem, int n_spaces_, const int *eleme
     n_shared_dofs = ESbuilder.compute_shared_dof_map(cmap, h_fI);
 }
 
+EnsembleSpace cuddh::partition_uniform_rect(const H1Space &fem, int nx, int ny, int max_dof_1d)
+{
+    const int n_basis = fem.basis().size();
+    const int elems_per_domain_x = max_dof_1d / n_basis;
+
+    if (nx % elems_per_domain_x != 0 || ny % elems_per_domain_x != 0)
+        cuddh_error("Only nx x ny meshes with nx and ny multiples of 32 / n_basis allowed.");
+
+    const int num_domains_x = nx / elems_per_domain_x;
+    const int num_domains_y = ny / elems_per_domain_x;
+
+    int n_domains = num_domains_x * num_domains_y;
+
+    imat element_labels(nx, ny);
+    std::fill(element_labels.begin(), element_labels.end(), -1);
+
+    for (int j = 0; j < ny; ++j)
+    {
+        for (int i = 0; i < nx; ++i)
+        {
+            int label_x = i / elems_per_domain_x;
+            int label_y = j / elems_per_domain_x;
+            element_labels(i, j) = label_x + num_domains_x * label_y;
+        }
+    }
+
+    return EnsembleSpace(fem, n_domains, element_labels);
+}
+
 template <typename Map, typename Key>
 static bool contains(const Map &map, Key key)
 {

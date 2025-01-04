@@ -6,42 +6,6 @@
 
 using namespace cuddh;
 
-WaveHoltz cuddh::init_waveholtz(double omega, double dt)
-{
-    WaveHoltz W;
-    W.omega = omega;
-
-    double T = (2 * M_PI) / omega;
-    W.nt = std::ceil(T / dt);
-    W.dt = T / W.nt;
-
-    W.K.resize(W.nt+1);
-    auto K = reshape(W.K.host_write(), W.nt+1);
-
-    double tan_omega_dt = std::tan(0.5 * omega * dt);
-    double a0 = 0.25 * (1 - tan_omega_dt * tan_omega_dt); // corrected shift
-
-    for (int j = 0; j <= W.nt; ++j)
-        K(j) = dt * (omega / M_PI) * (std::cos(omega * j * dt) - a0);
-    K(0) *= 0.5;
-    K(W.nt) *= 0.5;
-    
-    W.cs.resize(2 * W.nt + 1);
-    W.sn.resize(2 * W.nt + 1);
-
-    auto cs = reshape(W.cs.host_write(), 2 * W.nt + 1);
-    auto sn = reshape(W.sn.host_write(), 2 * W.nt + 1);
-
-    for (int j = 0; j <= 2 * W.nt; ++j)
-    {
-        double t = 0.5 * j * dt;
-        cs(j) = -std::cos(omega * t);
-        sn(j) = std::sin(omega * t);
-    }
-
-    return W;
-}
-
 template <typename Map, typename Key>
 inline static bool contains(const Map &map, Key key)
 {
@@ -104,21 +68,15 @@ static void ddh_action(const EnsembleSpace *efem,
                        const int g_ndof,                          /* global finite element degrees of freedom */
                        const int n_domains,                       /* number of subdomains */
                        const int n_lambda,                        /* number of substructured DOFs (lambda) */
-                       const int nt,                              /* number of time steps */
-                       const float omega,                         /* Helmholtz frequency */
-                       const float dt,                            /* time step */
                        const const_icube_wrapper B,               /* global lambda indices associated with boundary DOF */
                        const const_imat_wrapper gI,               /* global solution DOF associated with subdomain DOF */
                        const TensorWrapper<4, const int> sI,      /* mapping from (i,j)-node on element to subspace DOF */
-                       const MatrixWrapper<const float> D,        /* differentiation matrix */
-                       const MatrixWrapper<const float3> g,       /* geometric factors for stiffness computation */
+                       const DDStiffnessMatrix::KernelStiffness S,/* stiffness matrix on device */
                        const MatrixWrapper<const float> m,        /* subdomain mass matrices */
                        const MatrixWrapper<const float> g_inv_m,  /* global inverse mass matrix coefficients (mapped to subdomain index) */
                        const MatrixWrapper<const float> a,        /* variable coefficient */
                        const MatrixWrapper<const float> H,        /* subdomain boundary mass matrices */
-                       const float *const __restrict__ wh_filter, /* WaveHoltz filter (cos(omega*t) - 1/4)*dt */
-                       const float *const __restrict__ cs,        /* cos(omega*t) on half time steps */
-                       const float *const __restrict__ sn,        /* sin(omega*t) on half time steps */
+                       const WaveHoltz::KernelWaveHoltz W,        /* WaveHoltz on device */
                        const double *const __restrict__ x,        /* input */
                        double *const __restrict__ y,              /* output */
                        const float *const __restrict__ d_lambda,  /* substructured problem variables */
@@ -129,8 +87,8 @@ static void ddh_action(const EnsembleSpace *efem,
     auto s_dof = efem->sizes(MemorySpace::DEVICE);   // number of subdomain degrees of freedom
     auto s_fdof = efem->fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
 
-    const float half_dt = 0.5f * dt;
-    const float rw = 1.0f / omega;
+    const float half_dt = 0.5f * W.dt;
+    const float rw = 1.0f / W.omega;
 
     if (y)
         zeros(2 * g_ndof, y);
@@ -169,7 +127,7 @@ static void ddh_action(const EnsembleSpace *efem,
 
         // copy D
         if (tid < NB * NB)
-            s_D[k][l] = D(k, l);
+            s_D[k][l] = S.D(k, l);
 
         // copy sI
         s_I[el][l][k] = sI(k, l, el, subsp);
@@ -187,7 +145,7 @@ static void ddh_action(const EnsembleSpace *efem,
         float p = 0.0f, q = 0.0f; // (p,q) are the solution of the wave eq.
         float lambda = 0.0f, mu = 0.0f; // (lambda, mu) are the variables of the substructured problem.
 
-        const float3 g_tid = g(tid, subsp);
+        const float3 g_tid = S.G(tid, subsp);
 
         // copy global x to forcing, init work variables
         if (tid < ndof)
@@ -228,7 +186,7 @@ static void ddh_action(const EnsembleSpace *efem,
         // WaveHoltz iteration
         for (int whit=0; whit < wh_maxit; ++whit)
         {
-            float dK = wh_filter[0];
+            float dK = W.K[0];
             p = u;
             q = v;
 
@@ -236,7 +194,7 @@ static void ddh_action(const EnsembleSpace *efem,
             v *= dK;
 
             // time stepping
-            for (int it=1; it <= nt; ++it)
+            for (int it=1; it <= W.nt; ++it)
             {
                 // to save shared memory we use s_p_half and s_q_half as work
                 // variables in the computation of the stiffness action. So
@@ -255,15 +213,15 @@ static void ddh_action(const EnsembleSpace *efem,
                 s_z[tid] -= Hi * q;
 
                 // half time step
-                float dq = s_z[tid] + cs[2*it-2] * F;
-                dq += sn[2*it-2] * G;
+                float dq = s_z[tid] + W.cs[2*it-2] * F;
+                dq += W.sn[2*it-2] * G;
                 dq *= inv_mi;
                 
                 s_p_half[tid] = p - half_dt * q;
                 s_q_half[tid] = q + half_dt * dq;
 
                 s_z[tid] = 0.0f;
-                p -= dt * s_q_half[tid]; // <- full time step
+                p -= W.dt * s_q_half[tid]; // <- full time step
 
                 s_z[tid] -= Hi * s_q_half[tid];
                 __syncthreads();
@@ -272,13 +230,13 @@ static void ddh_action(const EnsembleSpace *efem,
                 __syncthreads();
 
                 // full time step + WaveHoltz update
-                dq = s_z[tid] + cs[2*it-1] * F;
-                dq += sn[2*it-1] * G;
+                dq = s_z[tid] + W.cs[2*it-1] * F;
+                dq += W.sn[2*it-1] * G;
                 dq *= inv_mi;
 
-                q += dt * dq;
+                q += W.dt * dq;
 
-                dK = wh_filter[it];
+                dK = W.K[it];
                 u += dK * p;
                 v += dK * q;
             } // time stepping
@@ -304,41 +262,11 @@ static void ddh_action(const EnsembleSpace *efem,
             const int idx = B(tid, 1, subsp);
             if (idx >= 0)
             {
-                const float S = 2.0f * ai * omega;
+                const float S = 2.0f * ai * W.omega;
                 lambda_update[idx] = -lambda - S * v;
                 mu_update[idx]     = -mu     + S * u;
             }
         } });
-}
-
-static int partition_structured_mesh(std::unique_ptr<EnsembleSpace> &efem, const H1Space &fem, int nx, int ny, int n_basis)
-{
-    const int elems_per_domain_x = DDH_BLOCK_SIZE / n_basis;
-
-    if (nx % elems_per_domain_x != 0 || ny % elems_per_domain_x != 0)
-        cuddh_error("Only nx x ny meshes with nx and ny multiples of 32 / n_basis allowed.");
-
-    const int num_domains_x = nx / elems_per_domain_x;
-    const int num_domains_y = ny / elems_per_domain_x;
-
-    int n_domains = num_domains_x * num_domains_y;
-
-    imat element_labels(nx, ny);
-    std::fill(element_labels.begin(), element_labels.end(), -1);
-
-    for (int j = 0; j < ny; ++j)
-    {
-        for (int i = 0; i < nx; ++i)
-        {
-            int label_x = i / elems_per_domain_x;
-            int label_y = j / elems_per_domain_x;
-            element_labels(i, j) = label_x + num_domains_x * label_y;
-        }
-    }
-
-    efem.reset(new EnsembleSpace(fem, n_domains, element_labels));
-
-    return n_domains;
 }
 
 /**
@@ -378,89 +306,6 @@ static int lambda_dofs(int *h_B, const EnsembleSpace *efem)
     }
 
     return n_lambda;
-}
-
-static void diffmat(float *h_D, const Basis &basis)
-{
-    const int n_basis = basis.size();
-    dmat D(n_basis, n_basis);
-    basis.deriv(n_basis, basis.quadrature().x(), D);
-    for (int i = 0; i < n_basis * n_basis; ++i)
-        h_D[i] = D[i];
-}
-
-static void DD_mass(float *h_m, const H1Space &fem, const EnsembleSpace *efem)
-{
-    const Mesh2D &mesh = fem.mesh();
-    const Basis &basis = fem.basis();
-    const QuadratureRule& q = basis.quadrature();
-
-    const int n_basis = basis.size();
-    const int n_domains = efem->size();
-    const int mx_elem_per_dom = efem->max_n_elem();
-    const int mx_dof = efem->max_size();
-
-    auto h_n_elems = efem->n_elems(MemorySpace::HOST);
-    auto h_elems = efem->elements(MemorySpace::HOST);
-    auto sI = efem->subspace_indices(MemorySpace::HOST);
-
-    const double *h_detJ = mesh.element_metrics(q).measures(MemorySpace::HOST);
-    auto detJ = reshape(h_detJ, n_basis, n_basis, mesh.n_elem());
-
-    auto m = reshape(h_m, mx_dof, n_domains);
-
-    for (int subsp = 0; subsp < n_domains; ++subsp)
-    {
-        const int s_nel = h_n_elems(subsp);
-        for (int el = 0; el < s_nel; ++el)
-        {
-            const int g_el = h_elems(el, subsp);
-            for (int j = 0; j < n_basis; ++j)
-            {
-                for (int i = 0; i < n_basis; ++i)
-                {
-                    int l = sI(i, j, el, subsp);
-                    m(l, subsp) += q.w(i) * q.w(j) * detJ(i, j, g_el);
-                }
-            }
-        }
-    }
-}
-
-static void DD_face_mass(float *h_h, const H1Space &fem, const EnsembleSpace *efem)
-{
-    const Mesh2D &mesh = fem.mesh();
-    const Basis &basis = fem.basis();
-    const QuadratureRule &q = basis.quadrature();
-
-    const int n_domains = efem->size();
-    const int n_basis = basis.size();
-    const int mx_fdof = efem->max_fsize();
-
-    auto n_faces = efem->n_faces(MemorySpace::HOST);
-    auto faces = efem->faces(MemorySpace::HOST);
-    auto f_inds = efem->face_indices(MemorySpace::HOST);
-
-    auto H = reshape(h_h, mx_fdof, n_domains);
-
-    for (int subsp = 0; subsp < n_domains; ++subsp)
-    {
-        const int s_nf = n_faces(subsp);
-        for (int f = 0; f < s_nf; ++f)
-        {
-            const int g_f = faces(f, subsp);
-            const Edge *edge = mesh.edge(g_f);
-
-            for (int i = 0; i < n_basis; ++i)
-            {
-                const double xi = q.x(i);
-                const double ds = edge->measure(xi);
-
-                const int l = f_inds(i, f, subsp);
-                H(l, subsp) += ds * q.w(i);
-            }
-        }
-    }
 }
 
 static void mass_matrix(double *h_m, const H1Space &fem)
@@ -515,67 +360,14 @@ static void DD_gridfun(T1 *h_u_dd, const T2 *h_u_mesh, const EnsembleSpace *efem
     }
 }
 
-static void DD_geom_factors(float3 * d_G, const H1Space &fem, const EnsembleSpace *efem)
-{
-    const Mesh2D &mesh = fem.mesh();
-    const Basis &basis = fem.basis();
-    const QuadratureRule &q = basis.quadrature();
-
-    const int n_basis = basis.size();
-    const int n_domains = efem->size();
-    const int mx_elem = efem->max_n_elem();
-
-    host_device_dvec _w(n_basis);
-    double *h_w = _w.host_write();
-    for (int i = 0; i < n_basis; ++i)
-        h_w[i] = q.w(i);
-    auto w = reshape(_w.device_read(), n_basis);
-
-    auto &metrics = mesh.element_metrics(q);
-    
-    const double *d_J = metrics.jacobians(MemorySpace::DEVICE);
-    auto J = reshape(d_J, 2, 2, n_basis, n_basis, mesh.n_elem());
-
-    auto n_elems = efem->n_elems(MemorySpace::DEVICE);
-    auto elems = efem->elements(MemorySpace::DEVICE);
-
-    auto G = reshape(d_G, n_basis, n_basis, mx_elem, n_domains);
-
-    int n = n_basis * n_basis * mx_elem;
-    forall_1d(n, n_domains, [=] __device__(int subsp) mutable -> void
-    {
-        const int n_elem = n_elems[subsp];
-
-        const int el = threadIdx.x / (n_basis * n_basis);
-        const int j = (threadIdx.x % (n_basis * n_basis)) / n_basis;
-        const int i = threadIdx.x % n_basis;
-
-        if (el >= n_elem)
-            return;
-
-        const int g_el = elems(el, subsp);
-
-        const double W = w(i) * w(j);
-        const double Y_eta = J(1, 1, i, j, g_el);
-        const double X_eta = J(0, 1, i, j, g_el);
-        const double Y_xi  = J(1, 0, i, j, g_el);
-        const double X_xi  = J(0, 0, i, j, g_el);
-
-        const double detJ = X_xi * Y_eta - X_eta * Y_xi;
-        
-        float3 gij;
-        gij.x =  W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
-        gij.y = -W * (Y_xi  * Y_eta + X_xi  * X_eta) / detJ;
-        gij.z =  W * (Y_xi  * Y_xi  + X_xi  * X_xi)  / detJ;
-
-        G(i, j, el, subsp) = gij;
-    });
-}
-
-DDH::DDH(double omega, const double *h_a, const H1Space &fem, int nx, int ny)
+DDH::DDH(double omega, const double *h_a, const H1Space &fem, const EnsembleSpace &efem)
     : g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
-      n_basis{fem.basis().size()}
+      n_basis{fem.basis().size()},
+      efem{efem},
+      M(fem, efem),
+      H(fem, efem),
+      S(fem, efem)
 {
     // Setup domain decomposition by determining which elements belong to which
     // subdomain. For the structured meshes generated by Mesh2D::uniform_rect
@@ -584,33 +376,20 @@ DDH::DDH(double omega, const double *h_a, const H1Space &fem, int nx, int ny)
     if (n_basis != 4 && n_basis != 8)
         cuddh_error("DDH error: Only n_basis==4, and n_basis==8 supported.");
 
-    n_domains = partition_structured_mesh(efem, fem, nx, ny, n_basis);
+    n_domains = efem.size();
 
     // determine max subspace dimensions
-    mx_dof = efem->max_size();
-    mx_fdof = efem->max_fsize();
-    mx_elem_per_dom = efem->max_n_elem();
+    mx_dof = efem.max_size();
+    mx_fdof = efem.max_fsize();
+    mx_elem_per_dom = efem.max_n_elem();
 
     // Set up lambdas for the substructured problem and compute index
     // information relating lambdas to their duals.
     _Bf.resize(2 * mx_fdof * n_domains);
-    n_lambda = lambda_dofs(_Bf.host_write(), efem.get());
-
-    // Set up subspace finite element operators
-    _D.resize(n_basis * n_basis);
-    diffmat(_D.host_write(), fem.basis());
-
-    _g_tensor.resize(n_basis * n_basis * mx_elem_per_dom * n_domains);
-    DD_geom_factors(_g_tensor.device_write(), fem, efem.get());
-
-    _m.resize(mx_dof * n_domains);
-    DD_mass(_m.host_write(), fem, efem.get());
-
-    _H.resize(mx_fdof * n_domains);
-    DD_face_mass(_H.host_write(), fem, efem.get());
+    n_lambda = lambda_dofs(_Bf.host_write(), &efem);
 
     _a.resize(mx_dof * n_domains);
-    DD_gridfun(_a.host_write(), h_a, efem.get());
+    DD_gridfun(_a.host_write(), h_a, &efem);
     const double amax = *std::max_element(h_a, h_a + g_ndof);
 
     dvec mi(fem.size());
@@ -620,7 +399,7 @@ DDH::DDH(double omega, const double *h_a, const H1Space &fem, int nx, int ny)
         m = 1.0 / m;
 
     _gmi.resize(mx_dof * n_domains);
-    DD_gridfun(_gmi.host_write(), mi.data(), efem.get());
+    DD_gridfun(_gmi.host_write(), mi.data(), &efem);
 
     // Setup WaveHoltz by determining the time step and precomputing the time
     // filter K(t) scaled by the quadrature weights (trapezoid rule), and also
@@ -634,26 +413,22 @@ void DDH::action(const float *d_lambda, float *d_update) const
 {
     auto B = reshape(_Bf.device_read(), mx_fdof, 2, n_domains);
 
-    auto gI = efem->global_indices(MemorySpace::DEVICE);
-    auto sI = efem->subspace_indices(MemorySpace::DEVICE);
+    auto gI = efem.global_indices(MemorySpace::DEVICE);
+    auto sI = efem.subspace_indices(MemorySpace::DEVICE);
 
-    auto D = reshape(_D.device_read(), n_basis, n_basis);
-
-    auto g = reshape(_g_tensor.device_read(), n_basis * n_basis * mx_elem_per_dom, n_domains);
+    auto d_S = S.to_device();
+    auto d_M = M.to_device();
+    auto d_H = H.to_device();
 
     auto a = reshape(_a.device_read(), mx_dof, n_domains);
-    auto m = reshape(_m.device_read(), mx_dof, n_domains);
-    auto H = reshape(_H.device_read(), mx_fdof, n_domains);
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
-    const float *wh_filter = W.K.device_read();
-    const float *cs = W.cs.device_read();
-    const float *sn = W.sn.device_read();
+    auto d_W = W.to_device();
 
     if (n_basis == 4)
-        ddh_action<4, DDH_BLOCK_SIZE / 4>(efem.get(), g_ndof, n_domains, n_lambda, W.nt, W.omega, W.dt, B, gI, sI, D, g, m, g_inv_m, a, H, wh_filter, cs, sn, (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
+        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
     else if (n_basis == 8)
-        ddh_action<8, DDH_BLOCK_SIZE / 8>(efem.get(), g_ndof, n_domains, n_lambda, W.nt, W.omega, W.dt, B, gI, sI, D, g, m, g_inv_m, a, H, wh_filter, cs, sn, (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
+        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
     else
         cuddh_error("DDH::action only supports n_basis == 4 or 8.");
 
@@ -664,26 +439,22 @@ void DDH::rhs(const double *f, float *b) const
 {
     auto B = reshape(_Bf.device_read(), mx_fdof, 2, n_domains);
 
-    auto gI = efem->global_indices(MemorySpace::DEVICE);
-    auto sI = efem->subspace_indices(MemorySpace::DEVICE);
+    auto gI = efem.global_indices(MemorySpace::DEVICE);
+    auto sI = efem.subspace_indices(MemorySpace::DEVICE);
 
-    auto D = reshape(_D.device_read(), n_basis, n_basis);
-
-    auto g = reshape(_g_tensor.device_read(), n_basis * n_basis * mx_elem_per_dom, n_domains);
+    auto d_S = S.to_device();
+    auto d_M = M.to_device();
+    auto d_H = H.to_device();
 
     auto a = reshape(_a.device_read(), mx_dof, n_domains);
-    auto m = reshape(_m.device_read(), mx_dof, n_domains);
-    auto H = reshape(_H.device_read(), mx_fdof, n_domains);
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
-    const float *wh_filter = W.K.device_read();
-    const float *cs = W.cs.device_read();
-    const float *sn = W.sn.device_read();
+    auto d_W = W.to_device();
 
     if (n_basis == 4)
-        ddh_action<4, DDH_BLOCK_SIZE / 4>(efem.get(), g_ndof, n_domains, n_lambda, W.nt, W.omega, W.dt, B, gI, sI, D, g, m, g_inv_m, a, H, wh_filter, cs, sn, f, (double *)nullptr, (const float *)nullptr, b);
+        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, f, (double *)nullptr, (const float *)nullptr, b);
     else if (n_basis == 8)
-        ddh_action<8, DDH_BLOCK_SIZE / 8>(efem.get(), g_ndof, n_domains, n_lambda, W.nt, W.omega, W.dt, B, gI, sI, D, g, m, g_inv_m, a, H, wh_filter, cs, sn, f, (double *)nullptr, (const float *)nullptr, b);
+        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, f, (double *)nullptr, (const float *)nullptr, b);
     else
         cuddh_error("DDH::action only supports n_basis == 4 or 8.");
 }
@@ -692,26 +463,22 @@ void DDH::postprocess(const float *d_lambda, const double *f, double *y) const
 {
     auto B = reshape(_Bf.device_read(), mx_fdof, 2, n_domains);
 
-    auto gI = efem->global_indices(MemorySpace::DEVICE);
-    auto sI = efem->subspace_indices(MemorySpace::DEVICE);
+    auto gI = efem.global_indices(MemorySpace::DEVICE);
+    auto sI = efem.subspace_indices(MemorySpace::DEVICE);
 
-    auto D = reshape(_D.device_read(), n_basis, n_basis);
-
-    auto g = reshape(_g_tensor.device_read(), n_basis * n_basis * mx_elem_per_dom, n_domains);
+    auto d_S = S.to_device();
+    auto d_M = M.to_device();
+    auto d_H = H.to_device();
 
     auto a = reshape(_a.device_read(), mx_dof, n_domains);
-    auto m = reshape(_m.device_read(), mx_dof, n_domains);
-    auto H = reshape(_H.device_read(), mx_fdof, n_domains);
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
-    const float *wh_filter = W.K.device_read();
-    const float *cs = W.cs.device_read();
-    const float *sn = W.sn.device_read();
+    auto d_W = W.to_device();
 
     if (n_basis == 4)
-        ddh_action<4, DDH_BLOCK_SIZE / 4>(efem.get(), g_ndof, n_domains, n_lambda, W.nt, W.omega, W.dt, B, gI, sI, D, g, m, g_inv_m, a, H, wh_filter, cs, sn, f, y, d_lambda, (float *)nullptr);
+        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, f, y, d_lambda, (float *)nullptr);
     else if (n_basis == 8)
-        ddh_action<8, DDH_BLOCK_SIZE / 8>(efem.get(), g_ndof, n_domains, n_lambda, W.nt, W.omega, W.dt, B, gI, sI, D, g, m, g_inv_m, a, H, wh_filter, cs, sn, f, y, d_lambda, (float *)nullptr);
+        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, d_W, f, y, d_lambda, (float *)nullptr);
     else
         cuddh_error("DDH::action only supports n_basis == 4 or 8.");
 }

@@ -103,6 +103,8 @@ int main()
     // The mesh and 1D basis functions are combined in H1Space to define the
     // total global degrees of freedom of the problem.
     H1Space fem(mesh, basis);
+    EnsembleSpace efem = partition_uniform_rect(fem, nx, nx);
+
     const int ndof = fem.size(); // # of degrees of freedom
     
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
@@ -123,7 +125,8 @@ int main()
     mi.action(d_a, d_a); // project the coefficient d_a onto the basis
 
     const double * h_a = a.host_read(); // right now the DDH setup requires a host array for the coefficient.
-    DDH F(omega, h_a, fem, nx, nx);
+    
+    DDH F(omega, h_a, fem, efem);
     const int n_lambda = F.size(); // number of degrees of freedom in substructured problem
 
     std::cout << "Solving the Helmholtz equation...\n"
