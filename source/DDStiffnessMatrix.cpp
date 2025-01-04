@@ -35,14 +35,13 @@ static void geom_factors(float3 *d_G, const H1Space &fem, const EnsembleSpace &e
 
     auto G = reshape(d_G, n_basis, n_basis, mx_elem, n_domains);
 
-    int n = n_basis * n_basis * mx_elem;
-    forall_1d(n, n_domains, [=] __device__(int subsp) mutable -> void
-              {
+    forall_3d(n_basis, n_basis, mx_elem, n_domains, [=] __device__ (int subsp) mutable -> void
+    {
         const int n_elem = n_elems[subsp];
 
-        const int el = threadIdx.x / (n_basis * n_basis);
-        const int j = (threadIdx.x % (n_basis * n_basis)) / n_basis;
-        const int i = threadIdx.x % n_basis;
+        const int i = threadIdx.x;
+        const int j = threadIdx.y;
+        const int el = threadIdx.z;
 
         if (el >= n_elem)
             return;
@@ -62,7 +61,8 @@ static void geom_factors(float3 *d_G, const H1Space &fem, const EnsembleSpace &e
         gij.y = -W * (Y_xi  * Y_eta + X_xi  * X_eta) / detJ;
         gij.z =  W * (Y_xi  * Y_xi  + X_xi  * X_xi)  / detJ;
 
-        G(i, j, el, subsp) = gij; });
+        G(i, j, el, subsp) = gij;
+    });
 }
 
 DDStiffnessMatrix::DDStiffnessMatrix(const H1Space &fem, const EnsembleSpace &efem)
