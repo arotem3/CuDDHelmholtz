@@ -96,7 +96,7 @@ static void ddh_action(const EnsembleSpace *efem,
     auto s_dof = efem->sizes(MemorySpace::DEVICE);   // number of subdomain degrees of freedom
     auto s_fdof = efem->fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
 
-    const float half_dt = 0.5f * W.dt;
+    const float dt = W.dt;
     const float rw = 1.0f / W.omega;
 
     if (y)
@@ -111,8 +111,8 @@ static void ddh_action(const EnsembleSpace *efem,
     constexpr int MX_NDOF = NB * NB * NEL * NEL; // == DDH_BLOCK_SIZE^2
 
     // R = Rx + i Ry = exp(i * omega * dt / 2) used in the short term recurrence: z(t + 0.5 * dt) = R * z(t) where z(t) = exp(i * omega * t).
-    const float Rx = std::cos(0.5f * W.omega * W.dt);
-    const float Ry = std::sin(0.5f * W.omega * W.dt);
+    const float Rx = std::cos(W.omega * W.dt);
+    const float Ry = std::sin(W.omega * W.dt);
 
     forall_3d(NB, NB, NEL*NEL, n_domains, [=] __device__ (const int subsp) mutable -> void
     {
@@ -127,9 +127,9 @@ static void ddh_action(const EnsembleSpace *efem,
 #endif
 
         // shared mem
-        __shared__ float s_p_half[MX_NDOF];
-        __shared__ float s_q_half[MX_NDOF];
-        __shared__ float s_z[MX_NDOF];
+        __shared__ float s_p[MX_NDOF];
+        __shared__ float s_work[MX_NDOF];
+        __shared__ float s_S[MX_NDOF];
         __shared__ float s_D[NB][NB];
         __shared__ int s_I[NEL*NEL][NB][NB];
 
@@ -149,9 +149,12 @@ static void ddh_action(const EnsembleSpace *efem,
         
         float ai = 0.0f; // variable coefficient a(x)
         float mi = 0.0f; // subdomain mass matrix coefficient
-        float inv_mi = 0.0f; // subdomain weighted inverse mass matrix coefficient
         
         float Hi = 0.0f; // subdomain boundary face mass matrix
+
+        float delta = 0.0f; // 0.5 * dt^2 / M. Used for time-stepping of p
+        float Q0 = 0.0f; // used for time-stepping of q
+        float Q1 = 0.0f;
         
         float F = 0.0f, G = 0.0f; // Helmholtz forcing
         float u = 0.0f, v = 0.0f; // (u,v) are the approx solution of the Helmholtz eq.
@@ -166,7 +169,10 @@ static void ddh_action(const EnsembleSpace *efem,
             g_idx = gI(tid, subsp);
             ai = a(tid, subsp);
             mi = m(tid, subsp);
-            inv_mi = 1.0f / (ai * ai * mi);
+            
+            Q0 = ai * ai * mi;
+            Q1 = Q0;
+            delta = 0.5f * dt * dt / Q0;
 
             if (x)
             {
@@ -194,7 +200,25 @@ static void ddh_action(const EnsembleSpace *efem,
             }
 
             Hi *= ai;
+            Q1 += 0.5f * dt * Hi;
         }
+
+        Q1 = 1.0f / Q1;
+        Q0 = Q0 * Q1 - 1.0f;
+        Q1 *= 0.5f * dt;
+
+        // returns S * p
+        auto Sp = [&]() -> float
+        {
+            s_S[tid] = 0.0f;
+            s_p[tid] = p;
+            __syncthreads();
+
+            stiffness(g_tid, s_I, s_D, s_work, s_p, s_S);
+            __syncthreads();
+
+            return s_S[tid];
+        };
 
         // WaveHoltz iteration
         for (int whit=0; whit < wh_maxit; ++whit)
@@ -210,54 +234,28 @@ static void ddh_action(const EnsembleSpace *efem,
             u *= K;
             v *= K;
 
+            // compute acceleration at t == 0
+            float acc_n = Sp() - Hi * q - F * cs + G * sn;
+
             // time stepping
             for (int it=1; it < W.nt; ++it)
             {
-                // to save shared memory we use s_p_half and s_q_half as work
-                // variables in the computation of the stiffness action. So
-                // we copy p to s_p_half and pass s_p_half to stifness which
-                // will compute the action on s_p_half but also overwrite it
-                // with junk.
-
-                s_z[tid] = 0.0f;
-                s_p_half[tid] = p;
-                __syncthreads();
-
-                // z <- z + S * p, overwrites p and uses s_q_half as a work variable
-                stiffness(g_tid, s_I, s_D, s_q_half, s_p_half, s_z);
-                __syncthreads();
-
-                s_z[tid] -= Hi * q;
-
-                // half time step
-                float dq = s_z[tid] - cs * F + sn * G;
-                dq *= inv_mi;
+                // update p
+                p -= dt * q + delta * acc_n;
                 
-                s_p_half[tid] = p - half_dt * q;
-                s_q_half[tid] = q + half_dt * dq;
-
-                s_z[tid] = 0.0f;
-                p -= W.dt * s_q_half[tid]; // <- full time step
-
-                s_z[tid] -= Hi * s_q_half[tid];
-                __syncthreads();
-
-                stiffness(g_tid, s_I, s_D, s_q_half, s_p_half, s_z);
-                __syncthreads();
-
-                // full time step + WaveHoltz update
                 cxmult(cs, sn, Rx, Ry); // update cos and sin
+                float acc_n1 = Sp() - F * cs + G * sn;
 
-                dq = s_z[tid] - cs * F + sn * G;
-                dq *= inv_mi;
+                // update q
+                q += Q0 * q + Q1 * acc_n + Q1 * acc_n1;
 
-                q += W.dt * dq;
+                // update acc
+                acc_n = acc_n1 - Hi * q;
 
+                // waveholtz update
                 K = W.K(cs);
                 u += K * p;
                 v += K * q;
-
-                cxmult(cs, sn, Rx, Ry); // update cos and sin
             } // time stepping
         } // WaveHoltz
 
