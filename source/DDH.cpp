@@ -21,55 +21,41 @@ __device__ __forceinline__ static void cxmult(float &x, float &y, float c, float
 }
 
 template <int NB>
-__device__ __forceinline__ static void stiffness(const float3 G,
-                                                 const int s_I[][NB][NB],
+__device__ __forceinline__ static void stiffness_matvec(const float3 G,
+                                                 const int Ix[NB],
+                                                 const int Iy[NB],
                                                  const float s_D[NB][NB],
-                                                 float *const __restrict__ s_w, /* <- work */
-                                                 float *const __restrict__ s_u, /* input and work */
+                                                 float2 s_w[][NB][NB], /* <- work */
+                                                 float *const __restrict__ s_u, /* input */
                                                  float *const __restrict__ s_out)
 {
-    const int k = threadIdx.x;
-    const int l = threadIdx.y;
-    const int el = threadIdx.z;
+    const auto [k, l, el] = threadIdx;
 
-    // compute covariant derivatives
-    float Ux = 0.0f, Uy = 0.0f;
-    int idx;
+    float2 grad{0.0f, 0.0f};
 
-#pragma unroll NB
+    #pragma unroll NB
     for (int i = 0; i < NB; ++i)
-    {
-        idx = s_I[el][l][i];
-        Ux += s_D[k][i] * s_u[idx];
+        grad.x += s_D[k][i] * s_u[Ix[i]];
 
-        idx = s_I[el][i][k];
-        Uy += s_D[l][i] * s_u[idx];
-    }
+    #pragma unroll NB
+    for (int i = 0; i < NB; ++i)
+        grad.y += s_D[l][i] * s_u[Iy[i]];
 
+    s_w[el][l][k].x = G.x * grad.x + G.y * grad.y;
+    s_w[el][l][k].y = G.y * grad.x + G.z * grad.y;
     __syncthreads();
 
-    // compute contravariant flux
-    idx = k + NB * (l + NB * el);
-    s_u[idx] = G.x * Ux + G.y * Uy;
-    s_w[idx] = G.y * Ux + G.z * Uy;
-
-    __syncthreads();
-
-    // integrate against grad phi
     float Su = 0.0f;
 
-#pragma unroll NB
+    #pragma unroll NB
     for (int i = 0; i < NB; ++i)
-    {
-        idx = i + NB * (l + NB * el);
-        Su += s_D[i][k] * s_u[idx];
+        Su += s_D[i][k] * s_w[el][l][i].x;
 
-        idx = k + NB * (i + NB * el);
-        Su += s_D[i][l] * s_w[idx];
-    }
+    #pragma unroll NB
+    for (int i = 0; i < NB; ++i)
+        Su += s_D[i][l] * s_w[el][i][k].y;
 
-    idx = s_I[el][l][k];
-    atomicAdd(s_out + idx, Su);
+    atomicAdd(s_out + Ix[k], Su);
 }
 
 template <int NB, int NEL>
@@ -80,7 +66,7 @@ static void ddh_action(const EnsembleSpace *efem,
                        const const_icube_wrapper B,               /* global lambda indices associated with boundary DOF */
                        const const_imat_wrapper gI,               /* global solution DOF associated with subdomain DOF */
                        const TensorWrapper<4, const int> sI,      /* mapping from (i,j)-node on element to subspace DOF */
-                       const DDStiffnessMatrix::KernelStiffness S,/* stiffness matrix on device */
+                       const DDStiffnessMatrix::KernelStiffness stiffness_matrix,/* stiffness_matvec matrix on device */
                        const MatrixWrapper<const float> m,        /* subdomain mass matrices */
                        const MatrixWrapper<const float> g_inv_m,  /* global inverse mass matrix coefficients (mapped to subdomain index) */
                        const MatrixWrapper<const float> a,        /* variable coefficient */
@@ -110,12 +96,13 @@ static void ddh_action(const EnsembleSpace *efem,
 
     constexpr int MX_NDOF = NB * NB * NEL * NEL; // == DDH_BLOCK_SIZE^2
 
-    // R = Rx + i Ry = exp(i * omega * dt / 2) used in the short term recurrence: z(t + 0.5 * dt) = R * z(t) where z(t) = exp(i * omega * t).
+    // R = Rx + i Ry = exp(i * omega * dt) used in the short term recurrence: z(t + dt) = R * z(t) where z(t) = exp(i * omega * t).
     const float Rx = std::cos(W.omega * W.dt);
     const float Ry = std::sin(W.omega * W.dt);
 
     forall_3d(NB, NB, NEL*NEL, n_domains, [=] __device__ (const int subsp) mutable -> void
     {
+        const auto [k, l, el] = threadIdx; // convinient indicies
         const int tid = threadIdx.x + NB * (threadIdx.y + NB * threadIdx.z); // linearized thread id
         
         // get subspace dimensions
@@ -128,93 +115,81 @@ static void ddh_action(const EnsembleSpace *efem,
 
         // shared mem
         __shared__ float s_p[MX_NDOF];
-        __shared__ float s_work[MX_NDOF];
+        __shared__ float2 s_work[NEL*NEL][NB][NB];
         __shared__ float s_S[MX_NDOF];
         __shared__ float s_D[NB][NB];
-        __shared__ int s_I[NEL*NEL][NB][NB];
-
-        // convinient indicies
-        const int k = threadIdx.x;
-        const int l = threadIdx.y;
-        const int el = threadIdx.z;
 
         // copy D
         if (tid < NB * NB)
-            s_D[k][l] = S.D(k, l);
+            s_D[k][l] = stiffness_matrix.D(k, l);
 
-        // copy sI
-        s_I[el][l][k] = sI(k, l, el, subsp);
+        int Ix[NB]; // indices for slice used d/dx computation
+        int Iy[NB]; // indices for slice used d/dy computation
 
-        int g_idx = -1; // subspace DOF[tid] global index.
-        
-        float ai = 0.0f; // variable coefficient a(x)
-        float mi = 0.0f; // subdomain mass matrix coefficient
-        
+        #pragma unroll NB
+        for (int i = 0; i < NB; ++i)
+            Ix[i] = sI(i, l, el, subsp);
+
+        #pragma unroll NB
+        for (int i = 0; i < NB; ++i)
+            Iy[i] = sI(k, i, el, subsp);
+
         float Hi = 0.0f; // subdomain boundary face mass matrix
 
-        float delta = 0.0f; // 0.5 * dt^2 / M. Used for time-stepping of p
-        float Q0 = 0.0f; // used for time-stepping of q
+        float Q0 = 0.0f; // used for time-stepping
         float Q1 = 0.0f;
+        float delta = 0.0f;
         
         float F = 0.0f, G = 0.0f; // Helmholtz forcing
         float u = 0.0f, v = 0.0f; // (u,v) are the approx solution of the Helmholtz eq.
         float p = 0.0f, q = 0.0f; // (p,q) are the solution of the wave eq.
-        float lambda = 0.0f, mu = 0.0f; // (lambda, mu) are the variables of the substructured problem.
 
-        const float3 g_tid = S.G(tid, subsp);
+        const float3 geom = stiffness_matrix.G(tid, subsp);
 
-        // copy global x to forcing, init work variables
         if (tid < ndof)
         {
-            g_idx = gI(tid, subsp);
-            ai = a(tid, subsp);
-            mi = m(tid, subsp);
-            
-            Q0 = ai * ai * mi;
-            Q1 = Q0;
-            delta = 0.5f * dt * dt / Q0;
-
+            // copy global x to forcing
             if (x)
             {
+                const int g_idx = gI(tid, subsp);
+
                 F = x[g_idx];
                 G = x[g_ndof + g_idx];
             }
-        }
 
-        // add lambda to forcing, init work variables
-        if (tid < fdof)
-        {
-            Hi = H(tid, subsp);
+            const float ai = a(tid, subsp); // variable coefficient
 
-            if (d_lambda)
+            if (tid < fdof)
             {
-                const int idx = B(tid, 0, subsp);
-                if (idx >= 0)
-                {
-                    lambda = g_lambda[idx];
-                    mu = g_mu[idx];
+                Hi = H(tid, subsp);
 
-                    F += Hi * lambda;
-                    G += Hi * mu;
+                // add lambda to forcing
+                const int idx = B(tid, 0, subsp);
+                if (d_lambda && idx >= 0)
+                {
+                    F += Hi * g_lambda[idx];
+                    G += Hi * g_mu[idx];
                 }
+
+                Hi *= ai;
             }
 
-            Hi *= ai;
-            Q1 += 0.5f * dt * Hi;
+            Q0 = ai * ai * m(tid, subsp); // used for time stepping
+            Q1 = 1.0f / (Q0 + 0.5f * dt * Hi);
+            delta = 0.5f * dt * dt / Q0;
+
+            Q0 = Q0 * Q1 - 1.0f;
+            Q1 *= 0.5f * dt;
         }
 
-        Q1 = 1.0f / Q1;
-        Q0 = Q0 * Q1 - 1.0f;
-        Q1 *= 0.5f * dt;
-
-        // returns S * p
-        auto Sp = [&]() -> float
+        // returns S * x where S is the stiffness matrix
+        auto S = [&](float x) -> float
         {
             s_S[tid] = 0.0f;
-            s_p[tid] = p;
+            s_p[tid] = x;
             __syncthreads();
 
-            stiffness(g_tid, s_I, s_D, s_work, s_p, s_S);
+            stiffness_matvec(geom, Ix, Iy, s_D, s_work, s_p, s_S);
             __syncthreads();
 
             return s_S[tid];
@@ -235,7 +210,7 @@ static void ddh_action(const EnsembleSpace *efem,
             v *= K;
 
             // compute acceleration at t == 0
-            float acc_n = Sp() - Hi * q - F * cs + G * sn;
+            float acc_n = S(p) - Hi * q - F * cs + G * sn;
 
             // time stepping
             for (int it=1; it < W.nt; ++it)
@@ -244,7 +219,7 @@ static void ddh_action(const EnsembleSpace *efem,
                 p -= dt * q + delta * acc_n;
                 
                 cxmult(cs, sn, Rx, Ry); // update cos and sin
-                float acc_n1 = Sp() - F * cs + G * sn;
+                float acc_n1 = S(p) - F * cs + G * sn;
 
                 // update q
                 q += Q0 * q + Q1 * acc_n + Q1 * acc_n1;
@@ -264,7 +239,8 @@ static void ddh_action(const EnsembleSpace *efem,
 
         if (y && (tid < ndof))
         {
-            const float M = mi * g_inv_m(tid, subsp);
+            const float M = m(tid, subsp) * g_inv_m(tid, subsp);
+            const int g_idx = gI(tid, subsp);
             
             const double m_u = M * u;
             atomicAdd(y+g_idx, m_u);
@@ -276,12 +252,22 @@ static void ddh_action(const EnsembleSpace *efem,
         // update Lambdas
         if (d_update && (tid < fdof))
         {
-            const int idx = B(tid, 1, subsp);
-            if (idx >= 0)
+            const int i = B(tid, 0, subsp);
+            float lambda = 0.0f;
+            float mu = 0.0f;
+
+            if (d_lambda && i >= 0)
             {
-                const float S = 2.0f * ai * W.omega;
-                lambda_update[idx] = -lambda - S * v;
-                mu_update[idx]     = -mu     + S * u;
+                lambda = g_lambda[i];
+                mu = g_mu[i];
+            }
+            
+            const int j = B(tid, 1, subsp);
+            if (j >= 0)
+            {
+                const float T = 2.0f * a(tid, subsp) * W.omega;
+                lambda_update[j] = -lambda - T * v;
+                mu_update[j]     = -mu     + T * u;
             }
         }
     });
