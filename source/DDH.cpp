@@ -405,9 +405,9 @@ DDH::DDH(double omega, const double *h_a, const H1Space &fem, const EnsembleSpac
     _gmi.resize(mx_dof * n_domains);
     DD_gridfun(_gmi.host_write(), mi.data(), &efem);
 
-    // time step determined by CFL condition: dt = sqrt(1/2) * h / (n_basis * n_basis * max_vel)
+    // time step determined by CFL condition: dt = C * h / (n_basis * n_basis * max_vel)
     double h = fem.mesh().min_h();
-    double dt = M_SQRT1_2 * reciprocal_max_vel * h / (n_basis * n_basis);
+    double dt = 2.6 * reciprocal_max_vel * h / (n_basis * n_basis); // why 2.6?
     W = init_waveholtz(omega, dt);
 }
 

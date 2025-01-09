@@ -17,8 +17,6 @@ namespace cuddh
         {
             MatrixWrapper<const float> D;
             MatrixWrapper<const float3> G;
-
-
         };
 
         DDStiffnessMatrix(const H1Space &fem, const EnsembleSpace &efem);
