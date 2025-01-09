@@ -13,15 +13,17 @@ namespace cuddh
     class DDStiffnessMatrix
     {
     public:
-        DDStiffnessMatrix(const H1Space &fem, const EnsembleSpace &efem);
-
-        struct KernelStiffness
+        struct DeviceDDStiffnessMatrix
         {
             MatrixWrapper<const float> D;
             MatrixWrapper<const float3> G;
+
+
         };
 
-        KernelStiffness to_device() const
+        DDStiffnessMatrix(const H1Space &fem, const EnsembleSpace &efem);
+
+        DeviceDDStiffnessMatrix to_device() const
         {
             auto D = reshape(d.device_read(), n_basis, n_basis);
             auto G = reshape(g.device_read(), n_basis * n_basis * mx_elem, n_domains);

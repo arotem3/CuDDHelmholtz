@@ -15,13 +15,13 @@ inline static bool contains(const Map &map, Key key)
 // computes the complex multiplication (c + i*s) * (x + i*y) and stores the result in x and y.
 __device__ __forceinline__ static void cxmult(float &x, float &y, float c, float s)
 {
-    float tmp = x;
-    x = c * x - s * y;
-    y = s * tmp + c * y;
+    float t = x;
+    x = c * t - s * y;
+    y = s * t + c * y;
 }
 
 template <int NB>
-__device__ __forceinline__ static void stiffness_matvec(const float3 G,
+__device__ __forceinline__ static void stiffness_matvec(const float3 geom,
                                                  const int Ix[NB],
                                                  const int Iy[NB],
                                                  const float s_D[NB][NB],
@@ -41,8 +41,8 @@ __device__ __forceinline__ static void stiffness_matvec(const float3 G,
     for (int i = 0; i < NB; ++i)
         grad.y += s_D[l][i] * s_u[Iy[i]];
 
-    s_w[el][l][k].x = G.x * grad.x + G.y * grad.y;
-    s_w[el][l][k].y = G.y * grad.x + G.z * grad.y;
+    s_w[el][l][k].x = geom.x * grad.x + geom.y * grad.y;
+    s_w[el][l][k].y = geom.y * grad.x + geom.z * grad.y;
     __syncthreads();
 
     float Su = 0.0f;
@@ -56,6 +56,7 @@ __device__ __forceinline__ static void stiffness_matvec(const float3 G,
         Su += s_D[i][l] * s_w[el][i][k].y;
 
     atomicAdd(s_out + Ix[k], Su);
+    __syncthreads();
 }
 
 template <int NB, int NEL>
@@ -66,7 +67,7 @@ static void ddh_action(const EnsembleSpace *efem,
                        const const_icube_wrapper B,               /* global lambda indices associated with boundary DOF */
                        const const_imat_wrapper gI,               /* global solution DOF associated with subdomain DOF */
                        const TensorWrapper<4, const int> sI,      /* mapping from (i,j)-node on element to subspace DOF */
-                       const DDStiffnessMatrix::KernelStiffness stiffness_matrix,/* stiffness_matvec matrix on device */
+                       const DDStiffnessMatrix::DeviceDDStiffnessMatrix stiffness_matrix,/* stiffness_matvec matrix on device */
                        const MatrixWrapper<const float> m,        /* subdomain mass matrices */
                        const MatrixWrapper<const float> g_inv_m,  /* global inverse mass matrix coefficients (mapped to subdomain index) */
                        const MatrixWrapper<const float> a,        /* variable coefficient */
@@ -116,7 +117,7 @@ static void ddh_action(const EnsembleSpace *efem,
         // shared mem
         __shared__ float s_p[MX_NDOF];
         __shared__ float2 s_work[NEL*NEL][NB][NB];
-        __shared__ float s_S[MX_NDOF];
+        __shared__ float s_Sp[MX_NDOF];
         __shared__ float s_D[NB][NB];
 
         // copy D
@@ -185,14 +186,13 @@ static void ddh_action(const EnsembleSpace *efem,
         // returns S * x where S is the stiffness matrix
         auto S = [&](float x) -> float
         {
-            s_S[tid] = 0.0f;
+            s_Sp[tid] = 0.0f;
             s_p[tid] = x;
             __syncthreads();
 
-            stiffness_matvec(geom, Ix, Iy, s_D, s_work, s_p, s_S);
-            __syncthreads();
+            stiffness_matvec(geom, Ix, Iy, s_D, s_work, s_p, s_Sp);
 
-            return s_S[tid];
+            return s_Sp[tid];
         };
 
         // WaveHoltz iteration
