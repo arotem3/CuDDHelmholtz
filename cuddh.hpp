@@ -14,6 +14,7 @@
 #include "include/forall.hpp"
 #include "include/gmres.hpp"
 #include "include/H1Space.hpp"
+#include "include/H1Space3D.hpp"
 #include "include/HostDeviceArray.hpp"
 #include "include/linalg.hpp"
 #include "include/LinearFunctional.hpp"
