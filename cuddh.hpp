@@ -19,6 +19,7 @@
 #include "include/LinearFunctional.hpp"
 #include "include/MassMatrix.hpp"
 #include "include/Mesh2D.hpp"
+#include "include/Mesh3D.hpp"
 #include "include/Node.hpp"
 #include "include/Operator.hpp"
 #include "include/QuadratureRule.hpp"

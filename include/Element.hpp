@@ -50,14 +50,7 @@ namespace cuddh
         ///
         /// @param[in] xi coordinates in the reference element. Shape (2,)
         /// @return The measure weight at `xi`
-        virtual double measure(const double * xi) const
-        {
-            double J[4];
-            jacobian(xi, J);
-            return J[0]*J[3] - J[1]*J[2];
-        }
-    
-        virtual double area() const = 0;
+        virtual double measure(const double * xi) const = 0;
 
         virtual ~Element() = default;
     };
@@ -94,8 +87,7 @@ namespace cuddh
         /// @param[out] J on exit, Jacobian matrix. Shape (2, 2)
         void jacobian(const double * xi, double * J) const override;
 
-        /// @brief returns the area of the element 
-        double area() const override;
+        double measure(const double * xi) const override;
 
         /// @brief initialize `QuadElement` by providing the coordinates of its
         /// corners (in counter clockwise order).

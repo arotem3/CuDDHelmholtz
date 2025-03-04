@@ -26,13 +26,11 @@ namespace cuddh
         J[3] = 0.25 * ((1.0 - xi[0]) * (x[3][1] - x[0][1]) + (1.0 + xi[0]) * (x[2][1] - x[1][1])); // dy/d(eta)
     }
 
-    double QuadElement::area() const
+    double QuadElement::measure(const double * xi) const
     {
-        // det(Jacobian) is linear, so it is integrated exactly by Gauss
-        // quadrature with a single point (x=0, w=2, so tensor product ->
-        // (x,y)=(0,0), w=4)
-        double zero[] = {0.0, 0.0};
-        return 4.0 * measure(zero);
+        double J[4];
+        jacobian(xi, J);
+        return J[0] * J[3] - J[1] * J[2];
     }
 
     QuadElement::QuadElement(const double * xs)
