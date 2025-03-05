@@ -1,0 +1,33 @@
+#ifndef CUDDH_STIFFNESS_MATRIX_3D_HPP
+#define CUDDH_STIFFNESS_MATRIX_3D_HPP
+
+#include "Operator.hpp"
+#include "H1Space3D.hpp"
+#include "linalg.hpp"
+
+namespace cuddh
+{
+    class StiffnessMatrix3D : public Operator
+    {
+    public:
+        StiffnessMatrix3D(const H1Space3D &fem);
+        StiffnessMatrix3D(const H1Space3D &fem, const QuadratureRule &quad);
+
+        ~StiffnessMatrix3D() = default;
+
+        /// @brief y[i] <- y[i] + c * (grad x, grad phi[i])
+        /// where phi[i] is the i-th basis function in the H1Space
+        void action(double c, const double *x, double *y) const override;
+
+        /// @brief y[i] <- (grad x, grad phi[i])
+        /// where phi[i] is the i-th basis function in the H1Space
+        void action(const double *x, double *y) const override;
+
+    private:
+        const H1Space3D &fem;
+        host_device_dvec _D;           // differentiation matrix
+        HostDeviceArray<double3x3> _G; // geometric factors
+    };
+} // namespace cuddh
+
+#endif

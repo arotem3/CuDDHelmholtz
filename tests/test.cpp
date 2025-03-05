@@ -15,6 +15,7 @@ int main()
     t_linalg(num_tests, num_success);
     t_mass(num_tests, num_success);
     t_stiffness(num_tests, num_success);
+    t_stiffness3d(num_tests, num_success);
 
     std::cout << "\n##############################\n\n"
               << std::setw(6) << num_success << " / " << num_tests << " tests passed";

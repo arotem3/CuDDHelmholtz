@@ -19,12 +19,14 @@
 #include "include/linalg.hpp"
 #include "include/LinearFunctional.hpp"
 #include "include/MassMatrix.hpp"
+#include "include/Operators3D/MassMatrix3D.hpp"
 #include "include/Mesh2D.hpp"
 #include "include/Mesh3D.hpp"
 #include "include/Node.hpp"
 #include "include/Operator.hpp"
 #include "include/QuadratureRule.hpp"
 #include "include/StiffnessMatrix.hpp"
+#include "include/Operators3D/StiffnessMatrix3D.hpp"
 #include "include/Tensor.hpp"
 
 #endif
