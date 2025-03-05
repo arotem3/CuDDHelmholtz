@@ -1,4 +1,4 @@
-#include "MassMatrix.hpp"
+#include "Operators2D/MassMatrix.hpp"
 
 namespace cuddh
 {

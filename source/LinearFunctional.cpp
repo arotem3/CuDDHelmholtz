@@ -1,4 +1,4 @@
-#include "LinearFunctional.hpp"
+#include "Operators2D/LinearFunctional.hpp"
 
 namespace cuddh
 {

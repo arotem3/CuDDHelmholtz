@@ -7,8 +7,7 @@ template <int SZ, int NR, typename scalar, typename LAMBDA>
 __global__ static void sum_reduction_kernel(int n, const scalar * x, const scalar * y, scalar * __restrict__ result, LAMBDA op)
 {
 #ifndef CUDDH_DEBUG
-    const int block_dim = blockDim.x;
-    assert(block_dim == SZ);
+    assert(blockDim.x == SZ);
 #endif
 
 	const int thread_id = threadIdx.x;

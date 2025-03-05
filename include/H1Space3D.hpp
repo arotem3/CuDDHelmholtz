@@ -4,7 +4,7 @@
 #include "cuddh_config.hpp"
 
 #include "Tensor.hpp"
-#include "Mesh3D.hpp"
+#include "Mesh3D/Mesh3D.hpp"
 #include "Basis.hpp"
 
 #include "HostDeviceArray.hpp"

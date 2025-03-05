@@ -1,4 +1,4 @@
-#include "DDH.hpp"
+#include "DD2D/DDH.hpp"
 
 // one dimensional size of each domain decomp block. Each block has
 // DDH_BLOCK_SIZE * DDH_BLOCK_SIZE degrees of freedom.

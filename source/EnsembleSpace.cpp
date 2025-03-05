@@ -1,4 +1,4 @@
-#include "EnsembleSpace.hpp"
+#include "DD2D/EnsembleSpace.hpp"
 
 using namespace cuddh;
 

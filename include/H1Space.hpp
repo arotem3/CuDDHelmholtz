@@ -4,7 +4,7 @@
 #include <unordered_set>
 
 #include "Tensor.hpp"
-#include "Mesh2D.hpp"
+#include "Mesh2D/Mesh2D.hpp"
 #include "Basis.hpp"
 #include "Operator.hpp"
 

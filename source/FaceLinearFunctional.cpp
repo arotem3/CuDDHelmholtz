@@ -1,4 +1,4 @@
-#include "FaceLinearFunctional.hpp"
+#include "Operators2D/FaceLinearFunctional.hpp"
 
 namespace cuddh
 {

@@ -1,4 +1,4 @@
-#include "DDMassMatrix.hpp"
+#include "DD2D/DDMassMatrix.hpp"
 
 using namespace cuddh;
 

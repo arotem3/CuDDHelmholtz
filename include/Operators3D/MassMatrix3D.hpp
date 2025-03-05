@@ -1,8 +1,6 @@
 #ifndef CUDDH_MASS_MATRIX_3D_HPP
 #define CUDDH_MASS_MATRIX_3D_HPP
 
-#include "Basis.hpp"
-#include "Mesh3D.hpp"
 #include "H1Space3D.hpp"
 #include "Operator.hpp"
 

@@ -1,8 +1,6 @@
 #ifndef CUDDH_MASS_MATRIX_HPP
 #define CUDDH_MASS_MATRIX_HPP
 
-#include "Basis.hpp"
-#include "Mesh2D.hpp"
 #include "H1Space.hpp"
 
 #include "HostDeviceArray.hpp"

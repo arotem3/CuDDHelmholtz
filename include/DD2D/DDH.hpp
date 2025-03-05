@@ -10,7 +10,7 @@
 #include "cuddh_error.hpp"
 #include "Operator.hpp"
 #include "EnsembleSpace.hpp"
-#include "MassMatrix.hpp"
+#include "Operators2D/MassMatrix.hpp"
 #include "linalg.hpp"
 
 #include "HostDeviceArray.hpp"

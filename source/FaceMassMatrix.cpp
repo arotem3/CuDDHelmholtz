@@ -1,4 +1,4 @@
-#include "FaceMassMatrix.hpp"
+#include "Operators2D/FaceMassMatrix.hpp"
 
 namespace cuddh
 {

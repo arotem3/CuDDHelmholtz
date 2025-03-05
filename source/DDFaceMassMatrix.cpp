@@ -1,4 +1,4 @@
-#include "DDFaceMassMatrix.hpp"
+#include "DD2D/DDFaceMassMatrix.hpp"
 
 using namespace cuddh;
 

@@ -1,4 +1,4 @@
-#include "StiffnessMatrix.hpp"
+#include "Operators2D/StiffnessMatrix.hpp"
 
 namespace cuddh
 {

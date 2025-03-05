@@ -2,31 +2,46 @@
 #define CUDDH_HPP
 
 #include "cuddh_config.hpp"
-
-#include "include/Basis.hpp"
 #include "include/cuddh_error.hpp"
-#include "include/DDH.hpp"
-#include "include/Edge.hpp"
-#include "include/Element.hpp"
-#include "include/EnsembleSpace.hpp"
-#include "include/FaceLinearFunctional.hpp"
-#include "include/FaceMassMatrix.hpp"
+
+#include "include/Tensor.hpp"
+#include "include/HostDeviceArray.hpp"
 #include "include/forall.hpp"
-#include "include/gmres.hpp"
+#include "include/linalg.hpp"
+
+#include "include/QuadratureRule.hpp"
+#include "include/Basis.hpp"
+
+#include "include/Mesh2D/Node.hpp"
+#include "include/Mesh2D/Edge.hpp"
+#include "include/Mesh2D/Element.hpp"
+#include "include/Mesh2D/Mesh2D.hpp"
+
+#include "include/Mesh3D/Connectivity.hpp"
+#include "include/Mesh3D/Face.hpp"
+#include "include/Mesh3D/Element.hpp"
+#include "include/Mesh3D/Mesh3D.hpp"
+
 #include "include/H1Space.hpp"
 #include "include/H1Space3D.hpp"
-#include "include/HostDeviceArray.hpp"
-#include "include/linalg.hpp"
-#include "include/LinearFunctional.hpp"
-#include "include/MassMatrix.hpp"
-#include "include/Operators3D/MassMatrix3D.hpp"
-#include "include/Mesh2D.hpp"
-#include "include/Mesh3D.hpp"
-#include "include/Node.hpp"
+
 #include "include/Operator.hpp"
-#include "include/QuadratureRule.hpp"
-#include "include/StiffnessMatrix.hpp"
+
+#include "include/Operators2D/MassMatrix.hpp"
+#include "include/Operators2D/StiffnessMatrix.hpp"
+#include "include/Operators2D/LinearFunctional.hpp"
+#include "include/Operators2D/FaceMassMatrix.hpp"
+#include "include/Operators2D/FaceLinearFunctional.hpp"
+
+#include "include/Operators3D/MassMatrix3D.hpp"
 #include "include/Operators3D/StiffnessMatrix3D.hpp"
-#include "include/Tensor.hpp"
+
+#include "include/gmres.hpp"
+
+#include "include/DD2D/EnsembleSpace.hpp"
+#include "include/DD2D/DDMassMatrix.hpp"
+#include "include/DD2D/DDStiffnessMatrix.hpp"
+#include "include/DD2D/DDFaceMassMatrix.hpp"
+#include "include/DD2D/DDH.hpp"
 
 #endif

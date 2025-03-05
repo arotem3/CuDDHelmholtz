@@ -1,4 +1,4 @@
-#include "DDStiffnessMatrix.hpp"
+#include "DD2D/DDStiffnessMatrix.hpp"
 
 using namespace cuddh;
 
