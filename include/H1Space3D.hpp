@@ -45,7 +45,7 @@ namespace cuddh
         }
 
         /// @brief returns the physical coordinates corresponding to collocation
-        /// point of each nodal DOF. The output has shape (3, ndof).
+        /// point of each nodal DOF. The output has shape (ndof,).
         VectorWrapper<const double3> physical_coordinates(MemorySpace m) const
         {
             return reshape(_xyz.read(m), ndof);
