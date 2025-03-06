@@ -63,30 +63,26 @@ MassMatrix3D::MassMatrix3D(const double *d_a, const H1Space3D &fem)
     init_mass(fem, d_a, _m.device_write());
 }
 
-static void mass_action(int n, double c, const double *m, const double *x, double *y)
+void MassMatrix3D::action(double c, const double *x, double *y) const
 {
+    const int n = fem.size();
+    auto m = _m.device_read();
+
     forall(n, [=] __device__ (int i) -> void
     {
         y[i] += c * m[i] * x[i];
     });
 }
 
-void MassMatrix3D::action(double c, const double *x, double *y) const
+void MassMatrix3D::action(const double *x, double *y) const
 {
-    mass_action(fem.size(), c, _m.device_read(), x, y);
-}
+    const int n = fem.size();
+    auto m = _m.device_read();
 
-static void mass_action(int n, const double *m, const double *x, double *y)
-{
     forall(n, [=] __device__ (int i) -> void
     {
         y[i] = m[i] * x[i];
     });
-}
-
-void MassMatrix3D::action(const double *x, double *y) const
-{
-    mass_action(fem.size(), _m.device_read(), x, y);
 }
 
 InvMassMatrix3D MassMatrix3D::inv() const
@@ -102,6 +98,7 @@ static void inv_mass(int n, const double * __restrict__ d_m, double * __restrict
     });
 }
 
+// inplace
 static void inv_mass(int n, double * d_m)
 {
     forall(n, [=] __device__ (int i) -> void
@@ -138,10 +135,22 @@ InvMassMatrix3D::InvMassMatrix3D(const MassMatrix3D &M)
 
 void InvMassMatrix3D::action(double c, const double *x, double *y) const
 {
-    mass_action(fem.size(), c, _mi.device_read(), x, y);
+    const int n = fem.size();
+    auto mi = _mi.device_read();
+
+    forall(n, [=] __device__ (int i) -> void
+    {
+        y[i] += c * mi[i] * x[i];
+    });
 }
 
 void InvMassMatrix3D::action(const double *x, double *y) const
 {
-    mass_action(fem.size(), _mi.device_read(), x, y);
+    const int n = fem.size();
+    auto mi = _mi.device_read();
+
+    forall(n, [=] __device__ (int i) -> void
+    {
+        y[i] = mi[i] * x[i];
+    });
 }
