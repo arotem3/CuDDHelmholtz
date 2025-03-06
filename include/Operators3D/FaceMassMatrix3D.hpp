@@ -42,8 +42,14 @@ namespace cuddh
         host_device_dvec m;
     };
 
+    /**
+     * @brief Computes F[i] = (f, phi[i]) for all i, where phi[i] is the i-th basis function in the TraceSpace3D.
+     * @param H FaceMassMatrix3D
+     * @param f a function f(double3) -> double
+     * @param F a vector in the TraceSpace3D. On exit, F[i] = (f, phi[i]).
+     */
     template <typename Func>
-    void h1_trace(const FaceMassMatrix3D &H, const Func &F, double *f)
+    void h1_trace(const FaceMassMatrix3D &H, const Func &f, double *F)
     {
         const int ndof = H.tr.size();
 
@@ -54,7 +60,7 @@ namespace cuddh
         forall(ndof, [=] __device__ (int i) -> void
         {
             const double3 r = x[global_indices[i]];
-            f[i] = m[i] * F(r);
+            F[i] = m[i] * f(r);
         });
     }
 } // namespace cuddh
