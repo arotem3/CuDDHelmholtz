@@ -312,7 +312,7 @@ static int lambda_dofs(int *h_B, const EnsembleSpace *efem)
     return n_lambda;
 }
 
-static void mass_matrix(double *h_m, const H1Space &fem)
+static void mass_matrix(double *h_m, const H1Space2D &fem)
 {
     const Mesh2D &mesh = fem.mesh();
     const Basis &basis = fem.basis();
@@ -364,7 +364,7 @@ static void DD_gridfun(T1 *h_u_dd, const T2 *h_u_mesh, const EnsembleSpace *efem
     }
 }
 
-DDH::DDH(double omega, const double *h_a, const H1Space &fem, const EnsembleSpace &efem)
+DDH::DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem)
     : g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
       n_basis{fem.basis().size()},

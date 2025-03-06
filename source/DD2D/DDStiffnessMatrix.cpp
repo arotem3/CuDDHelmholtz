@@ -11,7 +11,7 @@ static void make_diffmat(float *h_D, const Basis &basis)
         h_D[i] = D[i];
 }
 
-static void geom_factors(float3 *d_G, const H1Space &fem, const EnsembleSpace &efem)
+static void geom_factors(float3 *d_G, const H1Space2D &fem, const EnsembleSpace &efem)
 {
     const Mesh2D &mesh = fem.mesh();
     const Basis &basis = fem.basis();
@@ -65,7 +65,7 @@ static void geom_factors(float3 *d_G, const H1Space &fem, const EnsembleSpace &e
     });
 }
 
-DDStiffnessMatrix::DDStiffnessMatrix(const H1Space &fem, const EnsembleSpace &efem)
+DDStiffnessMatrix::DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
     : n_basis(fem.basis().size()),
       mx_elem(efem.max_n_elem()),
       n_domains(efem.size()),

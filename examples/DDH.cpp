@@ -100,9 +100,9 @@ int main()
     // tensor products of these 1D basis functions.
     Basis basis(deg+1);
 
-    // The mesh and 1D basis functions are combined in H1Space to define the
+    // The mesh and 1D basis functions are combined in H1Space2D to define the
     // total global degrees of freedom of the problem.
-    H1Space fem(mesh, basis);
+    H1Space2D fem(mesh, basis);
     EnsembleSpace efem = partition_uniform_rect(fem, nx, nx);
 
     const int ndof = fem.size(); // # of degrees of freedom
@@ -134,6 +134,7 @@ int main()
               << "\t#elements = " << mesh.n_elem() << "\n"
               << "\tpolynomial degree = " << deg << "\n"
               << "\t#dof = " << 2 * ndof << "\n"
+              << "\t#subdomains = " << efem.size() << "\n"
               << "\t#lambda = " << n_lambda << "\n";
 
     HostDeviceArray<float> L(n_lambda);
@@ -152,13 +153,13 @@ int main()
     // save solution and collocation nodes to file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
 
-    const char xy_file[] = "solution/xy.0000";
-    const char sol_file[] = "solution/ddh.0000";
-    to_file(xy_file, N, xy);
-    to_file(sol_file, N, h_U);
-
-    std::cout << "\nSolution written to: " << sol_file
-              << "\nCoordinates written to: " << xy_file << "\n";
+    const char xy_file[] = "xy.0000";
+    const char sol_file[] = "ddh.0000";
+    
+    if (to_file(xy_file, N, xy))
+        std::cout << "\ncoordinates written to: " << xy_file << "\n";
+    if (to_file(sol_file, N, h_U))
+        std::cout << "Solution written to: " << sol_file << "\n";
 
     return 0;
 }

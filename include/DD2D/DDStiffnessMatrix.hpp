@@ -19,7 +19,7 @@ namespace cuddh
             MatrixWrapper<const float3> G;
         };
 
-        DDStiffnessMatrix(const H1Space &fem, const EnsembleSpace &efem);
+        DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem);
 
         DeviceDDStiffnessMatrix to_device() const
         {

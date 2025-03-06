@@ -1,7 +1,7 @@
 #ifndef CUDDH_LINEAR_FUNCTIONAL_HPP
 #define CUDDH_LINEAR_FUNCTIONAL_HPP
 
-#include "H1Space.hpp"
+#include "H1Space2D.hpp"
 #include "forall.hpp"
 #include "linalg.hpp"
 
@@ -11,15 +11,15 @@ namespace cuddh
     class LinearFunctional
     {
     public:
-        LinearFunctional(const H1Space& fem);
-        LinearFunctional(const H1Space& fem, const QuadratureRule& quad);
+        LinearFunctional(const H1Space2D& fem);
+        LinearFunctional(const H1Space2D& fem, const QuadratureRule& quad);
 
-        /// @brief F[i] <- F[i] + c * (f, phi[i]) where f=f(x) and phi[i] is the i-th basis function in the H1Space.
+        /// @brief F[i] <- F[i] + c * (f, phi[i]) where f=f(x) and phi[i] is the i-th basis function in the H1Space2D.
         /// @tparam Func invocable as (const double x[2]) -> double
         /// @param[in] c scalar coefficient
         /// @param[in] f f(const double x[2]) -> double 
         /// @param[in,out] F has length of fem.size(); On exit F[i] <- F[i] + c * (f, phi[i])
-        /// where phi[i] is the i-th basis function in the H1Space fem.
+        /// where phi[i] is the i-th basis function in the H1Space2D fem.
         template <typename Func>
         void action(double c, Func && f, double * F) const;
 
@@ -27,7 +27,7 @@ namespace cuddh
         void action(Func && f, double * F) const;
 
     private:
-        const H1Space& fem;
+        const H1Space2D& fem;
         
         const int ndof;
         const int n_elem;

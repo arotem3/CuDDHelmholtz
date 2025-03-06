@@ -10,7 +10,7 @@ using namespace cuddh;
 class Helmholtz : public Operator
 {
 public:
-    Helmholtz(double omega_, const double * a2x, const double * ax, const H1Space& fem_, const FaceSpace& fs_)
+    Helmholtz(double omega_, const double * a2x, const double * ax, const H1Space2D& fem_, const TraceSpace2D& fs_)
         : omega{omega_},
           ndof{fem_.size()},
           fdof{fs_.size()},
@@ -69,8 +69,8 @@ private:
     const int ndof;
     const int fdof;
     
-    const H1Space& fem;
-    const FaceSpace& fs;
+    const H1Space2D& fem;
+    const TraceSpace2D& fs;
     
     StiffnessMatrix S;
     MassMatrix M;

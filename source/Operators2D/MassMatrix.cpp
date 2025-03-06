@@ -66,7 +66,7 @@ namespace cuddh
         });
     }
 
-    MassMatrix::MassMatrix(const H1Space& fem_)
+    MassMatrix::MassMatrix(const H1Space2D& fem_)
         : fem{fem_},
           ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
@@ -100,7 +100,7 @@ namespace cuddh
             cuddh_error("MassMatrix error: quadrature rules with more than 32 points not yet supported.");
     }
 
-    MassMatrix::MassMatrix(const double * a_, const H1Space& fem_)
+    MassMatrix::MassMatrix(const double * a_, const H1Space2D& fem_)
         : fem{fem_},
           ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
@@ -279,7 +279,7 @@ namespace cuddh
         });
     }
 
-    DiagInvMassMatrix::DiagInvMassMatrix(const H1Space& fem_)
+    DiagInvMassMatrix::DiagInvMassMatrix(const H1Space2D& fem_)
         : fem{fem_},
           ndof{fem.size()},
           _p(ndof)
@@ -296,7 +296,7 @@ namespace cuddh
         init_diag_mass(ndof, n_elem, n_basis, nullptr, detJ, q, I, op);
     }
 
-    DiagInvMassMatrix::DiagInvMassMatrix(const double * a, const H1Space& fem_)
+    DiagInvMassMatrix::DiagInvMassMatrix(const double * a, const H1Space2D& fem_)
         : fem{fem_},
           ndof(fem.size()),
           _p(ndof)

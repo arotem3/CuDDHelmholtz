@@ -2,7 +2,7 @@
 
 using namespace cuddh;
 
-DDFaceMassMatrix::DDFaceMassMatrix(const H1Space &fem, const EnsembleSpace &efem)
+DDFaceMassMatrix::DDFaceMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
     : mx_fdof(efem.max_fsize()), n_domains(efem.size()), m(mx_fdof * n_domains)
 {
     const Mesh2D &mesh = fem.mesh();

@@ -2,7 +2,7 @@
 #define CUDDH_STIFFNESS_MATRIX_HPP
 
 #include "Operator.hpp"
-#include "H1Space.hpp"
+#include "H1Space2D.hpp"
 #include "linalg.hpp"
 
 namespace cuddh
@@ -11,21 +11,21 @@ namespace cuddh
     class StiffnessMatrix : public Operator
     {
     public:
-        StiffnessMatrix(const H1Space& fem);
-        StiffnessMatrix(const H1Space& fem, const QuadratureRule& quad);
+        StiffnessMatrix(const H1Space2D& fem);
+        StiffnessMatrix(const H1Space2D& fem, const QuadratureRule& quad);
 
         ~StiffnessMatrix() = default;
 
         /// @brief y[i] <- y[i] + c * (grad x, grad phi[i])
-        /// where phi[i] is the i-th basis function in the H1Space
+        /// where phi[i] is the i-th basis function in the H1Space2D
         void action(double c, const double * x, double * y) const override;
 
         /// @brief y[i] <- (grad x, grad phi[i])
-        /// where phi[i] is the i-th basis function in the H1Space
+        /// where phi[i] is the i-th basis function in the H1Space2D
         void action(const double * x, double * y) const override;
 
     private:
-        const H1Space& fem;
+        const H1Space2D& fem;
 
         const int ndof;
         const int n_elem;

@@ -37,7 +37,7 @@ namespace cuddh
         });
     }
 
-    StiffnessMatrix::StiffnessMatrix(const H1Space& fem_)
+    StiffnessMatrix::StiffnessMatrix(const H1Space2D& fem_)
         : fem{fem_},
           ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
@@ -59,7 +59,7 @@ namespace cuddh
         setup_geometric_factors(n_elem, quad, J, G);
     }
 
-    StiffnessMatrix::StiffnessMatrix(const H1Space& fem_, const QuadratureRule& quad)
+    StiffnessMatrix::StiffnessMatrix(const H1Space2D& fem_, const QuadratureRule& quad)
         : fem{fem_},
           ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},

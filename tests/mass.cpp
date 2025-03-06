@@ -16,7 +16,7 @@ namespace cuddh_test
         const int n_elem = mesh.n_elem();
         const int n_basis = basis.size();
 
-        H1Space fem(mesh, basis);
+        H1Space2D fem(mesh, basis);
         const int ndof = fem.size();
 
         host_device_dvec _u(ndof);

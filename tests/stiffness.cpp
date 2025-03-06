@@ -30,7 +30,7 @@ namespace cuddh_test
         constexpr double tol = 1e-6;
         const int n_basis = basis.size();
 
-        H1Space fem(mesh, basis);
+        H1Space2D fem(mesh, basis);
         const int ndof = fem.size();
 
         host_device_dvec _Af(ndof);

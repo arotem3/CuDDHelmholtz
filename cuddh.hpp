@@ -22,7 +22,7 @@
 #include "include/Mesh3D/Element.hpp"
 #include "include/Mesh3D/Mesh3D.hpp"
 
-#include "include/H1Space.hpp"
+#include "include/H1Space2D.hpp"
 #include "include/H1Space3D.hpp"
 
 #include "include/Operator.hpp"

@@ -48,7 +48,7 @@ namespace cuddh
         });
     }
 
-    FaceMassMatrix::FaceMassMatrix(const FaceSpace& fs_)
+    FaceMassMatrix::FaceMassMatrix(const TraceSpace2D& fs_)
         : fs{fs_},
           ndof{fs.size()},
           n_faces{fs.n_faces()},
@@ -93,7 +93,7 @@ namespace cuddh
             cuddh_error("FaceMassMatrix does not support quadrature rules with more than 64 points.");
     }
 
-    FaceMassMatrix::FaceMassMatrix(const double * a, const FaceSpace& fs_)
+    FaceMassMatrix::FaceMassMatrix(const double * a, const TraceSpace2D& fs_)
         : fs{fs_},
           ndof{fs.size()},
           n_faces{fs.n_faces()},
@@ -254,7 +254,7 @@ namespace cuddh
 
     }
 
-    DiagInvFaceMassMatrix::DiagInvFaceMassMatrix(const FaceSpace& fs)
+    DiagInvFaceMassMatrix::DiagInvFaceMassMatrix(const TraceSpace2D& fs)
         : ndof(fs.size()),
           inv_m(ndof)
     {
@@ -277,7 +277,7 @@ namespace cuddh
         init_diag(ndof, nf, n_basis, d_w, d_detJ, nullptr, d_I, d_inv_m);
     }
 
-    DiagInvFaceMassMatrix::DiagInvFaceMassMatrix(const double * a, const FaceSpace& fs)
+    DiagInvFaceMassMatrix::DiagInvFaceMassMatrix(const double * a, const TraceSpace2D& fs)
         : ndof{fs.size()},
           inv_m(ndof)
     {

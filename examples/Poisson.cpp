@@ -54,7 +54,7 @@ using namespace cuddh;
 class Poisson : public Operator
 {
 public:
-    Poisson(const H1Space& fem, const FaceSpace& fs);
+    Poisson(const H1Space2D& fem, const TraceSpace2D& fs);
 
     void action(const double * x, double * y) const;
 
@@ -63,7 +63,7 @@ public:
 private:
     const int ndof;
     StiffnessMatrix a;
-    const FaceSpace& fs;
+    const TraceSpace2D& fs;
 };
 
 __device__ static double f(const double X[2])
@@ -98,9 +98,9 @@ int main()
     // tensor products of these 1D basis functions.
     Basis basis(deg+1);
 
-    // The mesh and 1D basis functions are combined in H1Space to define the
+    // The mesh and 1D basis functions are combined in H1Space2D to define the
     // total global degrees of freedom of the problem.
-    H1Space fem(mesh, basis);
+    H1Space2D fem(mesh, basis);
     const int ndof = fem.size(); // # of degrees of freedom
 
     std::cout << "Solving the Poisson equation...\n"
@@ -108,14 +108,14 @@ int main()
               << "\tpolynomial degree = " << deg << "\n"
               << "\t#dof = " << ndof << "\n";
 
-    // identify the boundary faces in the mesh in order to define the FaceSpace
+    // identify the boundary faces in the mesh in order to define the TraceSpace2D
     // and FaceMassMatrix
     ivec boundary_faces = mesh.boundary_edges();
 
-    // The FaceSpace is a subspace of the H1Space used to identify the degrees
+    // The TraceSpace2D is a subspace of the H1Space2D used to identify the degrees
     // of freedom needed on the boundary of the domain. In particular, we use
     // this object to restrict the solution to H1_0.
-    FaceSpace fs(fem, boundary_faces.size(), boundary_faces);
+    TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
     const int fdof = fs.size();
 
     // To manage memory between host and device, we use the HostDeviceArray class.
@@ -140,7 +140,7 @@ int main()
     l.action(1.0, [] __device__ (const double X[2]) -> double {return f(X);}, b); // (f, phi)
     fs.orth(b); // zero out boundary terms
 
-    // We project g onto the FaceSpace by solving <q, phi> = <g, phi> for the projection q.
+    // We project g onto the TraceSpace2D by solving <q, phi> = <g, phi> for the projection q.
     FaceLinearFunctional fl(fs);
     fl.action([] __device__ (const double X[2]) -> double {return g(X);}, y); // y <- <g, phi>
 
@@ -176,7 +176,7 @@ int main()
     return 0;
 }
 
-Poisson::Poisson(const H1Space& fem, const FaceSpace& fs_)
+Poisson::Poisson(const H1Space2D& fem, const TraceSpace2D& fs_)
     : ndof{fem.size()},
       a(fem),
       fs{fs_} {}

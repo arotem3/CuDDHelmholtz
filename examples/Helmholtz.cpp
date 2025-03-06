@@ -93,8 +93,8 @@ __device__ static double a(const double X[2])
         return 1.0;
 }
 
-/// @brief projects the coefficient a^2(x) onto the H1Space and a(x) onto the FaceSpace
-static void project_coefficients(const H1Space& fem, const FaceSpace& fs,  double * a2x, double * ax);
+/// @brief projects the coefficient a^2(x) onto the H1Space2D and a(x) onto the TraceSpace2D
+static void project_coefficients(const H1Space2D& fem, const TraceSpace2D& fs,  double * a2x, double * ax);
 
 int main()
 {
@@ -115,9 +115,9 @@ int main()
     // tensor products of these 1D basis functions.
     Basis basis(deg+1);
 
-    // The mesh and 1D basis functions are combined in H1Space to define the
+    // The mesh and 1D basis functions are combined in H1Space2D to define the
     // total global degrees of freedom of the problem.
-    H1Space fem(mesh, basis);
+    H1Space2D fem(mesh, basis);
     const int ndof = fem.size(); // # of degrees of freedom
 
     std::cout << "Solving the Helmholtz equation...\n"
@@ -126,13 +126,13 @@ int main()
               << "\tpolynomial degree = " << deg << "\n"
               << "\t#dof = " << 2 * ndof << "\n";
 
-    // identify the boundary faces in the mesh in order to define the FaceSpace
+    // identify the boundary faces in the mesh in order to define the TraceSpace2D
     // and FaceMassMatrix
     ivec boundary_faces = mesh.boundary_edges();
 
-    // The FaceSpace is a subspace of the H1Space used to identify the degrees
+    // The TraceSpace2D is a subspace of the H1Space2D used to identify the degrees
     // of freedom needed in the computation of trace terms: <u, phi>
-    FaceSpace fs(fem, boundary_faces.size(), boundary_faces);
+    TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
     const int fdof = fs.size();
 
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
@@ -146,9 +146,9 @@ int main()
     
     double * d_U = U.device_write(); // the solution vector [u; v]
     double * d_b = b.device_write(); // the right hand side b(phi)
-    double * d_a2 = a2x.device_write(); // a^2(x) projected onto H1Space
+    double * d_a2 = a2x.device_write(); // a^2(x) projected onto H1Space2D
     
-    double * d_a = ax.device_write(); // a(x) projected onto FaceSpace
+    double * d_a = ax.device_write(); // a(x) projected onto TraceSpace2D
     
     project_coefficients(fem, fs, d_a2, d_a);
 
@@ -187,7 +187,7 @@ int main()
     return 0;
 }
 
-void project_coefficients(const H1Space& fem, const FaceSpace& fs,  double * a2x, double * ax)
+void project_coefficients(const H1Space2D& fem, const TraceSpace2D& fs,  double * a2x, double * ax)
 {
     int n_basis = fem.basis().size();
     QuadratureRule q(2 * n_basis, QuadratureRule::GaussLegendre);

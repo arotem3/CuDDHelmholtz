@@ -16,10 +16,10 @@ namespace cuddh
     /// @brief abstract representation of H1 finite element space on a mesh of
     /// quad elements with tensor product basis functions. This class defines
     /// the global ordering of degrees of freedom for vectors in this space.
-    class H1Space
+    class H1Space2D
     {
     public:
-        H1Space(const Mesh2D& mesh, const Basis& basis);
+        H1Space2D(const Mesh2D& mesh, const Basis& basis);
 
         /// @brief returns the dimension of the space, i.e. the number of
         /// degrees of freedom. 
@@ -66,12 +66,12 @@ namespace cuddh
         host_device_dvec _xy;
     };
 
-    /// @brief abstract representation of a subspace of an H1Space spanned by
+    /// @brief abstract representation of a subspace of an H1Space2D spanned by
     /// the basis functions with support on the specified faces
-    class FaceSpace
+    class TraceSpace2D
     {
     public:
-        FaceSpace(const H1Space& fem, int n_faces, const int * faces);
+        TraceSpace2D(const H1Space2D& fem, int n_faces, const int * faces);
 
         /// @brief returns the dimension of the space 
         int size() const
@@ -91,7 +91,7 @@ namespace cuddh
             return reshape(_faces.read(m), _n_faces);
         }
 
-        /// @brief returns the indices of the FaceSpace degrees of freedom
+        /// @brief returns the indices of the TraceSpace2D degrees of freedom
         /// corresponding to the local face indices. Specifically,
         /// subspace_indices(i, f) is the subspace index of the i-th basis
         /// function on face f. These indices range from 0 to this->size()-1.
@@ -101,41 +101,41 @@ namespace cuddh
         }
 
         /// @brief returns the indicies of the global degrees of freedom in the
-        /// H1Space relative to the FaceSpace. that is, global_indicies(i) is
-        /// the index in H1Space corresponding to the i-th FaceSpace degree of
+        /// H1Space2D relative to the TraceSpace2D. that is, global_indicies(i) is
+        /// the index in H1Space2D corresponding to the i-th TraceSpace2D degree of
         /// freedom.
         const_ivec_wrapper global_indices(MemorySpace m) const
         {
             return reshape(_proj.read(m), ndof);
         }
 
-        /// @brief project H1Space vector to FaceSpace vector
-        /// @param x DEVICE. H1Space vector
-        /// @param y DEVICE. FaceSpace vector
+        /// @brief project H1Space2D vector to TraceSpace2D vector
+        /// @param x DEVICE. H1Space2D vector
+        /// @param y DEVICE. TraceSpace2D vector
         void restrict(const double * x, double * y) const;
 
-        /// @brief Transpose of restrict. Extend FaceSpace vector to H1Space
-        /// @param x DEVICE. FaceSpace vector
-        /// @param y DEVICE. H1Space vector. On exit, y <- y + P' * x where P is the restriction operator.
+        /// @brief Transpose of restrict. Extend TraceSpace2D vector to H1Space2D
+        /// @param x DEVICE. TraceSpace2D vector
+        /// @param y DEVICE. H1Space2D vector. On exit, y <- y + P' * x where P is the restriction operator.
         void prolong(const double * x, double * y) const;
 
-        /// @brief Project H1Space space vector to orthogonal complement of
-        /// FaceSpace. I.e. set face values to zero.
-        /// @param x DEVICE. H1Space vector. On exit, x <- x - P' * P * x where
+        /// @brief Project H1Space2D space vector to orthogonal complement of
+        /// TraceSpace2D. I.e. set face values to zero.
+        /// @param x DEVICE. H1Space2D vector. On exit, x <- x - P' * P * x where
         /// P is the restriction operator and P' is prolongation operator.
         void orth(double * x) const;
 
-        /// @brief returns the global H1Space
-        const H1Space& h1_space() const
+        /// @brief returns the global H1Space2D
+        const H1Space2D& h1_space() const
         {
             return fem;
         }
 
-        /// @brief returns the edge metrics for the faces in the FaceSpace 
+        /// @brief returns the edge metrics for the faces in the TraceSpace2D 
         const Mesh2D::EdgeMetricCollection& metrics(const QuadratureRule& quad) const;
 
     private:
-        const H1Space& fem;
+        const H1Space2D& fem;
         const int _n_faces;
         const int n_basis;
         int ndof;

@@ -1,4 +1,4 @@
-#include "H1Space.hpp"
+#include "H1Space2D.hpp"
 
 template <typename Map, typename Key>
 static bool contains(const Map & map, Key key)
@@ -8,7 +8,7 @@ static bool contains(const Map & map, Key key)
 
 namespace cuddh
 {
-    H1Space::H1Space(const Mesh2D& mesh_, const Basis& basis_)
+    H1Space2D::H1Space2D(const Mesh2D& mesh_, const Basis& basis_)
         : n_elem{mesh_.n_elem()},
           n_basis{basis_.size()},
           _mesh{mesh_},
@@ -126,7 +126,7 @@ namespace cuddh
         }
     }
 
-    FaceSpace::FaceSpace(const H1Space& fem_, int nf, const int * faces_)
+    TraceSpace2D::TraceSpace2D(const H1Space2D& fem_, int nf, const int * faces_)
         : fem{fem_},
           _n_faces{nf},
           n_basis{fem.basis().size()},
@@ -186,7 +186,7 @@ namespace cuddh
             proj(i) = P.at(i);
     }
 
-    void FaceSpace::restrict(const double * __restrict__ x, double * __restrict__ y) const
+    void TraceSpace2D::restrict(const double * __restrict__ x, double * __restrict__ y) const
     {
         const int n = ndof;
         auto proj = global_indices(MemorySpace::DEVICE);
@@ -197,7 +197,7 @@ namespace cuddh
         });
     }
 
-    void FaceSpace::prolong(const double * __restrict__ x, double * __restrict__ y) const
+    void TraceSpace2D::prolong(const double * __restrict__ x, double * __restrict__ y) const
     {
         const int n = ndof;
         auto proj = global_indices(MemorySpace::DEVICE);
@@ -208,7 +208,7 @@ namespace cuddh
         });
     }
 
-    void FaceSpace::orth(double * x) const
+    void TraceSpace2D::orth(double * x) const
     {
         auto proj = global_indices(MemorySpace::DEVICE);
 
@@ -218,7 +218,7 @@ namespace cuddh
         });
     }
 
-    const Mesh2D::EdgeMetricCollection& FaceSpace::metrics(const QuadratureRule& quad) const
+    const Mesh2D::EdgeMetricCollection& TraceSpace2D::metrics(const QuadratureRule& quad) const
     {
         auto key = quad.name();
         if (not contains(_metrics, key))

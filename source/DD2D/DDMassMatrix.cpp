@@ -2,7 +2,7 @@
 
 using namespace cuddh;
 
-static void mass(float *d_m, const H1Space &fem, const EnsembleSpace &efem)
+static void mass(float *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
 {
     const Mesh2D &mesh = fem.mesh();
     const Basis &basis = fem.basis();
@@ -46,7 +46,7 @@ static void mass(float *d_m, const H1Space &fem, const EnsembleSpace &efem)
     });
 }
 
-DDMassMatrix::DDMassMatrix(const H1Space &fem, const EnsembleSpace &efem)
+DDMassMatrix::DDMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
     : mx_dofs(efem.max_size()),
       n_domains(efem.size()),
       m(mx_dofs * n_domains)

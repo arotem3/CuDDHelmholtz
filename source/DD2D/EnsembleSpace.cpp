@@ -5,7 +5,7 @@ using namespace cuddh;
 class EnsembleSpaceBuilder
 {
 public:
-    EnsembleSpaceBuilder(const H1Space &fem, int n_spaces, const int *element_labels);
+    EnsembleSpaceBuilder(const H1Space2D &fem, int n_spaces, const int *element_labels);
 
     int set_subdomain_num_elements(ivec_wrapper &h_s_elems) const;
     void set_subdomain_elements(imat_wrapper &h_elems) const;
@@ -19,7 +19,7 @@ public:
     void compute_global_indices(imat_wrapper &h_gI) const;
 
 private:
-    const H1Space &fem;
+    const H1Space2D &fem;
     std::vector<std::vector<int>> E;                 // elements
     std::vector<std::vector<std::pair<int, int>>> F; // faces
     std::vector<std::array<int, 4>> shared_faces;    // {subdomain0, subdomain1, subdomain face index0, ..face..1}
@@ -27,7 +27,7 @@ private:
     std::vector<std::vector<int>> f2s;               // face index to subspace index
 };
 
-EnsembleSpace::EnsembleSpace(const H1Space &fem, int n_spaces_, const int *element_labels)
+EnsembleSpace::EnsembleSpace(const H1Space2D &fem, int n_spaces_, const int *element_labels)
     : n_spaces{n_spaces_},
       n_basis{fem.basis().size()},
       s_dof(n_spaces),
@@ -82,7 +82,7 @@ EnsembleSpace::EnsembleSpace(const H1Space &fem, int n_spaces_, const int *eleme
     n_shared_dofs = ESbuilder.compute_shared_dof_map(cmap, h_fI);
 }
 
-EnsembleSpace cuddh::partition_uniform_rect(const H1Space &fem, int nx, int ny, int max_dof_1d)
+EnsembleSpace cuddh::partition_uniform_rect(const H1Space2D &fem, int nx, int ny, int max_dof_1d)
 {
     const int n_basis = fem.basis().size();
     const int elems_per_domain_x = max_dof_1d / n_basis;
@@ -222,7 +222,7 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
     }
 }
 
-EnsembleSpaceBuilder::EnsembleSpaceBuilder(const H1Space &fem, int n_spaces, const int *element_labels)
+EnsembleSpaceBuilder::EnsembleSpaceBuilder(const H1Space2D &fem, int n_spaces, const int *element_labels)
     : fem{fem}
 {
     E = compute_subspace_elements(fem.mesh().n_elem(), n_spaces, element_labels);

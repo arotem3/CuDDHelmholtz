@@ -1,7 +1,7 @@
 #ifndef CUDDH_FACE_MASS_MATRIX_HPP
 #define CUDDH_FACE_MASS_MATRIX_HPP
 
-#include "H1Space.hpp"
+#include "H1Space2D.hpp"
 #include "Operator.hpp"
 #include "HostDeviceArray.hpp"
 #include "forall.hpp"
@@ -9,25 +9,25 @@
 
 namespace cuddh
 {
-    /// @brief m(u, phi) = (a(x) * u, phi) for all phi in a FaceSpace
+    /// @brief m(u, phi) = (a(x) * u, phi) for all phi in a TraceSpace2D
     class FaceMassMatrix : public Operator
     {
     public:
-        FaceMassMatrix(const FaceSpace& fs);
-        FaceMassMatrix(const double * a, const FaceSpace& fs);
+        FaceMassMatrix(const TraceSpace2D& fs);
+        FaceMassMatrix(const double * a, const TraceSpace2D& fs);
 
         /// @brief y[i] <- y[i] + c * (x, phi[i]),
-        /// where phi[i] is the i-th basis function in the FaceSpace.
+        /// where phi[i] is the i-th basis function in the TraceSpace2D.
         /// @param c scalar coefficient
-        /// @param x a vector in the FaceSpace
-        /// @param y a vector in the FaceSpace. On exit, y[i] <- y[i] + c * (x, phi[i]).
+        /// @param x a vector in the TraceSpace2D
+        /// @param y a vector in the TraceSpace2D. On exit, y[i] <- y[i] + c * (x, phi[i]).
         void action(double c, const double * x, double * y) const override;
 
         /// @brief y[i] = (x, phi[i])
         void action(const double * x, double * y) const override;
 
     private:
-        const FaceSpace& fs;
+        const TraceSpace2D& fs;
 
         const int ndof;
         const int n_faces;
@@ -42,13 +42,13 @@ namespace cuddh
     class DiagInvFaceMassMatrix : public Operator
     {
     public:
-        DiagInvFaceMassMatrix(const FaceSpace& fs);
-        DiagInvFaceMassMatrix(const double * a, const FaceSpace& fs);
+        DiagInvFaceMassMatrix(const TraceSpace2D& fs);
+        DiagInvFaceMassMatrix(const double * a, const TraceSpace2D& fs);
 
         /// @brief y <- y + c * A * x where A ~ inv(M).
         /// @param c scalar coefficient
-        /// @param x FaceSpace vector
-        /// @param y FaceSpace vector
+        /// @param x TraceSpace2D vector
+        /// @param y TraceSpace2D vector
         void action(double c, const double * x, double * y) const override;
 
         void action(const double * x, double * y) const override;

@@ -1,7 +1,7 @@
 #ifndef CUDDH_FACE_LINEAR_FUNCTIONAL_HPP
 #define CUDDH_FACE_LINEAR_FUNCTIONAL_HPP
 
-#include "H1Space.hpp"
+#include "H1Space2D.hpp"
 #include "HostDeviceArray.hpp"
 #include "forall.hpp"
 #include "linalg.hpp"
@@ -9,15 +9,15 @@
 namespace cuddh
 {
     /// @brief computes inner products (f, phi) for face data f = f(x)
-    /// (x on faces defined by FaceSpace)
+    /// (x on faces defined by TraceSpace2D)
     class FaceLinearFunctional
     {
     public:
-        FaceLinearFunctional(const FaceSpace& fs);
-        FaceLinearFunctional(const FaceSpace& fs, const QuadratureRule& quad);
+        FaceLinearFunctional(const TraceSpace2D& fs);
+        FaceLinearFunctional(const TraceSpace2D& fs, const QuadratureRule& quad);
 
         /// @brief F[i] <- F[i] + c * (f, phi[i])
-        /// where f=f(x) and phi[i] is the i-th basis function in the FaceSpace.
+        /// where f=f(x) and phi[i] is the i-th basis function in the TraceSpace2D.
         /// @tparam Func invocable as (const double x[2]) -> double
         /// @param c scalar coefficient
         /// @param f f(const double x[2]) -> double
@@ -29,7 +29,7 @@ namespace cuddh
         void action(Func && f, double * F) const;
 
     private:
-        const FaceSpace& fs;
+        const TraceSpace2D& fs;
         const Mesh2D::EdgeMetricCollection& metrics;
 
         const int fdof;

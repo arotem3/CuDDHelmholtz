@@ -5,7 +5,7 @@
 #include <utility>
 #include <algorithm>
 
-#include "H1Space.hpp"
+#include "H1Space2D.hpp"
 #include "Tensor.hpp"
 
 namespace cuddh
@@ -13,13 +13,13 @@ namespace cuddh
     class EnsembleSpace
     {
     public:
-        /// @brief initialize an EnsembleSpace by specifying the global H1Space
+        /// @brief initialize an EnsembleSpace by specifying the global H1Space2D
         /// and the association of each element to a subspace.
-        /// @param fem the global H1Space
+        /// @param fem the global H1Space2D
         /// @param n_spaces number of spaces in ensemble
         /// @param element_labels has length n_elem. element_labels[el]
         /// indicates which subspace element el belongs to.
-        EnsembleSpace(const H1Space &fem, int n_spaces, const int *element_labels);
+        EnsembleSpace(const H1Space2D &fem, int n_spaces, const int *element_labels);
 
         /// @brief returns the number of subspaces
         int size() const
@@ -153,7 +153,7 @@ namespace cuddh
         host_device_ivec cmap;
     };
 
-    EnsembleSpace partition_uniform_rect(const H1Space &fem, int nx, int ny, int max_dof_1d = 16);
+    EnsembleSpace partition_uniform_rect(const H1Space2D &fem, int nx, int ny, int max_dof_1d = 16);
 } // namespace cuddh
 
 #endif

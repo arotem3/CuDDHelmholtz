@@ -13,7 +13,7 @@ namespace cuddh
     class DDMassMatrix
     {
     public:
-        DDMassMatrix(const H1Space &fem, const EnsembleSpace &efem);
+        DDMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem);
 
         auto to_device() const
         {

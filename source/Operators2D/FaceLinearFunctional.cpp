@@ -2,7 +2,7 @@
 
 namespace cuddh
 {
-    FaceLinearFunctional::FaceLinearFunctional(const FaceSpace& fs_)
+    FaceLinearFunctional::FaceLinearFunctional(const TraceSpace2D& fs_)
         : fs{fs_},
           metrics{fs.metrics(fs.h1_space().basis().quadrature())},
           fdof{fs.size()},
@@ -19,7 +19,7 @@ namespace cuddh
             h_w[i] = quad.w(i);
     }
 
-    FaceLinearFunctional::FaceLinearFunctional(const FaceSpace& fs_, const QuadratureRule& quad)
+    FaceLinearFunctional::FaceLinearFunctional(const TraceSpace2D& fs_, const QuadratureRule& quad)
         : fs{fs_},
           metrics{fs.metrics(quad)},
           fdof{fs.size()},
