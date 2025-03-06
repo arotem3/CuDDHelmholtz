@@ -12,8 +12,10 @@ namespace cuddh
     class QuadFace
     {
     public:
-        __host__ __device__ QuadFace(const double3 *X);
+        QuadFace() = default;
         ~QuadFace() = default;
+
+        __host__ __device__ QuadFace(const double3 *X);
 
         /**
          * @brief Maps the reference coordinates to the physical coordinates.
