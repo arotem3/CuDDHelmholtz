@@ -150,3 +150,94 @@ H1Space3D::H1Space3D(const Mesh3D &mesh, const Basis &basis)
         }
     }
 }
+
+TraceSpace3D::TraceSpace3D(const H1Space3D &fem, int n_faces, const int *faces)
+    : fem{fem},
+     nf{n_faces},
+     n_basis{fem.basis().size()},
+     _I(n_basis * n_basis * n_faces),
+     _faces(n_faces)
+{
+    auto F = reshape(_faces.host_write(), n_faces);
+    auto I = reshape(_I.host_write(), n_basis, n_basis, n_faces);
+
+    for (int i = 0; i < n_faces; ++i)
+    {
+        F[i] = faces[i];
+    }
+
+    const Mesh3D &mesh = fem.mesh();
+    const int n_elem = mesh.n_elem();
+    auto K = reshape(fem.global_indices(MemorySpace::HOST), n_basis, n_basis, n_basis, n_elem);
+
+    std::unordered_map<int, int> mask; // unique mapping from global DOFs to trace DOFs
+    std::vector<int> P;               // global DOFs corresponding to trace DOFs
+
+    mask.reserve(n_basis * n_basis * n_faces);
+    P.reserve(n_basis * n_basis * n_faces);
+
+    int l = 0;
+    for (int f = 0; f < n_faces; ++f)
+    {
+        const FaceConnectivity connectivity = fem.mesh().interior_face_connectivity(F[f]);
+
+        const int el = connectivity.elements[0];
+        const FaceConnectivity::Label s = connectivity.label[0];
+
+        for (int i = 0; i < n_basis; ++i)
+        {
+            for (int j = 0; j < n_basis; ++j)
+            {
+                const int idx = face2vol(n_basis, i, j, s, el);
+
+                if (not contains(mask, idx))
+                {
+                    mask[idx] = l;
+                    P.push_back(idx);
+                    ++l;
+                }
+
+                I(i, j, f) = mask[idx];
+            }
+        }
+    }
+
+    ndof = mask.size();
+
+    _proj.resize(ndof);
+    auto proj = _proj.host_write();
+    for (int i = 0; i < ndof; ++i)
+    {
+        proj[i] = P[i];
+    }
+}
+
+void TraceSpace3D::restrict(const double * x, double * y) const
+{
+    auto proj = global_indices(MemorySpace::DEVICE);
+
+    forall(ndof, [=] __device__ (int i) -> void
+    {
+        y[i] = x[proj[i]];
+    });
+}
+
+void TraceSpace3D::prolong(const double * x, double * y) const
+{
+    auto proj = global_indices(MemorySpace::DEVICE);
+
+    forall(ndof, [=] __device__ (int i) -> void
+    {
+        y[proj[i]] += x[i];
+    });
+}
+
+void TraceSpace3D::orth(double * x) const
+{
+    auto proj = global_indices(MemorySpace::DEVICE);
+
+    forall(ndof, [=] __device__ (int i) -> void
+    {
+        x[proj[i]] = 0.0;
+    });
+}

@@ -59,10 +59,13 @@ namespace cuddh
         Mesh3D &operator=(Mesh3D &&) = default;
 
         int n_elem() const { return nel; }
+        int n_faces() const { return nf; }
         int n_boundary_faces() const { return nbf; }
         int n_interior_faces() const { return nif; }
 
-        // Geometry of element el
+        /**
+         * @brief Returns the geometry of element el.
+         */
         HexElement element(int el) const
         {
             if (el < 0 || el >= n_elem())
@@ -78,54 +81,89 @@ namespace cuddh
             return HexElement(x);
         }
 
-        // Geometry of boundary face f
+        /**
+         * @brief Returns the geometry of face f.
+         */
+        QuadFace face(int f) const
+        {
+            if (f < 0 || f >= n_faces())
+                throw std::out_of_range("Mesh3D::faces: face index out of range.");
+            
+            auto faces = reshape(this->faces.host_read(), 4, nf);
+            auto nodes = reshape(this->nodes.host_read(), this->nodes.size());
+
+            double3 x[4];
+            for (int i = 0; i < 4; ++i)
+                x[i] = nodes[faces(i, f)];
+            
+            return QuadFace(x);
+        }
+
+        /**
+         * @brief Returns the geometry of boundary face f.
+         */
         QuadFace boundary_face(int f) const
         {
             if (f < 0 || f >= n_boundary_faces())
                 throw std::out_of_range("Mesh3D::boundary_faces: face index out of range.");
 
-            auto boundary_faces = reshape(this->boundary_faces.host_read(), 4, nbf);
-            auto nodes = reshape(this->nodes.host_read(), this->nodes.size());
-
-            double3 x[4];
-            for (int i = 0; i < 4; ++i)
-                x[i] = nodes[boundary_faces(i, f)];
-
-            return QuadFace(x);
+            const int *boundary_faces = this->boundary_faces.host_read();
+            return face(boundary_faces[f]);
         }
 
-        // Geometry of interior face f
+        /**
+         * @brief Returns the geometry of interior face f.
+         */
         QuadFace interior_face(int f) const
         {
             if (f < 0 || f >= n_interior_faces())
                 throw std::out_of_range("Mesh3D::interior_faces: face index out of range.");
 
-            auto interior_faces = reshape(this->interior_faces.host_read(), 4, nif);
-            auto nodes = reshape(this->nodes.host_read(), this->nodes.size());
-
-            double3 x[4];
-            for (int i = 0; i < 4; ++i)
-                x[i] = nodes[interior_faces(i, f)];
-
-            return QuadFace(x);
+            const int *interior_faces = this->interior_faces.host_read();
+            return face(interior_faces[f]);
         }
 
-        // Face connectivity of interior face f
+        /**
+         * @brief Returns the face connectivity of face f.
+         */
+        FaceConnectivity face_connectivity(int f) const
+        {
+            if (f < 0 || f >= n_faces())
+                throw std::out_of_range("Mesh3D::face_connectivity: face index out of range.");
+
+            return connectivity[f];
+        }
+
+        /**
+         * @brief Returns the face connectivity of the interior face f.
+         */
         FaceConnectivity interior_face_connectivity(int f) const
         {
             if (f < 0 || f >= n_interior_faces())
                 throw std::out_of_range("Mesh3D::interior_face_connectivity: face index out of range.");
 
-            return interior_connectivity[f];
+            const int *interior_faces = this->interior_faces.host_read();
+            return face_connectivity(interior_faces[f]);
         }
 
-        // Face connectivity of boundary face f
+        /**
+         * @brief Returns the face connectivity of the boundary face f.
+         */
         FaceConnectivity boundary_face_connectivity(int f) const
         {
             if (f < 0 || f >= n_boundary_faces())
                 throw std::out_of_range("Mesh3D::boundary_face_connectivity: face index out of range.");
 
-            return boundary_connectivity[f];
+            const int *boundary_faces = this->boundary_faces.host_read();
+            return face_connectivity(boundary_faces[f]);
+        }
+
+        /**
+         * @brief Returns a list of face indices corresponding to the boundary faces.
+         */
+        const_ivec_wrapper get_boundary_faces() const
+        {
+            return reshape(boundary_faces.host_read(), nbf);
         }
 
         // Get the device mesh
@@ -133,15 +171,16 @@ namespace cuddh
 
     private:
         int nel; // number of elements
+        int nf;  // number of faces
         int nbf; // number of boundary faces
         int nif; // number of interior faces
         HostDeviceArray<double3> nodes;
         HostDeviceArray<int> elems;          // shape (8, n_elems) in canonical order
-        HostDeviceArray<int> interior_faces; // shape (4, n_interior_faces) -> indices of interior faces
-        HostDeviceArray<int> boundary_faces; // shape (4, n_boundary_faces) -> indices of boundary faces
+        HostDeviceArray<int> faces;          // shape (4, n_faces) -> indices of faces
+        HostDeviceArray<int> interior_faces; // shape (n_interior_faces) -> indices of interior faces (in faces)
+        HostDeviceArray<int> boundary_faces; // shape (n_boundary_faces) -> indices of boundary faces (in faces)
 
-        std::vector<FaceConnectivity> interior_connectivity;
-        std::vector<FaceConnectivity> boundary_connectivity;
+        std::vector<FaceConnectivity> connectivity;
     };
 
     /**
@@ -157,8 +196,9 @@ namespace cuddh
         DeviceMesh3D &operator=(DeviceMesh3D &&) = default;
 
         int n_elem() const { return elems.shape(1); }
-        int n_boundary_faces() const { return boundary_faces.shape(1); }
-        int n_interior_faces() const { return interior_faces.shape(1); }
+        int n_faces() const { return faces.shape(1); }
+        int n_boundary_faces() const { return boundary_faces.size(); }
+        int n_interior_faces() const { return interior_faces.size(); }
 
         __device__ HexElement element(int el) const
         {
@@ -174,6 +214,20 @@ namespace cuddh
             return HexElement(x);
         }
 
+        __device__ QuadFace face(int f) const
+        {
+#ifdef CUDDH_DEBUG
+            if (f < 0 || f >= n_faces())
+                cuddh_error("DeviceMesh3D::faces: face index out of range.");
+#endif
+
+            double3 x[4];
+            for (int i = 0; i < 4; ++i)
+                x[i] = nodes[faces(i, f)];
+
+            return QuadFace(x);
+        }
+
         __device__ QuadFace boundary_face(int f) const
         {
 #ifdef CUDDH_DEBUG
@@ -181,11 +235,7 @@ namespace cuddh
                 cuddh_error("DeviceMesh3D::boundary_faces: face index out of range.");
 #endif
 
-            double3 x[4];
-            for (int i = 0; i < 4; ++i)
-                x[i] = nodes[boundary_faces(i, f)];
-
-            return QuadFace(x);
+            return face(boundary_faces[f]);
         }
 
         __device__ QuadFace interior_face(int f) const
@@ -195,11 +245,7 @@ namespace cuddh
                 cuddh_error("DeviceMesh3D::interior_faces: face index out of range.");
 #endif
 
-            double3 x[4];
-            for (int i = 0; i < 4; ++i)
-                x[i] = nodes[interior_faces(i, f)];
-
-            return QuadFace(x);
+            return face(interior_faces[f]);
         }
 
     private:
@@ -207,8 +253,9 @@ namespace cuddh
 
         VectorWrapper<const double3> nodes;
         const_imat_wrapper elems;
-        const_imat_wrapper interior_faces;
-        const_imat_wrapper boundary_faces;
+        const_imat_wrapper faces;
+        const_ivec_wrapper interior_faces;
+        const_ivec_wrapper boundary_faces;
     };
 } // namespace cuddh
 

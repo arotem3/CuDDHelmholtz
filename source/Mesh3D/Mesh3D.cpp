@@ -233,46 +233,43 @@ Mesh3D Mesh3D::from_vertices(int nx, const double3 *nodes, int nel, const int *e
 
     const int n_faces = face_map.size();
     const int n_boundary_faces = n_faces - n_interior_faces;
+    mesh.nf = n_faces;
     mesh.nbf = n_boundary_faces;
     mesh.nif = n_interior_faces;
 
     // classify faces
-    mesh.interior_faces.resize(n_interior_faces * 4);
-    auto interior_faces = reshape(mesh.interior_faces.host_write(), 4, n_interior_faces);
+    mesh.interior_faces.resize(n_interior_faces);
+    auto interior_faces = reshape(mesh.interior_faces.host_write(), n_interior_faces);
 
-    mesh.boundary_faces.resize(n_boundary_faces * 4);
-    auto boundary_faces = reshape(mesh.boundary_faces.host_write(), 4, n_boundary_faces);
+    mesh.boundary_faces.resize(n_boundary_faces);
+    auto boundary_faces = reshape(mesh.boundary_faces.host_write(), n_boundary_faces);
 
-    mesh.interior_connectivity.resize(n_interior_faces);
-    mesh.boundary_connectivity.resize(n_boundary_faces);
+    mesh.faces.resize(4 * n_faces);
+    auto faces = reshape(mesh.faces.host_write(), 4, n_faces);
 
-    int I = 0, B = 0;
+    mesh.connectivity.resize(n_faces);
+
+    int l = 0, I = 0, B = 0;
     for (auto &[face, connectivity] : face_map)
     {
+        for (int i = 0; i < 4; ++i)
+            faces(i, l) = face[i];
+
         const auto [e0, e1] = connectivity.elements;
 
         if (e1 < 0) // boundary
         {
-            for (int i = 0; i < 4; ++i)
-            {
-                boundary_faces(i, B) = face[i];
-            }
-
-            mesh.boundary_connectivity.at(B) = connectivity;
-
+            boundary_faces[B] = l;
             B++;
         }
-        else // interior
+        else
         {
-            for (int i = 0; i < 4; ++i)
-            {
-                interior_faces(i, I) = face[i];
-            }
-
-            mesh.interior_connectivity.at(I) = connectivity;
-
+            interior_faces[I] = l;
             I++;
         }
+
+        mesh.connectivity[l] = connectivity;
+        l++;
     }
 
     assert(I == n_interior_faces);
@@ -287,8 +284,9 @@ DeviceMesh3D Mesh3D::to_device() const
 
     d_mesh.nodes = reshape(nodes.device_read(), nodes.size());
     d_mesh.elems = reshape(elems.device_read(), 8, nel);
-    d_mesh.interior_faces = reshape(interior_faces.device_read(), 4, nif);
-    d_mesh.boundary_faces = reshape(boundary_faces.device_read(), 4, nbf);
+    d_mesh.faces = reshape(faces.device_read(), 4, nf);
+    d_mesh.interior_faces = reshape(interior_faces.device_read(), nif);
+    d_mesh.boundary_faces = reshape(boundary_faces.device_read(), nbf);
 
     return d_mesh;
 }
