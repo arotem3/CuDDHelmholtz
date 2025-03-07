@@ -35,6 +35,7 @@
 
 #include "include/Operators3D/MassMatrix3D.hpp"
 #include "include/Operators3D/StiffnessMatrix3D.hpp"
+#include "include/Operators3D/FaceMassMatrix3D.hpp"
 
 #include "include/gmres.hpp"
 

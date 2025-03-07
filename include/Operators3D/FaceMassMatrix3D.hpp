@@ -1,5 +1,5 @@
-#ifndef CUDDH_FACE_MASS_MATRIX_HPP
-#define CUDDH_FACE_MASS_MATRIX_HPP
+#ifndef CUDDH_FACE_MASS_MATRIX_3D_HPP
+#define CUDDH_FACE_MASS_MATRIX_3D_HPP
 
 #include "H1Space3D.hpp"
 #include "Operator.hpp"
@@ -61,6 +61,26 @@ namespace cuddh
         {
             const double3 r = x[global_indices[i]];
             F[i] = m[i] * f(r);
+        });
+    }
+
+    /**
+     * @brief Computes F[i] = f(r[i]) for all i, where r[i] is the i-th physical coordinate in the TraceSpace3D.
+     * @param tr TraceSpace3D
+     * @param f a function f(double3) -> double
+     * @param F a vector in the TraceSpace3D. On exit, F[i] = f(r[i]).
+     */
+    template <typename Func>
+    void trace(const TraceSpace3D &tr, const Func &f, double *F)
+    {
+        const int ndof = tr.size();
+        auto x = tr.h1_space().physical_coordinates(MemorySpace::DEVICE);
+        auto global_indices = tr.global_indices(MemorySpace::DEVICE);
+
+        forall(ndof, [=] __device__ (int i) -> void
+        {
+            const double3 r = x[global_indices[i]];
+            F[i] = f(r);
         });
     }
 } // namespace cuddh

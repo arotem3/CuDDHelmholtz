@@ -48,6 +48,10 @@ namespace cuddh
         template <typename Func>
         friend void l2_project(const MassMatrix3D &M, const Func &f, double *F);
 
+        friend double l2_dot(const MassMatrix3D &M, const double *x, const double *y);
+        friend double l2_norm(const MassMatrix3D &M, const double *x);
+        friend double l2_dist(const MassMatrix3D &M, const double *x, const double *y);
+
         const H1Space3D &fem;
         host_device_dvec _m; // a(x) * w(i) * w(j) * w(k) * detJ
     };
@@ -97,6 +101,10 @@ namespace cuddh
             F[i] = f(xi) * m[i];
         });
     }
+
+    double l2_dot(const MassMatrix3D &M, const double *x, const double *y);
+    inline double l2_norm(const MassMatrix3D &M, const double *x) { return std::sqrt(l2_dot(M, x, x)); }
+    double l2_dist(const MassMatrix3D &M, const double *x, const double *y);
 } // namespace cuddh
 
 #endif

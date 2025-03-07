@@ -195,10 +195,10 @@ namespace cuddh
         DeviceMesh3D &operator=(const DeviceMesh3D &) = default;
         DeviceMesh3D &operator=(DeviceMesh3D &&) = default;
 
-        int n_elem() const { return elems.shape(1); }
-        int n_faces() const { return faces.shape(1); }
-        int n_boundary_faces() const { return boundary_faces.size(); }
-        int n_interior_faces() const { return interior_faces.size(); }
+        __host__ __device__ int n_elem() const { return elems.shape(1); }
+        __host__ __device__ int n_faces() const { return faces.shape(1); }
+        __host__ __device__ int n_boundary_faces() const { return boundary_faces.size(); }
+        __host__ __device__ int n_interior_faces() const { return interior_faces.size(); }
 
         __device__ HexElement element(int el) const
         {

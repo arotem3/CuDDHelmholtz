@@ -154,3 +154,92 @@ void InvMassMatrix3D::action(const double *x, double *y) const
         y[i] = mi[i] * x[i];
     });
 }
+
+template <int SZ, int NR, typename Lambda>
+__global__ static void sum_reduction_kernel(int n, const double * __restrict__ m, const double * x, const double * y, double * __restrict__ result, Lambda op)
+{
+    __shared__ double s[SZ];
+
+    const int thread_id = threadIdx.x;
+    const int block_id = blockIdx.x;
+
+    double sum = 0.0;
+
+    #pragma unroll
+    for (int j = 0; j < NR; ++j)
+    {
+        const int k = thread_id + SZ * (j + NR * block_id);
+        if (k < n)
+            sum += op(m[k], x[k], y[k]);
+    }
+
+    s[thread_id] = sum;
+
+    // tree reduction
+    for (int m = SZ>>1; m > 0; m >>= 1)
+    {
+        __syncthreads();
+
+        if (thread_id < m)
+        {
+            s[thread_id] += s[thread_id + m];
+        }
+    }
+
+    if (thread_id == 0)
+    {
+        sum = s[0];
+        atomicAdd(result, sum);
+    }
+}
+
+double cuddh::l2_dot(const MassMatrix3D &M, const double *x, const double *y)
+{
+    const int n = M.fem.size();
+    auto m = M._m.device_read();
+
+    host_device_dvec result(1);
+    double *d_result = result.device_write();
+    zeros(1, d_result);
+
+    auto op = [] __device__ (double m, double a, double b) -> double
+    {
+        return a * m * b;
+    };
+
+    constexpr int block_size = 32;
+    constexpr int num_reads = 8;
+    constexpr int data_per_block = block_size * num_reads;
+
+    const int n_blocks = (n + data_per_block - 1) / data_per_block;
+
+    sum_reduction_kernel<block_size, num_reads><<<n_blocks, block_size>>>(n, m, x, y, d_result, op);
+
+    return *result.host_read();
+}
+
+double cuddh::l2_dist(const MassMatrix3D &M, const double *x, const double *y)
+{
+    const int n = M.fem.size();
+    auto m = M._m.device_read();
+
+    host_device_dvec result(1);
+    double *d_result = result.device_write();
+    zeros(1, d_result);
+
+    auto op = [] __device__ (double m, double a, double b) -> double
+    {
+        double e = a - b;
+        return e * m * e;
+    };
+
+    constexpr int block_size = 32;
+    constexpr int num_reads = 8;
+    constexpr int data_per_block = block_size * num_reads;
+
+    const int n_blocks = (n + data_per_block - 1) / data_per_block;
+
+    sum_reduction_kernel<block_size, num_reads><<<n_blocks, block_size>>>(n, m, x, y, d_result, op);
+
+    return std::sqrt( *result.host_read() );
+}

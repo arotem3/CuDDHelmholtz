@@ -178,7 +178,7 @@ int main()
 
     const char xy_file[] = "solution/xy.0000";
     const char sol_file[] = "solution/helmholtz.0000";
-    to_file(xy_file, N, xy);
+    to_file(xy_file, N, xy.data());
     to_file(sol_file, N, h_U);
 
     std::cout << "\nSolution written to: " << sol_file

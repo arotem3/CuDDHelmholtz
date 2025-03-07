@@ -87,7 +87,7 @@ namespace cuddh
             return reshape(_faces.read(m), nf);
         }
 
-        /// @brief returns the indices of the TraceSpace2D degrees of freedom
+        /// @brief returns the indices of the TraceSpace3D degrees of freedom
         /// corresponding to the local face indices. Specifically,
         /// subspace_indices(i, j, f) is the subspace index of the (i,j) basis
         /// function on face f. These indices range from 0 to this->size()-1.
@@ -97,31 +97,31 @@ namespace cuddh
         }
 
         /// @brief returns the indicies of the global degrees of freedom in the
-        /// H1Space2D relative to the TraceSpace2D. that is, global_indicies(i) is
-        /// the index in H1Space2D corresponding to the i-th TraceSpace2D degree of
+        /// H1Space3D relative to the TraceSpace3D. that is, global_indicies(i) is
+        /// the index in H1Space3D corresponding to the i-th TraceSpace3D degree of
         /// freedom.
         const_ivec_wrapper global_indices(MemorySpace m) const
         {
             return reshape(_proj.read(m), ndof);
         }
 
-        /// @brief project H1Space2D vector to TraceSpace2D vector
-        /// @param x DEVICE. H1Space2D vector
-        /// @param y DEVICE. TraceSpace2D vector
+        /// @brief project H1Space3D vector to TraceSpace3D vector
+        /// @param x DEVICE. H1Space3D vector
+        /// @param y DEVICE. TraceSpace3D vector
         void restrict(const double * x, double * y) const;
 
-        /// @brief Transpose of restrict. Extend TraceSpace2D vector to H1Space2D
-        /// @param x DEVICE. TraceSpace2D vector
-        /// @param y DEVICE. H1Space2D vector. On exit, y <- y + P' * x where P is the restriction operator.
+        /// @brief Transpose of restrict. Extend TraceSpace3D vector to H1Space3D
+        /// @param x DEVICE. TraceSpace3D vector
+        /// @param y DEVICE. H1Space3D vector. On exit, y <- y + P' * x where P is the restriction operator.
         void prolong(const double * x, double * y) const;
 
-        /// @brief Project H1Space2D space vector to orthogonal complement of
-        /// TraceSpace2D. I.e. set face values to zero.
-        /// @param x DEVICE. H1Space2D vector. On exit, x <- x - P' * P * x where
+        /// @brief Project H1Space3D space vector to orthogonal complement of
+        /// TraceSpace3D. I.e. set face values to zero.
+        /// @param x DEVICE. H1Space3D vector. On exit, x <- x - P' * P * x where
         /// P is the restriction operator and P' is prolongation operator.
         void orth(double * x) const;
 
-        /// @brief returns the global H1Space2D
+        /// @brief returns the global H1Space3D
         const H1Space3D& h1_space() const
         {
             return fem;

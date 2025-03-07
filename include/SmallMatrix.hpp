@@ -20,7 +20,7 @@ namespace cuddh
         __host__ __device__ inline T &operator()(size_t i, size_t j)
         {
 #ifdef CUDDH_DEBUG
-            if (i < 0 || i >= Rows || j < 0 || j >= Cols)
+            if (i >= Rows || j >= Cols)
                 cuddh_error("SmallMatrix::operator() error: index out of range.");
 #endif
             return data[i][j];
@@ -29,7 +29,7 @@ namespace cuddh
         __host__ __device__ inline const T &operator()(size_t i, size_t j) const
         {
 #ifdef CUDDH_DEBUG
-            if (i < 0 || i >= Rows || j < 0 || j >= Cols)
+            if (i >= Rows || j >= Cols)
                 cuddh_error("SmallMatrix::operator() error: index out of range.");
 #endif
             return data[i][j];

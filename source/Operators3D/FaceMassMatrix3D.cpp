@@ -27,8 +27,8 @@ static void init_face_mass(const TraceSpace3D &tr, const double *a, double *m)
 
     forall_2d(n_basis, n_basis, n_faces, [=] __device__ (int f) mutable -> void
     {
-        const int &i = threadIdx.x;
-        const int &j = threadIdx.y;
+        const int i = threadIdx.x;
+        const int j = threadIdx.y;
 
         __shared__ QuadFace face;
         if (i == 0 && j == 0)

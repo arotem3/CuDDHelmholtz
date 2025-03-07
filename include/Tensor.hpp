@@ -28,8 +28,8 @@ namespace cuddh
             return s;
     }
 
-    template <typename Ind, typename... Inds>
-    __host__ __device__ inline int tensor_index(const int * shape, Ind idx, Inds... ids)
+    template <typename... Inds>
+    __host__ __device__ __forceinline__ int tensor_index(const int * shape, int idx, Inds... ids)
     {
         #ifdef CUDDH_DEBUG
         if (idx < 0 || idx >= *shape)

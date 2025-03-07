@@ -171,7 +171,7 @@ TraceSpace3D::TraceSpace3D(const H1Space3D &fem, int n_faces, const int *faces)
     auto K = reshape(fem.global_indices(MemorySpace::HOST), n_basis, n_basis, n_basis, n_elem);
 
     std::unordered_map<int, int> mask; // unique mapping from global DOFs to trace DOFs
-    std::vector<int> P;               // global DOFs corresponding to trace DOFs
+    std::vector<int> P;                // global DOFs corresponding to trace DOFs
 
     mask.reserve(n_basis * n_basis * n_faces);
     P.reserve(n_basis * n_basis * n_faces);
@@ -179,16 +179,13 @@ TraceSpace3D::TraceSpace3D(const H1Space3D &fem, int n_faces, const int *faces)
     int l = 0;
     for (int f = 0; f < n_faces; ++f)
     {
-        const FaceConnectivity connectivity = fem.mesh().interior_face_connectivity(F[f]);
-
-        const int el = connectivity.elements[0];
-        const FaceConnectivity::Label s = connectivity.label[0];
+        const FaceConnectivity connectivity = fem.mesh().face_connectivity(F[f]);
 
         for (int i = 0; i < n_basis; ++i)
         {
             for (int j = 0; j < n_basis; ++j)
             {
-                const int idx = face2vol(n_basis, i, j, s, el);
+                const int idx = K[face2vol(n_basis, i, j, connectivity.label[0], connectivity.elements[0])];
 
                 if (not contains(mask, idx))
                 {

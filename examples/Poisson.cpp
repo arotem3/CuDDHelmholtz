@@ -167,7 +167,7 @@ int main()
     
     const char xy_file[] = "solution/xy.0000";
     const char sol_file[] = "solution/poisson.0000";
-    to_file(xy_file, 2*ndof, xy);
+    to_file(xy_file, 2*ndof, xy.data());
     to_file(sol_file, ndof, h_u);
 
     std::cout << "\nSolution written to: " << sol_file

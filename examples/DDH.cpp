@@ -156,7 +156,7 @@ int main()
     const char xy_file[] = "xy.0000";
     const char sol_file[] = "ddh.0000";
     
-    if (to_file(xy_file, N, xy))
+    if (to_file(xy_file, N, xy.data()))
         std::cout << "\ncoordinates written to: " << xy_file << "\n";
     if (to_file(sol_file, N, h_U))
         std::cout << "Solution written to: " << sol_file << "\n";
