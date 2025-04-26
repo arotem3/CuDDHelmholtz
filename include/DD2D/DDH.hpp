@@ -21,7 +21,6 @@
 #include "DDMassMatrix.hpp"
 #include "DDFaceMassMatrix.hpp"
 #include "DDStiffnessMatrix.hpp"
-#include "WaveHoltz.hpp"
 
 namespace cuddh
 {
@@ -67,6 +66,9 @@ namespace cuddh
         int mx_fdof;
         int mx_elem_per_dom;
 
+        double omega;
+        double dt;
+
         const EnsembleSpace &efem;
 
         host_device_ivec _Bf;
@@ -77,8 +79,6 @@ namespace cuddh
 
         HostDeviceArray<float> _gmi; // global inverse mass
         HostDeviceArray<float> _a;   // variable coefficient a(x)
-
-        WaveHoltz W;
     };
 } // namespace cuddh
 

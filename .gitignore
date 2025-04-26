@@ -12,3 +12,5 @@ tmp
 ncu_*
 benchmark*
 build
+*.png
+*.mp4

@@ -6,6 +6,47 @@
 
 using namespace cuddh;
 
+namespace
+{
+    struct waveholtz
+    {
+        int nt;
+        float omega;
+        float dt;
+        float weight;
+        float shift;
+        float theta; // modified time step
+        float sigma; // modified acceleration scaling
+
+        constexpr __host__ __device__ float filter(float cs) const
+        {
+            return weight * cs - shift;
+        }
+    };
+
+    waveholtz make_waveholtz(double omega, double dt)
+    {
+        waveholtz W;
+        W.omega = omega;
+
+        double T = (2 * M_PI) / omega;
+        W.nt = std::ceil(T / dt);
+        dt = T / W.nt;
+        W.dt = dt;
+
+        double tan_omega_dt = std::tan(0.5 * omega * dt);
+        double a0 = 0.25 * (1 - tan_omega_dt * tan_omega_dt); // corrected shift
+
+        W.weight = 2.0 / W.nt;
+        W.shift = W.weight * a0;
+        W.theta = tan_omega_dt / (0.5 * omega);
+        W.sigma = std::cos(0.5 * omega * dt);
+        W.sigma *= W.sigma;
+
+        return W;
+    }
+}
+
 template <typename Map, typename Key>
 inline static bool contains(const Map &map, Key key)
 {
@@ -72,7 +113,7 @@ static void ddh_action(const EnsembleSpace *efem,
                        const MatrixWrapper<const float> g_inv_m,  /* global inverse mass matrix coefficients (mapped to subdomain index) */
                        const MatrixWrapper<const float> a,        /* variable coefficient */
                        const MatrixWrapper<const float> H,        /* subdomain boundary mass matrices */
-                       const WaveHoltz W,                         /* WaveHoltz data */
+                       const waveholtz W,                         /* WaveHoltz data */
                        const double *const __restrict__ x,        /* input */
                        double *const __restrict__ y,              /* output */
                        const float *const __restrict__ d_lambda,  /* substructured problem variables */
@@ -83,7 +124,6 @@ static void ddh_action(const EnsembleSpace *efem,
     auto s_dof = efem->sizes(MemorySpace::DEVICE);   // number of subdomain degrees of freedom
     auto s_fdof = efem->fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
 
-    const float dt = W.dt;
     const float rw = 1.0f / W.omega;
 
     if (y)
@@ -176,11 +216,11 @@ static void ddh_action(const EnsembleSpace *efem,
             }
 
             Q0 = ai * ai * m(tid, subsp); // used for time stepping
-            Q1 = 1.0f / (Q0 + 0.5f * dt * Hi);
-            delta = 0.5f * dt * dt / Q0;
+            Q1 = 1.0f / (Q0 + 0.5f * W.theta * Hi);
+            delta = 0.5f * W.theta * W.theta / Q0;
 
             Q0 = Q0 * Q1 - 1.0f;
-            Q1 *= 0.5f * dt;
+            Q1 *= 0.5f * W.theta;
         }
 
         // returns S * x where S is the stiffness matrix
@@ -201,7 +241,7 @@ static void ddh_action(const EnsembleSpace *efem,
             float cs = 1.0f;
             float sn = 0.0f;
 
-            float K = W.K(cs);
+            float K = W.filter(cs);
             
             p = u;
             q = v;
@@ -210,25 +250,31 @@ static void ddh_action(const EnsembleSpace *efem,
             v *= K;
 
             // compute acceleration at t == 0
-            float acc_n = S(p) - Hi * q - F * cs + G * sn;
+            float acc_n = -S(p) - Hi * q;
+            float F_n = F * cs + G * sn;
 
             // time stepping
             for (int it=1; it < W.nt; ++it)
             {
                 // update p
-                p -= dt * q + delta * acc_n;
+                p += W.theta * q + delta * (W.sigma * acc_n + F_n);
                 
-                cxmult(cs, sn, Rx, Ry); // update cos and sin
-                float acc_n1 = S(p) - F * cs + G * sn;
+                // update sines and cosines
+                cxmult(cs, sn, Rx, Ry);
+
+                // intermediate acceleration
+                float acc_n1 = -S(p);
+                float F_n1 = F * cs + G * sn;
 
                 // update q
-                q += Q0 * q + Q1 * acc_n + Q1 * acc_n1;
+                q += Q0 * q + Q1 * (acc_n + acc_n1 + F_n + F_n1); 
 
                 // update acc
                 acc_n = acc_n1 - Hi * q;
+                F_n = F_n1;
 
                 // waveholtz update
-                K = W.K(cs);
+                K = W.filter(cs);
                 u += K * p;
                 v += K * q;
             } // time stepping
@@ -266,8 +312,8 @@ static void ddh_action(const EnsembleSpace *efem,
             if (j >= 0)
             {
                 const float T = 2.0f * a(tid, subsp) * W.omega;
-                lambda_update[j] = -lambda - T * v;
-                mu_update[j]     = -mu     + T * u;
+                lambda_update[j] = -lambda + T * v;
+                mu_update[j]     = -mu     - T * u;
             }
         }
     });
@@ -364,10 +410,11 @@ static void DD_gridfun(T1 *h_u_dd, const T2 *h_u_mesh, const EnsembleSpace *efem
     }
 }
 
-DDH::DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem)
+DDH::DDH(double omega_, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem)
     : g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
       n_basis{fem.basis().size()},
+      omega{omega_},
       efem{efem},
       M(fem, efem),
       H(fem, efem),
@@ -407,8 +454,7 @@ DDH::DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSp
 
     // time step determined by CFL condition: dt = C * h / (n_basis * n_basis * max_vel)
     double h = fem.mesh().min_h();
-    double dt = 2.6 * reciprocal_max_vel * h / (n_basis * n_basis); // why 2.6?
-    W = init_waveholtz(omega, dt);
+    dt = 2.0 * reciprocal_max_vel * h / (n_basis * n_basis); // why 2.6?
 }
 
 void DDH::action(const float *d_lambda, float *d_update) const
@@ -426,9 +472,9 @@ void DDH::action(const float *d_lambda, float *d_update) const
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
     if (n_basis == 4)
-        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
+        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, make_waveholtz(omega, dt), (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
     else if (n_basis == 8)
-        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
+        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, make_waveholtz(omega, dt), (const double *)nullptr, (double *)nullptr, d_lambda, d_update);
     else
         cuddh_error("DDH::action only supports n_basis == 4 or 8.");
 
@@ -450,9 +496,9 @@ void DDH::rhs(const double *f, float *b) const
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
     if (n_basis == 4)
-        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, f, (double *)nullptr, (const float *)nullptr, b);
+        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, make_waveholtz(omega, dt), f, (double *)nullptr, (const float *)nullptr, b);
     else if (n_basis == 8)
-        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, f, (double *)nullptr, (const float *)nullptr, b);
+        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, make_waveholtz(omega, dt), f, (double *)nullptr, (const float *)nullptr, b);
     else
         cuddh_error("DDH::action only supports n_basis == 4 or 8.");
 }
@@ -472,9 +518,9 @@ void DDH::postprocess(const float *d_lambda, const double *f, double *y) const
     auto g_inv_m = reshape(_gmi.device_read(), mx_dof, n_domains);
 
     if (n_basis == 4)
-        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, f, y, d_lambda, (float *)nullptr);
+        ddh_action<4, DDH_BLOCK_SIZE / 4>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, make_waveholtz(omega, dt), f, y, d_lambda, (float *)nullptr);
     else if (n_basis == 8)
-        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, W, f, y, d_lambda, (float *)nullptr);
+        ddh_action<8, DDH_BLOCK_SIZE / 8>(&efem, g_ndof, n_domains, n_lambda, B, gI, sI, d_S, d_M, g_inv_m, a, d_H, make_waveholtz(omega, dt), f, y, d_lambda, (float *)nullptr);
     else
         cuddh_error("DDH::action only supports n_basis == 4 or 8.");
 }

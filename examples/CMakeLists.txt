@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.18)
 
 # Set include directories
 include_directories(
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )

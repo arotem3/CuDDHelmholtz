@@ -157,12 +157,14 @@ int main()
     // save solution
     const char x_file[] = "solution/x.0000";
     const char u_file[] = "solution/poisson.0000";
+    const char res_file[] = "solution/residuals.0000";
 
     if (to_file(x_file, ndof, x.data()))
         std::cout << "Coordinates written to " << x_file << "\n";
     if (to_file(u_file, ndof, h_u))
         std::cout << "Solution written to " << u_file << "\n";
-    
+    if (to_file(res_file, out.res_norm.size(), out.res_norm.data()))
+        std::cout << "Residuals written to " << res_file << "\n";
     return 0;
 }
 

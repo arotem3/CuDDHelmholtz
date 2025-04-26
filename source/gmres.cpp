@@ -110,8 +110,8 @@ namespace cuddh
         Vec<scalar> eta(m1);
 
         solver_out out;
-        out.res_norm.reserve(maxit+1);
-        out.time.reserve(maxit+1);
+        out.res_norm.reserve((maxit+1)*m);
+        out.time.reserve((maxit+1)*m);
         out.num_matvec = 0;
         out.success = false;
 
@@ -182,6 +182,14 @@ namespace cuddh
                 eta(k1) = -sn(k) * eta(k);
                 eta(k) = cs(k) * eta(k);
 
+                scalar rnrm = std::abs(eta(k1));
+                out.res_norm.push_back((double)rnrm);
+                auto t1 = std::chrono::high_resolution_clock::now();
+                double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
+                out.time.push_back(dur);
+                if (dur > max_seconds)
+                    break;
+
                 if (std::abs(eta(k1)) < tol * bnrm)
                     break;
             }
@@ -195,10 +203,10 @@ namespace cuddh
             axpby(n, one, b, -one, r); // r <- b - r = b - A * x
             
             r_nrm = norm(n, r);
-            out.res_norm.push_back((double)r_nrm);
+            out.res_norm.back() = (double)r_nrm;
             auto t1 = std::chrono::high_resolution_clock::now();
             double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count();
-            out.time.push_back(dur);
+            out.time.back() = dur;
             if (dur > max_seconds)
                 break;
 

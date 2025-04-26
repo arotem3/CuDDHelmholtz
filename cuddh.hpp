@@ -32,6 +32,8 @@
 #include "include/Operators2D/LinearFunctional.hpp"
 #include "include/Operators2D/FaceMassMatrix.hpp"
 #include "include/Operators2D/FaceLinearFunctional.hpp"
+#include "include/Operators2D/WaveEquation.hpp"
+#include "include/Operators2D/WaveHoltz.hpp"
 
 #include "include/Operators3D/MassMatrix3D.hpp"
 #include "include/Operators3D/StiffnessMatrix3D.hpp"

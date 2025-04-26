@@ -153,13 +153,16 @@ int main()
     // save solution and collocation nodes to file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
 
-    const char xy_file[] = "xy.0000";
-    const char sol_file[] = "ddh.0000";
+    const char xy_file[] = "solution/xy.0000";
+    const char sol_file[] = "solution/ddh.0000";
+    const char res_file[] = "solution/residuals.0000";
     
     if (to_file(xy_file, N, xy.data()))
         std::cout << "\ncoordinates written to: " << xy_file << "\n";
     if (to_file(sol_file, N, h_U))
         std::cout << "Solution written to: " << sol_file << "\n";
+    if (to_file(res_file, out.res_norm.size(), out.res_norm.data()))
+        std::cout << "Residuals written to: " << res_file << "\n";
 
     return 0;
 }

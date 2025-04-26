@@ -167,11 +167,22 @@ int main()
     
     const char xy_file[] = "solution/xy.0000";
     const char sol_file[] = "solution/poisson.0000";
-    to_file(xy_file, 2*ndof, xy.data());
-    to_file(sol_file, ndof, h_u);
-
-    std::cout << "\nSolution written to: " << sol_file
-              << "\nCoordinates written to: " << xy_file << "\n";
+    const char res_file[] = "solution/residuals.0000";
+    
+    if (to_file(xy_file, 2*ndof, xy.data()))
+        std::cout << "Coordinates written to: " << xy_file << "\n";
+    else
+        std::cerr << "Failed to write coordinates to: " << xy_file << "\n";
+    
+    if (to_file(sol_file, ndof, h_u))
+        std::cout << "Solution written to: " << sol_file << "\n";
+    else
+        std::cerr << "Failed to write solution to: " << sol_file << "\n";
+    
+    if (to_file(res_file, out.res_norm.size(), out.res_norm.data()))
+        std::cout << "Residuals written to: " << res_file << "\n";
+    else
+        std::cerr << "Failed to write residuals to: " << res_file << "\n";
 
     return 0;
 }

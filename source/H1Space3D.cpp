@@ -8,55 +8,6 @@ static bool contains(const Map &map, Key key)
     return map.find(key) != map.end();
 }
 
-static constexpr auto permute(int N, int i, int j, FaceConnectivity::Permutation p)
-{
-    switch (p)
-    {
-    case FaceConnectivity::Permutation::Rotate90:
-        return std::make_pair(j, N - 1 - i);
-    case FaceConnectivity::Permutation::Rotate180:
-        return std::make_pair(N - 1 - i, N - 1 - j);
-    case FaceConnectivity::Permutation::Rotate270:
-        return std::make_pair(N - 1 - j, i);
-    case FaceConnectivity::Permutation::HorizontalFlip:
-        return std::make_pair(N - 1 - i, j);
-    case FaceConnectivity::Permutation::VerticalFlip:
-        return std::make_pair(i, N - 1 - j);
-    case FaceConnectivity::Permutation::DiagonalFlipMain:
-        return std::make_pair(j, i);
-    case FaceConnectivity::Permutation::DiagonalFlipAnti:
-        return std::make_pair(N - 1 - j, N - 1 - i);
-    default: // Identity
-        return std::make_pair(i, j);
-    }
-}
-
-static constexpr int face2vol(int N, int i, int j, FaceConnectivity::Label f, int el)
-{
-    int m = 0, n = 0, l = 0;
-
-    if (f == FaceConnectivity::Label::ZMin || f == FaceConnectivity::Label::ZMax)
-    {
-        m = i;
-        n = j;
-        l = (f == FaceConnectivity::Label::ZMin) ? 0 : (N - 1);
-    }
-    else if (f == FaceConnectivity::Label::XMin || f == FaceConnectivity::Label::XMax)
-    {
-        m = (f == FaceConnectivity::Label::XMin) ? 0 : (N - 1);
-        n = i;
-        l = j;
-    }
-    else // YMin or YMax
-    {
-        m = i;
-        n = (f == FaceConnectivity::Label::YMin) ? 0 : (N - 1);
-        l = j;
-    }
-
-    return m + N * (n + N * (l + N * el));
-}
-
 H1Space3D::H1Space3D(const Mesh3D &mesh, const Basis &basis)
     : n_elem(mesh.n_elem()),
       n_basis(basis.size()),
@@ -81,10 +32,12 @@ H1Space3D::H1Space3D(const Mesh3D &mesh, const Basis &basis)
         {
             for (int j = 0; j < n_basis; ++j)
             {
-                const int idx0 = face2vol(n_basis, i, j, f0, el0);
+                auto vol_idx = face2vol(n_basis, i, j, f0);
+                const int idx0 = vol_idx[0] + n_basis * (vol_idx[1] + n_basis * (vol_idx[2] + n_basis * el0));
 
                 const auto [i1, j1] = permute(n_basis, i, j, fc.permutation);
-                const int idx1 = face2vol(n_basis, i1, j1, f1, el1);
+                vol_idx = face2vol(n_basis, i1, j1, f1);
+                const int idx1 = vol_idx[0] + n_basis * (vol_idx[1] + n_basis * (vol_idx[2] + n_basis * el1));
 
                 int i = contains(mask, idx0) ? mask[idx0] : idx0;
                 mask.insert({idx1, i});
@@ -185,7 +138,8 @@ TraceSpace3D::TraceSpace3D(const H1Space3D &fem, int n_faces, const int *faces)
         {
             for (int j = 0; j < n_basis; ++j)
             {
-                const int idx = K[face2vol(n_basis, i, j, connectivity.label[0], connectivity.elements[0])];
+                const auto vol_idx = face2vol(n_basis, i, j, connectivity.label[0]);
+                const int idx = K(vol_idx[0], vol_idx[1], vol_idx[2], connectivity.elements[0]);
 
                 if (not contains(mask, idx))
                 {
