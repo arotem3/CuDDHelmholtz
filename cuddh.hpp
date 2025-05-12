@@ -49,4 +49,9 @@
 #include "include/DD2D/DDFaceMassMatrix.hpp"
 #include "include/DD2D/DDH.hpp"
 
+#include "include/DD3D/EnsembleSpace3D.hpp"
+#include "include/DD3D/DDMassMatrix3D.hpp"
+#include "include/DD3D/DDStiffnessMatrix3D.hpp"
+#include "include/DD3D/DDFaceMassMatrix3D.hpp"
+
 #endif
