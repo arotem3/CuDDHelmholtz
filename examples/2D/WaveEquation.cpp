@@ -1,3 +1,22 @@
+/**
+ * @file WaveEquation.cpp
+ * @brief Example driver for solving the wave equation in 2D.
+ * 
+ * @details This file is a driver for solving the wave equation:
+ * 
+ *     alpha(x)^2 u_{tt} - div(grad u) == f cos(omega*t)    in  D := [-1, 1]x[-1, 1]
+ *     alpha(x) u_t + dU/dn == 0                            on boundary of D
+ * 
+ * Here alpha(x) is a variable coefficient, and omega is the frequency.
+ * We assume f and u are real valued.
+ * 
+ * The WaveEquation class implements the finite element discretization of this equation.
+ * 
+ * The program will write the collocation points to `solution/xy.0000` in binary
+ * format. The solution is written to `solution/wave{:05d}.0000` in binary where
+ * {:05d} is the time step.
+ */
+
 #include "cuddh.hpp"
 #include "examples.hpp"
 #include <format>
@@ -46,7 +65,7 @@ int main()
     H1Space2D fem(mesh, basis);
 
     const int ndof = fem.size(); // number of degrees of freedom
-    const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
+    const int N = 2 * ndof; // total degrees of freedom in [u, v] (v = u_t)
 
     ivec boundary_faces = mesh.boundary_edges(); // identify boundary faces
     TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces); // define trace space

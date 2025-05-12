@@ -63,6 +63,23 @@ namespace cuddh
         HostDeviceArray<double3> _xyz;
     };
 
+    /**
+     * @brief evaluate a function f at the collocation points of the H1Space3D
+     */
+    template <typename Func>
+    void gridfunc(const H1Space3D &fem, const Func &f, double *F)
+    {
+        const int ndof = fem.size();
+
+        auto x = fem.physical_coordinates(MemorySpace::DEVICE);
+
+        forall(ndof, [=] __device__(int i)
+        {
+            double3 xi = x[i];
+            F[i] = f(xi);
+        });
+    }
+
     class TraceSpace3D
     {
     public:

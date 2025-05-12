@@ -38,6 +38,8 @@
 #include "include/Operators3D/MassMatrix3D.hpp"
 #include "include/Operators3D/StiffnessMatrix3D.hpp"
 #include "include/Operators3D/FaceMassMatrix3D.hpp"
+#include "include/Operators3D/WaveEquation3D.hpp"
+#include "include/Operators3D/WaveHoltz3D.hpp"
 
 #include "include/gmres.hpp"
 

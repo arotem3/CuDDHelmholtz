@@ -63,6 +63,8 @@ namespace cuddh
         int n_boundary_faces() const { return nbf; }
         int n_interior_faces() const { return nif; }
 
+        double h() const { return _h; }
+
         /**
          * @brief Returns the geometry of element el.
          */
@@ -174,6 +176,7 @@ namespace cuddh
         int nf;  // number of faces
         int nbf; // number of boundary faces
         int nif; // number of interior faces
+        double _h; // mesh size
         HostDeviceArray<double3> nodes;
         HostDeviceArray<int> elems;          // shape (8, n_elems) in canonical order
         HostDeviceArray<int> faces;          // shape (4, n_faces) -> indices of faces

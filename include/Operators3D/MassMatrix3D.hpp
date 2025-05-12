@@ -52,6 +52,8 @@ namespace cuddh
         friend double l2_norm(const MassMatrix3D &M, const double *x);
         friend double l2_dist(const MassMatrix3D &M, const double *x, const double *y);
 
+        friend const_dvec_wrapper diagonal_mass(const MassMatrix3D &, MemorySpace);
+
         const H1Space3D &fem;
         host_device_dvec _m; // a(x) * w(i) * w(j) * w(k) * detJ
     };
@@ -105,6 +107,11 @@ namespace cuddh
     double l2_dot(const MassMatrix3D &M, const double *x, const double *y);
     inline double l2_norm(const MassMatrix3D &M, const double *x) { return std::sqrt(l2_dot(M, x, x)); }
     double l2_dist(const MassMatrix3D &M, const double *x, const double *y);
+
+    inline const_dvec_wrapper diagonal_mass(const MassMatrix3D &M, MemorySpace ms)
+    {
+        return reshape(M._m.read(ms), M._m.size());
+    }
 } // namespace cuddh
 
 #endif

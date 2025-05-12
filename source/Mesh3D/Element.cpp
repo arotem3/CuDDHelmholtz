@@ -42,7 +42,7 @@ HexElement::vec HexElement::physical_coordinates(const vec &s) const
 HexElement::mat HexElement::jacobian(const vec &s) const
 {
     mat J;
-    zeros(J);
+    // J.zeros();
 
     for (int i = 0; i < 8; i++)
     {

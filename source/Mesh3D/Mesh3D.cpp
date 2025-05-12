@@ -108,6 +108,13 @@ public:
     }
 };
 
+static double dist3(double3 a, double3 b)
+{
+    return std::sqrt((a.x - b.x) * (a.x - b.x) +
+                     (a.y - b.y) * (a.y - b.y) +
+                     (a.z - b.z) * (a.z - b.z));
+}
+
 Mesh3D Mesh3D::uniform_cube(int nx, double ax, double bx, int ny, double ay, double by, int nz, double az, double bz)
 {
     int np = (nx + 1) * (ny + 1) * (nz + 1);
@@ -173,6 +180,23 @@ Mesh3D Mesh3D::from_vertices(int nx, const double3 *nodes, int nel, const int *e
 
     mesh.elems.resize(8 * nel);
     std::copy_n(elems, 8 * nel, mesh.elems.host_write());
+
+    // compute mesh size
+    double h = INFINITY;
+    for (int el = 0; el < nel; ++el)
+    {
+        for (int i = 0; i < 8; ++i)
+        {
+            for (int j = i + 1; j < 8; ++j)
+            {
+                double3 x0 = nodes[elem(i, el)];
+                double3 x1 = nodes[elem(j, el)];
+                double d = dist3(x0, x1);
+                h = std::min(h, d);
+            }
+        }
+    }
+    mesh._h = h;
 
     std::unordered_map<face_nodes, FaceConnectivity, face_nodes_hash, face_nodes_equal> face_map;
     face_map.reserve(6 * nel);

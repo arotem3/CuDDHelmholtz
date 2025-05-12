@@ -1,28 +1,18 @@
-#ifndef CUDDH_WAVEHOLTZ_HPP
-#define CUDDH_WAVEHOLTZ_HPP
+#ifndef CUDDH_WAVEHOLTZ3D_HPP
+#define CUDDH_WAVEHOLTZ3D_HPP
 
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
-#include "Operators2D/StiffnessMatrix.hpp"
-#include "Operators2D/MassMatrix.hpp"
-#include "Operators2D/FaceMassMatrix.hpp"
+#include "Operators3D/StiffnessMatrix3D.hpp"
+#include "Operators3D/MassMatrix3D.hpp"
+#include "Operators3D/FaceMassMatrix3D.hpp"
 
 namespace cuddh
 {
-    /**
-     * @brief WaveHoltz FEM solver for the Helmholtz equation: -div(grad u) - omega^2 alpha^2(x) u = f(x)
-     * with boundary conditions: du/dn - i omega alpha(x) u == 0.
-     * 
-     * Can be used in the fixed point iteration:
-     *  u[n+1] = S(u[n]) + G(f)
-     * 
-     * Or accelerated with gmres as the system:
-     *  action(u) = G(f).
-     */
-    class WaveHoltz : public Operator
+    class WaveHoltz3D : public Operator
     {
     public:
-        WaveHoltz(double omega, double maximum_velocity, const double * a2x, const double * ax, const H1Space2D& fem_, const TraceSpace2D& fs_);
+        WaveHoltz3D(double omega, double maximum_velocity, const double * a2x, const double * ax, const H1Space3D& fem_, const TraceSpace3D& fs_);
 
         /// @brief y <- y + c * S * x
         inline void S(double c, const double * x, double * y) const
@@ -33,6 +23,7 @@ namespace cuddh
         /// @brief Gf <- G * f
         inline void G(const double * f, double * Gf) const
         {
+            zeros(2*ndof, Gf); // Gf <- 0
             evolve_project(1.0, nullptr, f, Gf); // Gf <- G * f
         }
 
@@ -55,12 +46,11 @@ namespace cuddh
         double sigma;
         double shift;
 
-        const H1Space2D& fem;
-        const TraceSpace2D& fs;
+        const H1Space3D& fem;
+        const TraceSpace3D& fs;
 
-        StiffnessMatrix stiffness;
-        
-        HostDeviceArray<double> M; // mass matrix
+        StiffnessMatrix3D stiffness;
+        MassMatrix3D M;
         HostDeviceArray<double> H; // face mass matrix
 
         mutable HostDeviceArray<double> acc;
@@ -73,6 +63,5 @@ namespace cuddh
         }
     };
 } // namespace cuddh
-
 
 #endif
