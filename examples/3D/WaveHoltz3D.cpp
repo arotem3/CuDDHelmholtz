@@ -32,7 +32,7 @@ __device__ static double f(double3 x, double omega)
     double r1 = (x.x-0.5)*(x.x-0.5) + x.y * x.y + x.z * x.z;
     double F1 = std::pow(s / M_PI, 1.5) * std::exp(-s * r1);
 
-    double r2 = (x.x+0.2)*(x.x+0.2) + (x.y-0.7)*(x.y-0.7) + (x.z-0.3)*(x.z-0.3);
+    double r2 = (x.x+0.7)*(x.x+0.7) + (x.y+0.7) * (x.y+0.7) + x.z * x.z;
     double F2 = std::pow(s / M_PI, 1.5) * std::exp(-s * r2);
 
     return F1 + F2;
@@ -123,12 +123,12 @@ int main()
     auto solfile = "solution/waveholtz.0000";
     auto resfile = "solution/residuals.0000";
 
-    if (to_file(coofile, ndof, coo.data()))
+    if (to_file(coofile, coo.size(), coo.data()))
         std::cout << "Saved collocation points to " << coofile << std::endl;
     else
         std::cerr << "Failed to save collocation points to " << coofile << std::endl;
 
-    if (to_file(solfile, N, U.host_read()))
+    if (to_file(solfile, U.size(), U.host_read()))
         std::cout << "Saved solution to " << solfile << std::endl;
     else
         std::cerr << "Failed to save solution to " << solfile << std::endl;
