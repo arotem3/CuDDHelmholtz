@@ -42,6 +42,7 @@
 #include "include/Operators3D/WaveHoltz3D.hpp"
 
 #include "include/gmres.hpp"
+#include "include/minres.hpp"
 
 #include "include/DD2D/EnsembleSpace.hpp"
 #include "include/DD2D/DDMassMatrix.hpp"
