@@ -3,6 +3,7 @@
 
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
+#include "linalg.hpp"
 #include "Operators2D/StiffnessMatrix.hpp"
 #include "Operators2D/MassMatrix.hpp"
 #include "Operators2D/FaceMassMatrix.hpp"
@@ -51,8 +52,6 @@ namespace cuddh
 
         int nt;
         double dt;
-        double theta;
-        double sigma;
         double shift;
 
         const H1Space2D& fem;
@@ -64,12 +63,11 @@ namespace cuddh
         HostDeviceArray<double> H; // face mass matrix
 
         mutable HostDeviceArray<double> acc;
-        mutable HostDeviceArray<double> acc1;
         mutable HostDeviceArray<double> w;
 
-        inline double filter(double t) const
+        inline double filter(double n) const
         {
-            return (2.0 / nt) * (std::cos(omega * t) - shift);
+            return (2.0 / nt) * (std::cos(2.0 * M_PI * n / nt) - shift);
         }
     };
 } // namespace cuddh

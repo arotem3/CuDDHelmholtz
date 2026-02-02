@@ -43,6 +43,7 @@
 
 #include "cuddh.hpp"
 #include "examples.hpp"
+#include "Helmholtz.hpp"
 #include <format>
 
 using namespace cuddh;
@@ -138,6 +139,19 @@ int main()
 
     // Solve the system using GMRES
     solver_out out = gmres(N, d_U, &W, d_Gb, gmres_m, gmres_maxit, gmres_tol, gmres_verbose);
+
+    double res_norm = [&]()
+    {
+        host_device_dvec res(N);
+        double *d_res = res.device_write();
+
+        Helmholtz A(omega, d_a2, d_a, fem, fs);
+        A.action(d_U, d_res); // compute residuals
+        axpby(N, -1.0, d_b, 1.0, d_res); // res = A U - b
+        return cuddh::norm(N, d_res) / cuddh::norm(N, d_b); // compute norm of residual
+    }();
+
+    std::cout << "Relative residual norm ||A U - b|| / ||b|| = " << res_norm << std::endl;
 
     // save the solution to a file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
