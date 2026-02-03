@@ -40,8 +40,8 @@ include_directories(
 # Library setup
 file(GLOB_RECURSE SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/source/*.cpp)
 set_source_files_properties(${SOURCES} PROPERTIES LANGUAGE CUDA)
-add_library(cuddh STATIC ${SOURCES})
-target_compile_options(cuddh PUBLIC -dc --extended-lambda --expt-relaxed-constexpr -Wall -Wextra -Wno-unused-parameter -Wunused-variable)
+add_library(cuddh SHARED ${SOURCES})
+target_compile_options(cuddh PUBLIC --extended-lambda --expt-relaxed-constexpr -Wall -Wextra -Wno-unused-parameter -Wunused-variable)
 set_target_properties(cuddh PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 target_compile_features(cuddh PUBLIC cxx_std_17)
 

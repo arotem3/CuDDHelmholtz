@@ -5,6 +5,10 @@
 #include <assert.h>
 
 #include <cuda_runtime.h>
+#include <thrust/inner_product.h>
+#include <thrust/device_ptr.h>
+#include <thrust/transform_reduce.h>
+#include <thrust/execution_policy.h>
 
 #include "cuddh_config.hpp"
 #include "forall.hpp"

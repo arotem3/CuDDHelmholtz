@@ -70,8 +70,7 @@ namespace cuddh
          */
         HexElement element(int el) const
         {
-            if (el < 0 || el >= n_elem())
-                throw std::out_of_range("Mesh3D::element: element index out of range.");
+            cuddh_assert(0 <= el && el < n_elem(), printf("Mesh3D error: element index %d out of range [0, %d).\n", el, n_elem()););
 
             auto elems = reshape(this->elems.host_read(), 8, nel);
             auto nodes = reshape(this->nodes.host_read(), this->nodes.size());
@@ -88,8 +87,7 @@ namespace cuddh
          */
         QuadFace face(int f) const
         {
-            if (f < 0 || f >= n_faces())
-                throw std::out_of_range("Mesh3D::faces: face index out of range.");
+            cuddh_assert(0 <= f && f < n_faces(), printf("Mesh3D error: face index %d out of range [0, %d).\n", f, n_faces()););
             
             auto faces = reshape(this->faces.host_read(), 4, nf);
             auto nodes = reshape(this->nodes.host_read(), this->nodes.size());
@@ -106,8 +104,7 @@ namespace cuddh
          */
         QuadFace boundary_face(int f) const
         {
-            if (f < 0 || f >= n_boundary_faces())
-                throw std::out_of_range("Mesh3D::boundary_faces: face index out of range.");
+            cuddh_assert(0 <= f && f < n_boundary_faces(), printf("Mesh3D error: boundary face index %d out of range [0, %d).\n", f, n_boundary_faces()););
 
             const int *boundary_faces = this->boundary_faces.host_read();
             return face(boundary_faces[f]);
@@ -118,8 +115,7 @@ namespace cuddh
          */
         QuadFace interior_face(int f) const
         {
-            if (f < 0 || f >= n_interior_faces())
-                throw std::out_of_range("Mesh3D::interior_faces: face index out of range.");
+            cuddh_assert(0 <= f && f < n_interior_faces(), printf("Mesh3D error: interior face index %d out of range [0, %d).\n", f, n_interior_faces()););
 
             const int *interior_faces = this->interior_faces.host_read();
             return face(interior_faces[f]);
@@ -130,8 +126,7 @@ namespace cuddh
          */
         FaceConnectivity face_connectivity(int f) const
         {
-            if (f < 0 || f >= n_faces())
-                throw std::out_of_range("Mesh3D::face_connectivity: face index out of range.");
+            cuddh_assert(0 <= f && f < n_faces(), printf("Mesh3D error: face index %d out of range [0, %d).\n", f, n_faces()););
 
             return connectivity[f];
         }
@@ -141,8 +136,7 @@ namespace cuddh
          */
         FaceConnectivity interior_face_connectivity(int f) const
         {
-            if (f < 0 || f >= n_interior_faces())
-                throw std::out_of_range("Mesh3D::interior_face_connectivity: face index out of range.");
+            cuddh_assert(0 <= f && f < n_interior_faces(), printf("Mesh3D error: interior face index %d out of range [0, %d).\n", f, n_interior_faces()););
 
             const int *interior_faces = this->interior_faces.host_read();
             return face_connectivity(interior_faces[f]);
@@ -153,8 +147,7 @@ namespace cuddh
          */
         FaceConnectivity boundary_face_connectivity(int f) const
         {
-            if (f < 0 || f >= n_boundary_faces())
-                throw std::out_of_range("Mesh3D::boundary_face_connectivity: face index out of range.");
+            cuddh_assert(0 <= f && f < n_boundary_faces(), printf("Mesh3D error: boundary face index %d out of range [0, %d).\n", f, n_boundary_faces()););
 
             const int *boundary_faces = this->boundary_faces.host_read();
             return face_connectivity(boundary_faces[f]);
@@ -205,10 +198,7 @@ namespace cuddh
 
         __device__ HexElement element(int el) const
         {
-#ifdef CUDDH_DEBUG
-            if (el < 0 || el >= n_elem())
-                cuddh_error("DeviceMesh3D::element: element index out of range.");
-#endif
+            cuddh_assert(0 <= el && el < n_elem(), printf("Mesh3D error: element index %d out of range [0, %d).\n", el, n_elem()););
 
             double3 x[8];
             for (int i = 0; i < 8; ++i)
@@ -219,10 +209,7 @@ namespace cuddh
 
         __device__ QuadFace face(int f) const
         {
-#ifdef CUDDH_DEBUG
-            if (f < 0 || f >= n_faces())
-                cuddh_error("DeviceMesh3D::faces: face index out of range.");
-#endif
+            cuddh_assert(0 <= f && f < n_faces(), printf("Mesh3D error: face index %d out of range [0, %d).\n", f, n_faces()););
 
             double3 x[4];
             for (int i = 0; i < 4; ++i)
@@ -233,21 +220,13 @@ namespace cuddh
 
         __device__ QuadFace boundary_face(int f) const
         {
-#ifdef CUDDH_DEBUG
-            if (f < 0 || f >= n_boundary_faces())
-                cuddh_error("DeviceMesh3D::boundary_faces: face index out of range.");
-#endif
-
+            cuddh_assert(0 <= f && f < n_boundary_faces(), printf("Mesh3D error: boundary face index %d out of range [0, %d).\n", f, n_boundary_faces()););
             return face(boundary_faces[f]);
         }
 
         __device__ QuadFace interior_face(int f) const
         {
-#ifdef CUDDH_DEBUG
-            if (f < 0 || f >= n_interior_faces())
-                cuddh_error("DeviceMesh3D::interior_faces: face index out of range.");
-#endif
-
+            cuddh_assert(0 <= f && f < n_interior_faces(), printf("Mesh3D error: interior face index %d out of range [0, %d).\n", f, n_interior_faces()););
             return face(interior_faces[f]);
         }
 

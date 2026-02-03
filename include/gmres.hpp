@@ -5,6 +5,8 @@
 #include <iomanip>
 #include <chrono>
 
+#include <thrust/device_vector.h>
+
 #include "Tensor.hpp"
 #include "linalg.hpp"
 #include "Operator.hpp"

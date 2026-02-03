@@ -72,7 +72,7 @@ namespace cuddh
 
         void action(double c, const double * x, double * y) const override
         {
-            cuddh_error("How did you get this error?");
+            cuddh_verify(false, printf("Not implemented"));
         }
 
         void action(const double * x, double * y) const override
@@ -89,7 +89,7 @@ namespace cuddh
     };
 
     template <typename scalar,typename OpType>
-    solver_out t_gmres(int n, scalar * x, const OpType * A, const scalar * b, int m, int maxit, scalar tol, int verbose, double max_seconds)
+    inline solver_out t_gmres(int n, scalar * x, const OpType * A, const scalar * b, int m, int maxit, scalar tol, int verbose, double max_seconds)
     {
         constexpr scalar one = 1, zero = 0;
 
@@ -98,10 +98,10 @@ namespace cuddh
         const int m1 = m + 1;
 
         // DEVICE DATA:
-        HostDeviceArray<scalar> _r(n);
-        HostDeviceArray<scalar> _V(n * m1);
-        scalar * r = _r.device_write();
-        scalar * V = _V.device_write();
+        thrust::device_vector<scalar> _r(n, scalar{});
+        thrust::device_vector<scalar> _V(n * m1, scalar{});
+        scalar * r = thrust::raw_pointer_cast(_r.data());
+        scalar * V = thrust::raw_pointer_cast(_V.data());
 
         // HOST DATA
         Matrix<scalar> H(m1, m);

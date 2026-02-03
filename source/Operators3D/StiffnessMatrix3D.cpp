@@ -162,20 +162,8 @@ void StiffnessMatrix3D::action(double c, const double *x, double *y) const
     case 8:
         stiffness_action<8>(n_elem, d_D, d_G, d_I, c, x, y);
         break;
-    case 9:
-        stiffness_action<9>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
-    case 10:
-        stiffness_action<10>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
-    case 11:
-        stiffness_action<11>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
-    case 12:
-        stiffness_action<12>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
     default:
-        cuddh_error("StiffnessMatrix3D::action does not support basis functions of order > 12.");
+        cuddh_verify(false, printf("StiffnessMatrix3D::action does not support basis functions of order > 12.\n"));
         break;
     }
 }

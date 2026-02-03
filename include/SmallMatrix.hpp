@@ -44,19 +44,13 @@ namespace cuddh
 
         __host__ __device__ inline T &operator()(size_t i, size_t j)
         {
-#ifdef CUDDH_DEBUG
-            if (i >= Rows || j >= Cols)
-                cuddh_error("SmallMatrix::operator() error: index out of range.");
-#endif
+            cuddh_assert(i < Rows && j < Cols, printf("SmallMatrix::operator() error: index out of range. i=%zu, j=%zu, Rows=%zu, Cols=%zu\n", i, j, Rows, Cols));
             return data[i][j];
         }
 
         __host__ __device__ inline const T &operator()(size_t i, size_t j) const
         {
-#ifdef CUDDH_DEBUG
-            if (i >= Rows || j >= Cols)
-                cuddh_error("SmallMatrix::operator() error: index out of range.");
-#endif
+            cuddh_assert(i < Rows && j < Cols, printf("SmallMatrix::operator() error: index out of range. i=%zu, j=%zu, Rows=%zu, Cols=%zu\n", i, j, Rows, Cols));
             return data[i][j];
         }
 
@@ -120,10 +114,8 @@ namespace cuddh
 
         __host__ __device__ static inline size_t index(size_t i, size_t j)
         {
-#ifdef CUDDH_DEBUG
-            if (i >= Rows || j >= Rows)
-                cuddh_error("SmallSymmetricMatrix::index() error: index out of range.");
-#endif
+            cuddh_assert(i < Rows && j < Rows, printf("SmallSymmetricMatrix::index() error: index out of range. i=%zu, j=%zu, Rows=%zu\n", i, j, Rows));
+            
             if (i < j)
                 return j * (j + 1) / 2 + i;
             else

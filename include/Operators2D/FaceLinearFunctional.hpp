@@ -152,7 +152,7 @@ namespace cuddh
             else if (n_quad <= 32)
                 fl_action<32>(f, n_faces, n_basis, n_quad, d_w, d_P, d_detJ, d_X, d_I, c, F);
             else
-                cuddh_error("FaceLinearFunctional::action does not support quadrature points with more than 32 points");
+                cuddh_verify(false, printf("FaceLinearFunctional::action does not support quadrature points with more than 32 points\n"));
         }
     }
 

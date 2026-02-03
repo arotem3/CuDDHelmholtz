@@ -169,7 +169,7 @@ namespace cuddh
             else if (n_quad <= 32)
                 lf_action<32>(f, n_elem, n_quad, n_basis, d_w, d_P, d_detJ, d_X, d_I, c, F);
             else
-                cuddh_error("LinearFunctional::action does not support quadrature rules with more than 32 points");
+                cuddh_verify(false, printf("LinearFunctional::action does not support quadrature rules with more than 32 points"));
         }
     }
 

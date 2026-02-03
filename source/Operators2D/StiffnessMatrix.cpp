@@ -201,7 +201,7 @@ namespace cuddh
         else if (n_quad <= 24)
             stiffness_action<24>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
         else
-            cuddh_error("StiffnessMatrix::action does not support quadrature rules with more than 24 points.");
+            cuddh_verify(false, printf("StiffnessMatrix::action does not support quadrature rules with more than 24 points."));
     }
 
     void StiffnessMatrix::action(const double * x, double * y) const

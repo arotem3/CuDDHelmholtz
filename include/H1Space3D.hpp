@@ -1,13 +1,11 @@
 #ifndef CUDDH_H1_SPACE_3D_HPP
 #define CUDDH_H1_SPACE_3D_HPP
 
-#include "cuddh_config.hpp"
-
-#include "Tensor.hpp"
-#include "Mesh3D/Mesh3D.hpp"
 #include "Basis.hpp"
-
 #include "HostDeviceArray.hpp"
+#include "Mesh3D/Mesh3D.hpp"
+#include "Tensor.hpp"
+#include "cuddh_config.hpp"
 #include "forall.hpp"
 
 namespace cuddh
@@ -73,8 +71,7 @@ namespace cuddh
 
         auto x = fem.physical_coordinates(MemorySpace::DEVICE);
 
-        forall(ndof, [=] __device__(int i)
-        {
+        forall(ndof, [=] __device__(int i) {
             double3 xi = x[i];
             F[i] = f(xi);
         });
@@ -125,21 +122,21 @@ namespace cuddh
         /// @brief project H1Space3D vector to TraceSpace3D vector
         /// @param x DEVICE. H1Space3D vector
         /// @param y DEVICE. TraceSpace3D vector
-        void restrict(const double * x, double * y) const;
+        void restrict(const double *x, double *y) const;
 
         /// @brief Transpose of restrict. Extend TraceSpace3D vector to H1Space3D
         /// @param x DEVICE. TraceSpace3D vector
         /// @param y DEVICE. H1Space3D vector. On exit, y <- y + P' * x where P is the restriction operator.
-        void prolong(const double * x, double * y) const;
+        void prolong(const double *x, double *y) const;
 
         /// @brief Project H1Space3D space vector to orthogonal complement of
         /// TraceSpace3D. I.e. set face values to zero.
         /// @param x DEVICE. H1Space3D vector. On exit, x <- x - P' * P * x where
         /// P is the restriction operator and P' is prolongation operator.
-        void orth(double * x) const;
+        void orth(double *x) const;
 
         /// @brief returns the global H1Space3D
-        const H1Space3D& h1_space() const
+        const H1Space3D &h1_space() const
         {
             return fem;
         }
@@ -150,9 +147,9 @@ namespace cuddh
         const int n_basis;
         int ndof;
 
-        host_device_ivec _I; // subspace indices (n_basis, n_basis, n_basis, n_faces)
+        host_device_ivec _I;     // subspace indices (n_basis, n_basis, n_basis, n_faces)
         host_device_ivec _faces; // face indices (n_faces)
-        host_device_ivec _proj; // global indices (ndof)
+        host_device_ivec _proj;  // global indices (ndof)
     };
 } // namespace cuddh
 
