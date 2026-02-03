@@ -2,8 +2,8 @@
 #define CUDDH_FACE_MASS_MATRIX_HPP
 
 #include "H1Space2D.hpp"
-#include "Operator.hpp"
 #include "HostDeviceArray.hpp"
+#include "Operator.hpp"
 #include "forall.hpp"
 #include "linalg.hpp"
 
@@ -13,50 +13,47 @@ namespace cuddh
     class FaceMassMatrix : public Operator
     {
     public:
-        FaceMassMatrix(const TraceSpace2D& fs);
-        FaceMassMatrix(const double * a, const TraceSpace2D& fs);
+        FaceMassMatrix(const TraceSpace2D &fs, const double *d_a = nullptr);
 
         /// @brief y[i] <- y[i] + c * (x, phi[i]),
         /// where phi[i] is the i-th basis function in the TraceSpace2D.
         /// @param c scalar coefficient
         /// @param x a vector in the TraceSpace2D
         /// @param y a vector in the TraceSpace2D. On exit, y[i] <- y[i] + c * (x, phi[i]).
-        void action(double c, const double * x, double * y) const override;
+        void action(double c, const double *x, double *y) const override;
 
         /// @brief y[i] = (x, phi[i])
-        void action(const double * x, double * y) const override;
+        void action(const double *x, double *y) const override;
+
+        /// @brief returns the (diagonal) mass matrix as VectorWrapper of managed memory
+        VectorWrapper<const double> to_device() const
+        {
+            return reshape(_m, _m.size());
+        }
 
     private:
-        const TraceSpace2D& fs;
-
-        const int ndof;
-        const int n_faces;
-        const int n_basis;
-        const int n_quad;
-
-        host_device_dvec _a;
-        host_device_dvec _P;
+        thrust::universal_vector<double> _m;
     };
 
-    /// @brief diagonal approximate inverse of FaceMassMatrix
-    class DiagInvFaceMassMatrix : public Operator
+    template <typename Func>
+    thrust::universal_vector<double> trace(const TraceSpace2D &fs, const Func &f)
     {
-    public:
-        DiagInvFaceMassMatrix(const TraceSpace2D& fs);
-        DiagInvFaceMassMatrix(const double * a, const TraceSpace2D& fs);
+        const int fdof = fs.size();
 
-        /// @brief y <- y + c * A * x where A ~ inv(M).
-        /// @param c scalar coefficient
-        /// @param x TraceSpace2D vector
-        /// @param y TraceSpace2D vector
-        void action(double c, const double * x, double * y) const override;
+        auto x = fs.h1_space().physical_coordinates(MemorySpace::DEVICE);
+        auto gI = fs.global_indices(MemorySpace::DEVICE);
 
-        void action(const double * x, double * y) const override;
+        thrust::universal_vector<double> F(fdof);
+        double *d_F = thrust::raw_pointer_cast(F.data());
 
-    private:
-        const int ndof;
-        host_device_dvec inv_m;
-    };
+        forall(fdof, [=] __device__(int i) {
+            int gi = gI[i];
+            double xi[] = {x(0, gi), x(1, gi)};
+            d_F[i] = f(xi);
+        });
+
+        return F;
+    }
 } // namespace cuddh
 
 #endif

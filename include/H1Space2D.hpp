@@ -66,6 +66,25 @@ namespace cuddh
         host_device_dvec _xy;
     };
 
+    template <typename Func>
+    inline thrust::universal_vector<double> gridfunc(const H1Space2D& fem, const Func& f)
+    {
+        const int ndof = fem.size();
+
+        auto x = fem.physical_coordinates(MemorySpace::DEVICE);
+
+        thrust::universal_vector<double> F(ndof);
+        double* d_F = thrust::raw_pointer_cast(F.data());
+
+        forall(ndof, [=] __device__(int i)
+        {
+            double xi[] = {x(0, i), x(1, i)};
+            d_F[i] = f(xi);
+        });
+
+        return F;
+    }
+
     /// @brief abstract representation of a subspace of an H1Space2D spanned by
     /// the basis functions with support on the specified faces
     class TraceSpace2D

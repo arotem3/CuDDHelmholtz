@@ -2,7 +2,6 @@
 #define CUDDH_MASS_MATRIX_HPP
 
 #include "H1Space2D.hpp"
-
 #include "HostDeviceArray.hpp"
 #include "forall.hpp"
 #include "linalg.hpp"
@@ -13,58 +12,47 @@ namespace cuddh
     class MassMatrix : public Operator
     {
     public:
-        /// @brief initialize mass matrix m(u, v) = (u, v)
-        MassMatrix(const H1Space2D& fem);
-
         /// @brief initialize weighted mass matrix m(u, v) = (a(x)*u, v)
         /// @param a DEVICE. H1Space2D vector representing the function a.
-        /// @param fem 
-        MassMatrix(const double * a, const H1Space2D& fem);
+        /// @param fem
+        MassMatrix(const H1Space2D &fem, const double *a = nullptr);
 
         /// @brief y <- y + c * M*x, where M is the mass matrix
-        void action(double c, const double * x, double * y) const override;
+        void action(double c, const double *x, double *y) const override;
 
-        void action(const double * x, double * y) const override;
+        void action(const double *x, double *y) const override;
+
+        // returns the mass matrix as a dvec_wrapper of managed memory
+        VectorWrapper<const double> to_device() const
+        {
+            return reshape(_m, _m.size());
+        }
 
     private:
-        const H1Space2D& fem;
-        
-        const int ndof;
-        const int n_elem;
-        const int n_basis;
-        const int n_quad;
-        
-        host_device_dvec _P;
-        host_device_dvec _a; // a(x) * w(i) * w(j) * detJ
+        const H1Space2D &fem;
+        thrust::universal_vector<double> _m;
+
+        template <typename Func>
+        friend thrust::universal_vector<double> l2_project(const MassMatrix &M, Func &&f);
     };
 
-    /// @brief diagonal approximate inverse of mass matrix
-    class DiagInvMassMatrix : public Operator
+    template <typename Func>
+    thrust::universal_vector<double> l2_project(const MassMatrix &M, Func &&f)
     {
-    public:
-        /// @brief construct a diagonal approximate inverse of the mass matrix
-        /// m(u, v) = (u, v).
-        DiagInvMassMatrix(const H1Space2D& fem);
+        const int ndof = M.fem.size();
+        thrust::universal_vector<double> F(ndof, 0.0);
+        double *d_F = thrust::raw_pointer_cast(F.data());
 
-        /// @brief construct a diagonal approximate inverse of the mass matrix
-        /// m(u, v) = (a(x)*u, v).
-        /// @param a nodal-FEM grid function representing the coefficient a(x)
-        /// on the nodes of the mesh
-        /// @param fem 
-        DiagInvMassMatrix(const double * a, const H1Space2D& fem);
+        auto x = M.fem.physical_coordinates(MemorySpace::DEVICE);
+        auto m = M.to_device();
 
-        /// @brief y <- y + c * P*x where P ~ inv(M), where M is the mass matrix. 
-        void action(double c, const double * x, double * y) const override;
+        forall(ndof, [=] __device__(int i) {
+            double xi[] = {x(0, i), x(1, i)};
+            d_F[i] = f(xi) * m[i];
+        });
 
-        void action(const double * x, double * y) const override;
-
-    private:
-        const H1Space2D& fem;
-        const int ndof;
-
-        host_device_dvec _p;
-    };
+        return F;
+    }
 } // namespace cuddh
-
 
 #endif
