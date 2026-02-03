@@ -5,6 +5,7 @@
 #include "include/cuddh_error.hpp"
 
 #include "include/Tensor.hpp"
+#include "include/FixedTensorWrapper.hpp"
 #include "include/HostDeviceArray.hpp"
 #include "include/forall.hpp"
 #include "include/linalg.hpp"
