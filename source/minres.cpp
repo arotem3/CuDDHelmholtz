@@ -44,14 +44,13 @@ cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const doubl
     out.num_matvec++;
     axpby(n, 1.0, b, -1.0, r);
 
-    double beta = norm(n, r);
-    double phi_bar = beta; // ||r||_2
+    double phi = norm(n, r);
 
-    out.res_norm.push_back(phi_bar);
+    out.res_norm.push_back(phi);
     out.time.push_back(0.0);
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    if (phi_bar < tol * bnrm)
+    if (phi < tol * bnrm)
     {
         out.success = true;
 
@@ -68,12 +67,12 @@ cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const doubl
     if (verbose)
         std::cout << std::setprecision(5) << std::scientific;
 
-    // v = r / beta
-    axpby(n, 1.0 / beta, r, 0.0, v);
+    // v = r / phi
+    axpby(n, 1.0 / phi, r, 0.0, v);
 
     double cp = 1.0, sp = 0.0;
     double c = 1.0, s = 0.0;
-    double beta_qr = 0.0;
+    double beta = 0.0;
 
     int it;
     for (it = 0; it < maxit; ++it)
@@ -84,37 +83,33 @@ cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const doubl
         double alpha = dot(n, v, r); // (v, A*v)
 
         // r = A * v - alpha * v - beta * vp
-        axpby(n, -alpha, v, 1.0, r);
-        axpby(n, -beta, vp, 1.0, r);
-
-        double beta_next = norm(n, r);
+        forall(n, [=] __device__(int i) { r[i] -= alpha * v[i] + beta * vp[i]; });
 
         // Givens
-        double rho2 = sp * beta_qr;
-        double gamma = cp * beta_qr;
+        double rho2 = sp * beta;
+        double gamma = cp * beta;
 
         double rho1 = c * gamma + s * alpha;
         double delta = -s * gamma + c * alpha;
 
-        double rho3 = std::hypot(delta, beta_next);
+        beta = norm(n, r);
+
+        double rho3 = std::hypot(delta, beta);
         cp = c;
         sp = s;
         c = delta / rho3;
-        s = beta_next / rho3;
+        s = beta / rho3;
 
-        // update w
-        // w = (v - rho1 * wp - rho2 * wpp) / rho3
-        axpby(n, 1.0 / rho3, v, 0.0, w);
-        axpby(n, -rho1 / rho3, wp, 1.0, w);
-        axpby(n, -rho2 / rho3, wpp, 1.0, w);
+        // update w and x
+        forall(n, [=] __device__(int i) {
+            w[i] = (v[i] - rho1 * wp[i] - rho2 * wpp[i]) / rho3;
+            x[i] += c * phi * w[i];
+        });
 
-        // x = x + (phi_bar * c) * w
-        axpby(n, phi_bar * c, w, 1.0, x);
+        // update norm and check convergence
+        phi = -s * phi;
 
-        // check convergence
-        phi_bar = -s * phi_bar;
-
-        out.res_norm.push_back(std::abs(phi_bar));
+        out.res_norm.push_back(std::abs(phi));
         auto t1 = std::chrono::high_resolution_clock::now();
         double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
         out.time.push_back(dur);
@@ -122,28 +117,27 @@ cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const doubl
         {
             ++bar;
             std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it + 1 << " / " << maxit
-                      << " || rel. res. = " << std::setw(10) << std::abs(phi_bar) / bnrm << "\r" << std::flush;
+                      << " || rel. res. = " << std::setw(10) << std::abs(phi) / bnrm << "\r" << std::flush;
         }
         else if (verbose >= 2)
         {
             std::cout << "iteration " << std::setw(10) << it + 1 << " / " << maxit
-                      << " || rel. res. = " << std::setw(10) << std::abs(phi_bar) / bnrm << std::endl;
+                      << " || rel. res. = " << std::setw(10) << std::abs(phi) / bnrm << std::endl;
         }
 
-        if (std::abs(phi_bar) < tol * bnrm)
+        if (std::abs(phi) < tol * bnrm)
         {
             out.success = true;
             break;
         }
 
         // prepare for next iteration
-        copy(n, wp, wpp);
-        copy(n, w, wp);
-        copy(n, v, vp);
-
-        axpby(n, 1.0 / beta_next, r, 0.0, v);
-        beta = beta_next;
-        beta_qr = beta_next;
+        forall(n, [=] __device__(int i) {
+            wpp[i] = wp[i];
+            wp[i] = w[i];
+            vp[i] = v[i];
+            v[i] = r[i] / beta;
+        });
     }
 
     out.num_iter = it + 1;
