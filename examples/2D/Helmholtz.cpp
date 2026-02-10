@@ -129,7 +129,6 @@ int main()
     // The TraceSpace2D is a subspace of the H1Space2D used to identify the degrees
     // of freedom needed in the computation of trace terms: <u, phi>
     TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
-    const int fdof = fs.size();
 
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
 
@@ -143,12 +142,14 @@ int main()
     auto ax = trace(fs, [] __device__(const double X[2]) -> double { return a(X); });
 
     MassMatrix M(fem);
-    auto b = l2_project(M, [] __device__(const double X[2]) -> double { return f(X, omega); });
+    thrust::universal_vector<double> b(N, 0.0);
 
     double *d_U = thrust::raw_pointer_cast(U.data());    // the solution vector [u; v]
     double *d_b = thrust::raw_pointer_cast(b.data());    // the right hand side b(phi)
     double *d_a2 = thrust::raw_pointer_cast(a2x.data()); // a^2(x) projected onto H1Space2D
     double *d_a = thrust::raw_pointer_cast(ax.data());   // a(x) projected onto TraceSpace2D
+
+    l2_project(d_b, M, [=] __device__(const double X[2]) -> double { return f(X, omega); });
 
     // The operator representing the bilinear form: a([u, v], phi)
     Helmholtz A(omega, d_a2, d_a, fem, fs);

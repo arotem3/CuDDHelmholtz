@@ -67,7 +67,7 @@ namespace cuddh
     };
 
     template <typename Func>
-    inline thrust::universal_vector<double> gridfunc(const H1Space2D& fem, const Func& f)
+    inline thrust::universal_vector<double> gridfunc(const H1Space2D& fem, const Func &f)
     {
         const int ndof = fem.size();
 

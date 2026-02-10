@@ -35,10 +35,10 @@ public:
         auto h = H.to_device();
 
         forall(ndof, [=] __device__(int i) -> void {
-            double mi = m(i);
-            double hi = h(i);
+            const double mi = m(i);
+            const double hi = h(i);
 
-            double U = u[i], V = v[i];
+            const double U = u[i], V = v[i];
 
             Au[i] = Au[i] - omega * omega * mi * U + omega * hi * V;
             Av[i] = -Av[i] + omega * omega * mi * V + omega * hi * U;

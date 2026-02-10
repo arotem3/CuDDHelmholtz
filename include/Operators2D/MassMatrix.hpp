@@ -33,15 +33,13 @@ namespace cuddh
         thrust::universal_vector<double> _m;
 
         template <typename Func>
-        friend thrust::universal_vector<double> l2_project(const MassMatrix &M, Func &&f);
+        friend void l2_project(double *d_F, const MassMatrix &M, const Func &f);
     };
 
     template <typename Func>
-    thrust::universal_vector<double> l2_project(const MassMatrix &M, Func &&f)
+    void l2_project(double *d_F, const MassMatrix &M, const Func &f)
     {
         const int ndof = M.fem.size();
-        thrust::universal_vector<double> F(ndof, 0.0);
-        double *d_F = thrust::raw_pointer_cast(F.data());
 
         auto x = M.fem.physical_coordinates(MemorySpace::DEVICE);
         auto m = M.to_device();
@@ -50,8 +48,6 @@ namespace cuddh
             double xi[] = {x(0, i), x(1, i)};
             d_F[i] = f(xi) * m[i];
         });
-
-        return F;
     }
 } // namespace cuddh
 
