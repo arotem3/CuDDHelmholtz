@@ -4,6 +4,7 @@
 #include <thrust/device_vector.h>
 
 #include <chrono>
+#include <format>
 #include <iomanip>
 #include <iostream>
 
@@ -22,6 +23,15 @@ namespace cuddh
         std::vector<double> time;
     };
 
+    struct solver_opts
+    {
+        int m = 20;        // number of vectors in the Krylov space used at each iteration of GMRES
+        int maxit = 100;   // maximum number of iterations of GMRES
+        double tol = 1e-3; // relative tolerance for an acceptable solution. gmres stops when |A*x-b|/|b| < tol.
+        double atol = 0.0; // absolute tolerance for an acceptable solution. gmres stops when |A*x-b| < atol.
+        int verbose = 0;   // 0: silent, 1: progress bar, 2: one line per iteration
+    };
+
     /// @brief GMRES(m) for solving A * x == b
     /// @param[in] n dimension of x
     /// @param[in,out] x DEVICE. length n. On entry, an initial estimate of the solution (or zero). On exit, the
@@ -30,18 +40,39 @@ namespace cuddh
     /// @param[in] b DEVICE. length n. The right hand side of A * x == b.
     /// @param[in] Precond DEVICE KERNEL. an operator such that Precond.action(x, y) computes y <- P * x where P ~
     /// inv(A).
-    /// @param[in] m the size of the Krylov space used at each iteration.
-    /// @param[in] maxit the maximum number of iteration to convergence.
-    /// @param[in] tol the relative tolerance for an acceptable solution. gmres stops when |A*x-b|/|b| < tol.
-    /// @param[in] verbose if verbose == 1, gmres will print progress bar to cout; if verbose >= 2, gmres will print
     /// each iteration to cout; if verbose == 0, gmres is silent.
-    solver_out gmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond, int m, int maxit,
-                     double tol = 1e-6, int verbose = 0, double max_seconds = 6 * 60 * 60);
-    solver_out gmres(int n, double *x, const Operator *A, const double *b, int m, int maxit, double tol = 1e-6,
-                     int verbose = 0, double max_seconds = 6 * 60 * 60);
+    solver_out gmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
+                     solver_opts opts = {});
+    solver_out gmres(int n, double *x, const Operator *A, const double *b, solver_opts opts = {});
 
-    solver_out gmres(int n, float *x, const SinglePrecisionOperator *A, const float *b, int m, int maxit,
-                     float tol = 1e-4, int verbose = 0, double max_seconds = 6 * 60 * 60);
+    solver_out gmres(int n, float *x, const SinglePrecisionOperator *A, const float *b, solver_opts opts = {});
+
+    /**
+     * @brief MINRES for solving A * x == b where A is symmetric (not necessarily positive definite).
+     *
+     * @param n dimension of x
+     * @param x DEVICE. length n. On entry, an initial estimate of the solution (or zero). On exit, the approximate
+     * solution x <- A \ b.
+     * @param A DEVICE KERNEL. an operator such that A.action(x, y) computes y <- A * x.
+     * @param b DEVICE. length n. The right hand side of A * x == b.
+     * @param opts
+     * @return solver_out
+     */
+    solver_out minres(int n, double *x, const Operator *A, const double *b, solver_opts opts = {});
+
+    /**
+     * @brief Flexible GMRES(m) for solving A * x == b where the preconditioner can change at each iteration.
+     *
+     * @param n dimension of x
+     * @param x DEVICE. length n. On entry, an initial estimate of the solution (or zero). On exit, the approximate
+     * solution x <- A \ b.
+     * @param A DEVICE KERNEL. an operator such that A.action(x, y) computes y <- A * x.
+     * @param b DEVICE. length n. The right hand side of A * x == b.
+     * @param Precond Right preconditioner.
+     * @return solver_out
+     */
+    solver_out fgmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
+                      solver_opts opts = {});
 } // namespace cuddh
 
 #endif

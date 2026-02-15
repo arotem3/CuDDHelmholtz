@@ -2,58 +2,46 @@
 #define CUDDH_HPP
 
 #include "cuddh_config.hpp"
-#include "include/cuddh_error.hpp"
-
-#include "include/Tensor.hpp"
-#include "include/FixedTensorWrapper.hpp"
-#include "include/HostDeviceArray.hpp"
-#include "include/forall.hpp"
-#include "include/linalg.hpp"
-
-#include "include/QuadratureRule.hpp"
 #include "include/Basis.hpp"
-
-#include "include/Mesh2D/Node.hpp"
+#include "include/DD2D/DDFaceMassMatrix.hpp"
+#include "include/DD2D/DDH.hpp"
+#include "include/DD2D/DDMassMatrix.hpp"
+#include "include/DD2D/DDStiffnessMatrix.hpp"
+#include "include/DD2D/EnsembleSpace.hpp"
+#include "include/DD3D/DDFaceMassMatrix3D.hpp"
+#include "include/DD3D/DDMassMatrix3D.hpp"
+#include "include/DD3D/DDStiffnessMatrix3D.hpp"
+#include "include/DD3D/EnsembleSpace3D.hpp"
+#include "include/FixedTensorWrapper.hpp"
+#include "include/H1Space2D.hpp"
+#include "include/H1Space3D.hpp"
+#include "include/HostDeviceArray.hpp"
 #include "include/Mesh2D/Edge.hpp"
 #include "include/Mesh2D/Element.hpp"
 #include "include/Mesh2D/Mesh2D.hpp"
-
+#include "include/Mesh2D/Node.hpp"
 #include "include/Mesh3D/Connectivity.hpp"
-#include "include/Mesh3D/Face.hpp"
 #include "include/Mesh3D/Element.hpp"
+#include "include/Mesh3D/Face.hpp"
 #include "include/Mesh3D/Mesh3D.hpp"
-
-#include "include/H1Space2D.hpp"
-#include "include/H1Space3D.hpp"
-
 #include "include/Operator.hpp"
-
+#include "include/Operators2D/FaceLinearFunctional.hpp"
+#include "include/Operators2D/FaceMassMatrix.hpp"
+#include "include/Operators2D/LinearFunctional.hpp"
 #include "include/Operators2D/MassMatrix.hpp"
 #include "include/Operators2D/StiffnessMatrix.hpp"
-#include "include/Operators2D/LinearFunctional.hpp"
-#include "include/Operators2D/FaceMassMatrix.hpp"
-#include "include/Operators2D/FaceLinearFunctional.hpp"
 #include "include/Operators2D/WaveEquation.hpp"
 #include "include/Operators2D/WaveHoltz.hpp"
-
+#include "include/Operators3D/FaceMassMatrix3D.hpp"
 #include "include/Operators3D/MassMatrix3D.hpp"
 #include "include/Operators3D/StiffnessMatrix3D.hpp"
-#include "include/Operators3D/FaceMassMatrix3D.hpp"
 #include "include/Operators3D/WaveEquation3D.hpp"
 #include "include/Operators3D/WaveHoltz3D.hpp"
-
+#include "include/QuadratureRule.hpp"
+#include "include/Tensor.hpp"
+#include "include/cuddh_error.hpp"
+#include "include/forall.hpp"
 #include "include/gmres.hpp"
-#include "include/minres.hpp"
-
-#include "include/DD2D/EnsembleSpace.hpp"
-#include "include/DD2D/DDMassMatrix.hpp"
-#include "include/DD2D/DDStiffnessMatrix.hpp"
-#include "include/DD2D/DDFaceMassMatrix.hpp"
-#include "include/DD2D/DDH.hpp"
-
-#include "include/DD3D/EnsembleSpace3D.hpp"
-#include "include/DD3D/DDMassMatrix3D.hpp"
-#include "include/DD3D/DDStiffnessMatrix3D.hpp"
-#include "include/DD3D/DDFaceMassMatrix3D.hpp"
+#include "include/linalg.hpp"
 
 #endif

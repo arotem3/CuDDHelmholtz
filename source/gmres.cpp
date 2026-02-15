@@ -51,7 +51,7 @@ public:
     void operator++()
     {
         it = std::min(it + 1, nt - 1);
-        progress.at(30 * (it - 1) / nt) = '#';
+        progress.at(30 * it / nt) = '#';
     }
 
     const std::string &get() const
@@ -77,26 +77,59 @@ public:
 
     void action(const double *x, double *y) const override
     {
-        double *d_q = q.device_write();
+        double *d_q = thrust::raw_pointer_cast(q.data());
         A->action(x, d_q);
         P->action(d_q, y);
     }
 
 private:
-    mutable host_device_dvec q;
+    mutable thrust::universal_vector<double> q;
     const Operator *A;
     const Operator *P;
 };
 
+static void validate_opts(solver_opts &opts)
+{
+    cuddh_verify(opts.m > 0, printf("solver error: m must be positive\n"));
+    cuddh_verify(opts.maxit > 0, printf("solver error: maxit must be positive\n"));
+    cuddh_verify(opts.tol >= 0, printf("solver error: tol must be non-negative\n"));
+
+    if (opts.m > opts.maxit)
+        opts.m = opts.maxit;
+}
+
+static std::string format_time(double t)
+{
+    if (t < 1e-3)
+        return std::format("{:.2f}µs", 1e6 * t);
+    else if (t < 1.0)
+        return std::format("{:.2f}ms", 1e3 * t);
+    else if (t < 60.0)
+        return std::format("{:.2f}s", t);
+    else if (t < 3600.0)
+    {
+        int minutes = static_cast<int>(t) / 60;
+        int seconds = static_cast<int>(t) % 60;
+        return std::format("{:02d}m {:02d}s", minutes, seconds);
+    }
+    else
+    {
+        int hours = static_cast<int>(t) / 3600;
+        int minutes = (static_cast<int>(t) % 3600) / 60;
+        int seconds = static_cast<int>(t) % 60;
+        return std::format("{:02d}h {:02d}m {:02d}s", hours, minutes, seconds);
+    }
+}
+
 template <typename scalar, typename OpType>
-inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, int m, int maxit, scalar tol, int verbose,
-                          double max_seconds)
+inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, solver_opts &opts)
 {
     constexpr scalar one = 1, zero = 0;
 
-    const scalar bnrm = cuddh::norm(n, b);
+    validate_opts(opts);
 
-    const int m1 = m + 1;
+    const scalar bnrm = cuddh::norm(n, b);
+    const int m1 = opts.m + 1;
 
     // DEVICE DATA:
     thrust::device_vector<scalar> _r(n, scalar{});
@@ -105,14 +138,14 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, in
     scalar *V = thrust::raw_pointer_cast(_V.data());
 
     // HOST DATA
-    Matrix<scalar> H(m1, m);
-    Vec<scalar> sn(m);
-    Vec<scalar> cs(m);
+    Matrix<scalar> H(m1, opts.m);
+    Vec<scalar> sn(opts.m);
+    Vec<scalar> cs(opts.m);
     Vec<scalar> eta(m1);
 
     solver_out out;
-    out.res_norm.reserve((maxit + 1) * m);
-    out.time.reserve((maxit + 1) * m);
+    out.res_norm.reserve((opts.maxit + 1) * opts.m);
+    out.time.reserve((opts.maxit + 1) * opts.m);
     out.num_matvec = 0;
     out.success = false;
 
@@ -120,17 +153,17 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, in
     out.num_matvec++;
     axpby(n, one, b, -one, r); // r <- b - r = b - A * x
 
-    scalar r_nrm = cuddh::norm(n, r);
+    scalar rnrm = cuddh::norm(n, r);
 
-    out.res_norm.push_back((double)r_nrm);
+    out.res_norm.push_back((double)rnrm);
     out.time.push_back(0.0);
     auto t0 = std::chrono::high_resolution_clock::now();
 
-    if (r_nrm < tol * bnrm)
+    if (rnrm <= opts.tol * bnrm + opts.atol)
     {
         out.success = true;
 
-        if (verbose)
+        if (opts.verbose)
         {
             std::cout << "After 0 iterations, GMRES achieved rel. residual of " << out.res_norm.back() / bnrm
                       << std::endl;
@@ -140,23 +173,23 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, in
         return out;
     }
 
-    ProgressBar bar(maxit);
-    if (verbose)
+    ProgressBar bar(opts.maxit);
+    if (opts.verbose)
         std::cout << std::setprecision(5) << std::scientific;
 
     int it = 1;
-    for (; it < maxit;)
+    while (it <= opts.maxit)
     {
         scalar *vk = V;
         scalar *vk1;
 
-        cuddh::axpby(n, one / r_nrm, r, zero, vk); // v[0] <- r / ||r||
+        cuddh::axpby(n, one / rnrm, r, zero, vk); // v[0] <- r / ||r||
 
         std::fill(eta.begin(), eta.end(), 0.0);
-        eta(0) = r_nrm;
+        eta(0) = rnrm;
 
         int k1 = 0;
-        for (int k = 0; k < m && it < maxit; ++k)
+        for (int k = 0; k < opts.m && it <= opts.maxit; ++k, ++it)
         {
             k1 = k + 1;
             vk = V + k * n;
@@ -183,31 +216,27 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, in
             eta(k1) = -sn(k) * eta(k);
             eta(k) = cs(k) * eta(k);
 
-            scalar rnrm = std::abs(eta(k1));
+            rnrm = std::abs(eta(k1));
             out.res_norm.push_back((double)rnrm);
 
-            it++;
-
-            if (verbose == 1)
+            if (opts.verbose == 1)
             {
                 ++bar;
-                std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it + 1 << " / " << maxit
-                          << " || rel. res. = " << std::setw(10) << r_nrm / bnrm << "\r" << std::flush;
+                std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it << " / " << opts.maxit
+                          << " || rel. res. = " << std::setw(10) << rnrm / bnrm << "\r" << std::flush;
             }
-            else if (verbose >= 2)
+            else if (opts.verbose >= 2)
             {
-                std::cout << "iteration " << std::setw(10) << it + 1 << " / " << maxit
-                          << " || rel. res. = " << std::setw(10) << r_nrm / bnrm << std::endl;
+                std::cout << "iteration " << std::setw(10) << it << " / " << opts.maxit
+                          << " || rel. res. = " << std::setw(10) << rnrm / bnrm << std::endl;
             }
 
-            if (std::abs(eta(k1)) < tol * bnrm)
+            if (rnrm <= opts.tol * bnrm + opts.atol)
                 break;
 
             auto t1 = std::chrono::high_resolution_clock::now();
             double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
             out.time.push_back(dur);
-            if (dur > max_seconds)
-                break;
         }
 
         solve_upper_triangular(k1, H, m1, eta);
@@ -218,10 +247,10 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, in
         out.num_matvec++;
         cuddh::axpby(n, one, b, -one, r); // r <- b - r = b - A * x
 
-        r_nrm = cuddh::norm(n, r);
-        out.res_norm.back() = (double)r_nrm;
+        rnrm = cuddh::norm(n, r);
+        out.res_norm.back() = (double)rnrm;
 
-        if (r_nrm < tol * bnrm)
+        if (rnrm <= opts.tol * bnrm + opts.atol)
         {
             out.success = true;
             break;
@@ -230,16 +259,14 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, in
         auto t1 = std::chrono::high_resolution_clock::now();
         double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
         out.time.back() = dur;
-        if (dur > max_seconds)
-            break;
     }
 
-    if (verbose == 1)
+    if (opts.verbose == 1)
         std::cout << std::endl;
-    if (verbose)
+    if (opts.verbose)
     {
-        std::cout << "After " << it << " iterations, GMRES achieved rel. residual of " << out.res_norm.back() / bnrm
-                  << std::endl;
+        std::cout << "After " << it << " iterations (" << format_time(out.time.back())
+                  << "), GMRES achieved rel. residual of " << out.res_norm.back() / bnrm << std::endl;
         if (out.success)
             std::cout << "GMRES successfully converged within desired tolerance." << std::endl;
         else
@@ -250,14 +277,12 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, in
     return out;
 }
 
-solver_out cuddh::gmres(int n, double *x, const Operator *A, const double *b, int m, int maxit, double tol, int verbose,
-                        double max_seconds)
+solver_out cuddh::gmres(int n, double *x, const Operator *A, const double *b, solver_opts opts)
 {
-    return t_gmres<double>(n, x, A, b, m, maxit, tol, verbose, max_seconds);
+    return t_gmres<double>(n, x, A, b, opts);
 }
 
-solver_out cuddh::gmres(int n, double *x, const Operator *A, const double *b, const Operator *P, int m, int maxit,
-                        double tol, int verbose, double max_seconds)
+solver_out cuddh::gmres(int n, double *x, const Operator *A, const double *b, const Operator *P, solver_opts opts)
 {
     PreconditionedSystem PA(n, A, P);
 
@@ -265,11 +290,300 @@ solver_out cuddh::gmres(int n, double *x, const Operator *A, const double *b, co
     double *d_r0 = r0.device_write();
     P->action(b, d_r0);
 
-    return t_gmres<double>(n, x, &PA, d_r0, m, maxit, tol, verbose, max_seconds);
+    return t_gmres<double>(n, x, &PA, d_r0, opts);
 }
 
-solver_out cuddh::gmres(int n, float *x, const SinglePrecisionOperator *A, const float *b, int m, int maxit, float tol,
-                        int verbose, double max_seconds)
+solver_out cuddh::gmres(int n, float *x, const SinglePrecisionOperator *A, const float *b, solver_opts opts)
 {
-    return t_gmres<float>(n, x, A, b, m, maxit, tol, verbose, max_seconds);
+    return t_gmres<float>(n, x, A, b, opts);
+}
+
+cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const double *b, solver_opts opts)
+{
+    solver_out out{.success = false, .num_iter = 0, .num_matvec = 0, .res_norm = {}, .time = {}};
+    out.res_norm.reserve(opts.maxit + 1);
+    out.time.reserve(opts.maxit + 1);
+
+    thrust::device_vector<double> _r(n), _v(n), _w(n, 0.0), _wp(n, 0.0), _vp(n, 0.0), _wpp(n, 0.0);
+    double *r = thrust::raw_pointer_cast(_r.data());
+    double *v = thrust::raw_pointer_cast(_v.data());
+    double *w = thrust::raw_pointer_cast(_w.data());
+    double *wp = thrust::raw_pointer_cast(_wp.data());
+    double *vp = thrust::raw_pointer_cast(_vp.data());
+    double *wpp = thrust::raw_pointer_cast(_wpp.data());
+
+    double bnrm = cuddh::norm(n, b);
+
+    // r = b - A * x
+    A->action(x, r);
+    out.num_matvec++;
+    axpby(n, 1.0, b, -1.0, r);
+
+    double phi = norm(n, r);
+
+    out.res_norm.push_back(phi);
+    out.time.push_back(0.0);
+    auto t0 = std::chrono::high_resolution_clock::now();
+
+    if (phi < opts.tol * bnrm + opts.atol)
+    {
+        out.success = true;
+
+        if (opts.verbose)
+        {
+            std::cout << "After 0 iterations, MINRES achieved rel. residual of " << out.res_norm.back() / bnrm
+                      << std::endl;
+            std::cout << "MINRES successfully converged within desired tolerance." << std::endl;
+        }
+        return out;
+    }
+
+    ProgressBar bar(opts.maxit);
+    if (opts.verbose)
+        std::cout << std::setprecision(5) << std::scientific;
+
+    // v = r / phi
+    axpby(n, 1.0 / phi, r, 0.0, v);
+
+    double cp = 1.0, sp = 0.0;
+    double c = 1.0, s = 0.0;
+    double beta = 0.0;
+
+    int it;
+    for (it = 0; it < opts.maxit; ++it)
+    {
+        // Lanczos step
+        A->action(v, r); // r = A * v
+        out.num_matvec++;
+        double alpha = dot(n, v, r); // (v, A*v)
+
+        // r = A * v - alpha * v - beta * vp
+        forall(n, [=] __device__(int i) { r[i] -= alpha * v[i] + beta * vp[i]; });
+
+        // Givens
+        double rho2 = sp * beta;
+        double gamma = cp * beta;
+
+        double rho1 = c * gamma + s * alpha;
+        double delta = -s * gamma + c * alpha;
+
+        beta = norm(n, r);
+
+        double rho3 = std::hypot(delta, beta);
+        cp = c;
+        sp = s;
+        c = delta / rho3;
+        s = beta / rho3;
+
+        // update w and x
+        forall(n, [=] __device__(int i) {
+            w[i] = (v[i] - rho1 * wp[i] - rho2 * wpp[i]) / rho3;
+            x[i] += c * phi * w[i];
+        });
+
+        // update norm and check convergence
+        phi = -s * phi;
+
+        out.res_norm.push_back(std::abs(phi));
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+        out.time.push_back(dur);
+        if (opts.verbose == 1)
+        {
+            ++bar;
+            std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it + 1 << " / " << opts.maxit
+                      << " || rel. res. = " << std::setw(10) << std::abs(phi) / bnrm << "\r" << std::flush;
+        }
+        else if (opts.verbose >= 2)
+        {
+            std::cout << "iteration " << std::setw(10) << it + 1 << " / " << opts.maxit
+                      << " || rel. res. = " << std::setw(10) << std::abs(phi) / bnrm << std::endl;
+        }
+
+        if (std::abs(phi) < opts.tol * bnrm + opts.atol)
+        {
+            out.success = true;
+            break;
+        }
+
+        // prepare for next iteration
+        forall(n, [=] __device__(int i) {
+            wpp[i] = wp[i];
+            wp[i] = w[i];
+            vp[i] = v[i];
+            v[i] = r[i] / beta;
+        });
+    }
+
+    out.num_iter = it + 1;
+
+    if (opts.verbose == 1)
+        std::cout << std::endl;
+    if (opts.verbose)
+    {
+        std::cout << "After " << out.num_iter << " iterations (" << format_time(out.time.back())
+                  << "), MINRES achieved rel. residual of " << out.res_norm.back() / bnrm << std::endl;
+        if (out.success)
+            std::cout << "MINRES successfully converged in " << out.num_iter << " iterations." << std::endl;
+        else
+            std::cout << "MINRES reached maximum number of iterations (" << opts.maxit << ") without converging."
+                      << std::endl;
+    }
+
+    return out;
+}
+
+solver_out cuddh::fgmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
+                         solver_opts opts)
+{
+    validate_opts(opts);
+
+    const double bnrm = cuddh::norm(n, b);
+
+    // DEVICE DATA:
+    thrust::device_vector<double> _r(n, 0.0);
+    thrust::device_vector<double> _V(n * (opts.m + 1), 0.0);
+    thrust::device_vector<double> _Z(n * opts.m, 0.0);
+    double *r = thrust::raw_pointer_cast(_r.data());
+    double *V = thrust::raw_pointer_cast(_V.data());
+    double *Z = thrust::raw_pointer_cast(_Z.data());
+
+    // HOST DATA:
+    Matrix<double> H(opts.m + 1, opts.m);
+    Vec<double> sn(opts.m);
+    Vec<double> cs(opts.m);
+    Vec<double> eta(opts.m + 1);
+
+    solver_out out;
+    out.res_norm.reserve((opts.maxit + 1) * opts.m);
+    out.time.reserve((opts.maxit + 1) * opts.m);
+    out.num_matvec = 0;
+    out.success = false;
+
+    // compute initial residual
+    A->action(x, r); // r <- A * x
+    out.num_matvec++;
+    axpby(n, 1.0, b, -1.0, r); // r <- b - A * x
+
+    double rnrm = cuddh::norm(n, r);
+
+    out.res_norm.push_back(rnrm);
+    out.time.push_back(0.0);
+    auto t0 = std::chrono::high_resolution_clock::now();
+
+    if (rnrm <= opts.tol * bnrm + opts.atol)
+    {
+        out.success = true;
+
+        if (opts.verbose)
+        {
+            std::cout << "After 0 iterations, F-GMRES achieved rel. residual of " << out.res_norm.back() / bnrm
+                      << std::endl;
+            std::cout << "F-GMRES successfully converged within desired tolerance." << std::endl;
+        }
+
+        return out;
+    }
+
+    ProgressBar bar(opts.maxit);
+    if (opts.verbose)
+        std::cout << std::setprecision(5) << std::scientific;
+
+    int it = 1;
+    while (it <= opts.maxit)
+    {
+        axpby(n, 1.0 / rnrm, r, 0.0, V); // v[0] <- r / ||r||
+        eta(0) = rnrm;
+
+        // Arnoldi process with variable preconditioner
+        int k1 = 0;
+        for (int k = 0; k < opts.m && it <= opts.maxit; ++k, ++it)
+        {
+            k1 = k + 1;
+            const double *vk = V + k * n;
+            double *vk1 = V + k1 * n;
+            double *zk = Z + k * n;
+
+            Precond->action(vk, zk); // z[k] <- Precond * v[k]
+            A->action(zk, vk1);      // v[k+1] <- A * z[k]
+            out.num_matvec++;
+
+            // Modified Gram-Schmidt
+            for (int j = 0; j <= k; ++j)
+            {
+                const double *vj = V + j * n;
+                H(j, k) = cuddh::dot(n, vk1, vj);
+                cuddh::axpby(n, -H(j, k), vj, 1.0, vk1); // v[k+1] <- v[k+1] - H(j, k) * v[j]
+            }
+
+            H(k + 1, k) = cuddh::norm(n, vk1);
+
+            if (H(k + 1, k) < 1e-14)
+                break;
+
+            cuddh::scal(n, 1.0 / H(k + 1, k), vk1); // v[k+1] <- v[k+1] / ||v[k+1||
+
+            givens_rotations(&H(0, k), (double *)cs, (double *)sn, k);
+            eta(k + 1) = -sn(k) * eta(k);
+            eta(k) = cs(k) * eta(k);
+
+            rnrm = std::abs(eta(k + 1));
+            out.res_norm.push_back(rnrm);
+
+            if (opts.verbose == 1)
+            {
+                ++bar;
+                std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it << " / " << opts.maxit
+                          << " || rel. res. = " << std::setw(10) << rnrm / bnrm << "\r" << std::flush;
+            }
+            else if (opts.verbose >= 2)
+            {
+                std::cout << "iteration " << std::setw(10) << it << " / " << opts.maxit
+                          << " || rel. res. = " << std::setw(10) << rnrm / bnrm << std::endl;
+            }
+
+            if (rnrm <= opts.tol * bnrm + opts.atol)
+                break;
+
+            auto t1 = std::chrono::high_resolution_clock::now();
+            double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+            out.time.push_back(dur);
+        }
+
+        solve_upper_triangular(k1, H, opts.m + 1, eta);
+        for (int k = 0; k < k1; ++k)
+            cuddh::axpby(n, eta(k), Z + k * n, 1.0, x); // x <- x + eta[k] * z[k]
+
+        A->action(x, r); // r <- A * x
+        out.num_matvec++;
+        axpby(n, 1.0, b, -1.0, r); // r <- b - r = b - A * x
+
+        rnrm = cuddh::norm(n, r);
+        out.res_norm.back() = rnrm;
+
+        if (rnrm <= opts.tol * bnrm + opts.atol)
+        {
+            out.success = true;
+            break;
+        }
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+        out.time.back() = dur;
+    }
+
+    if (opts.verbose == 1)
+        std::cout << std::endl;
+    if (opts.verbose)
+    {
+        std::cout << "After " << it << " iterations (" << format_time(out.time.back())
+                  << "), F-GMRES achieved rel. residual of " << out.res_norm.back() / bnrm << std::endl;
+        if (out.success)
+            std::cout << "F-GMRES successfully converged within desired tolerance." << std::endl;
+        else
+            std::cout << "F-GMRES failed to converge within desired tolerance." << std::endl;
+    }
+
+    out.num_iter = it;
+    return out;
 }
