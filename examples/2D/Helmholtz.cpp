@@ -97,12 +97,14 @@ __device__ static double a(const double X[2])
 int main()
 {
     const int deg = 3;                       // polynomial degree of basis functions
-    const int nx = 128;                      // number of elements along each direction. Mesh will have nx^2 elements
+    const int nx = 64;                       // number of elements along each direction. Mesh will have nx^2 elements
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
-    const int maxit = 100'000; // maximum number of iterations of MINRES
-    const double tol = 1e-6;   // relative tolerance. MINRES stops when ||b-A*x|| < tol*||b||
-    const int verbose = 1;     // 0: silent, 1: progress bar, 2: one line per iteration
+    const SolverParams opts = {
+        .maxit = 100'000,                    // maximum number of iterations of MINRES
+        .tol = 1e-6,                         // relative tolerance. MINRES stops when ||b-A*x|| < tol*||b||
+        .verbose = SolverParams::ProgressBar // verbosity level: ProgressBar, Iteration, or Silent
+    };
 
     // Assemble the mesh
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
@@ -122,41 +124,41 @@ int main()
               << "\tpolynomial degree = " << deg << "\n"
               << "\t#dof = " << 2 * ndof << "\n";
 
-    // identify the boundary faces in the mesh in order to define the TraceSpace2D
-    // and FaceMassMatrix
-    ivec boundary_faces = mesh.boundary_edges();
+    auto A = [&]() -> Helmholtz {
+        // identify the boundary faces in the mesh in order to define the TraceSpace2D
+        // and FaceMassMatrix
+        ivec boundary_faces = mesh.boundary_edges();
 
-    // The TraceSpace2D is a subspace of the H1Space2D used to identify the degrees
-    // of freedom needed in the computation of trace terms: <u, phi>
-    TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
+        // The TraceSpace2D is a subspace of the H1Space2D used to identify the degrees
+        // of freedom needed in the computation of trace terms: <u, phi>
+        TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
+
+        auto a2x = gridfunc(fem, [] __device__(const double X[2]) -> double {
+            double aX = a(X);
+            return aX * aX;
+        });
+
+        auto ax = trace(fs, [] __device__(const double X[2]) -> double { return a(X); });
+
+        double *d_a2 = thrust::raw_pointer_cast(a2x.data()); // a^2(x) projected onto H1Space2D
+        double *d_a = thrust::raw_pointer_cast(ax.data());   // a(x) projected onto TraceSpace2D
+
+        return Helmholtz(omega, d_a2, d_a, fem, fs);
+    }();
 
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
 
     thrust::universal_vector<double> U(N, 0.0); // solution vector [u; v] initialized to zero
+    thrust::universal_vector<double> B(N, 0.0);
 
-    auto a2x = gridfunc(fem, [] __device__(const double X[2]) -> double {
-        double aX = a(X);
-        return aX * aX;
-    });
+    double *u = thrust::raw_pointer_cast(U.data()); // the solution vector [u; v]
+    double *b = thrust::raw_pointer_cast(B.data()); // the right hand side b(phi)
 
-    auto ax = trace(fs, [] __device__(const double X[2]) -> double { return a(X); });
-
-    MassMatrix M(fem);
-    thrust::universal_vector<double> b(N, 0.0);
-
-    double *d_U = thrust::raw_pointer_cast(U.data());    // the solution vector [u; v]
-    double *d_b = thrust::raw_pointer_cast(b.data());    // the right hand side b(phi)
-    double *d_a2 = thrust::raw_pointer_cast(a2x.data()); // a^2(x) projected onto H1Space2D
-    double *d_a = thrust::raw_pointer_cast(ax.data());   // a(x) projected onto TraceSpace2D
-
-    l2_project(d_b, M, [=] __device__(const double X[2]) -> double { return f(X, omega); });
-
-    // The operator representing the bilinear form: a([u, v], phi)
-    Helmholtz A(omega, d_a2, d_a, fem, fs);
+    l2_project(b, MassMatrix(fem), [=] __device__(const double X[2]) -> double { return f(X, omega); });
 
     // solve a([u, v], phi) = b(phi)
     std::cout << "\nsolving with MINRES ... \n";
-    auto out = minres(N, d_U, &A, d_b, maxit, tol, verbose);
+    auto out = minres(N, u, &A, b, opts);
 
     // save solution and collocation nodes to file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
@@ -170,7 +172,7 @@ int main()
     else
         std::cerr << "Failed to save collocation points to " << xy_file << std::endl;
 
-    if (to_file(sol_file, N, d_U))
+    if (to_file(sol_file, N, u))
         std::cout << "Saved solution to " << sol_file << std::endl;
     else
         std::cerr << "Failed to save solution to " << sol_file << std::endl;

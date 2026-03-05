@@ -21,10 +21,10 @@
  *                         (grad v, grad phi) - omega^2 (a^2(x) v, phi) + omega <a(x) u, phi> ]
  *
  * And the linear operator b is defined b(phi) = [ (f, phi); 0 ]
- * 
- * The DDH class implements this discretization but is used to solve the 
+ *
+ * The DDH class implements this discretization but is used to solve the
  * substructured problem instead of the original problem.
- * 
+ *
  * To compile & run this program:
  *  (1) From the CuDDHelmholtz directory, compile the library:
  *      cmake .
@@ -39,7 +39,7 @@
  * format.
  *
  * This format can be read and visualized, for example, in Python using numpy and matplotlib via:
- *      
+ *
  *      xy = numpy.fromfile("solution/xy.0000", order='F')
  *      xy = xy.reshape(2, -1)
  *      x, y = xy[0], xy[1]
@@ -47,11 +47,11 @@
  *      uv = numpy.fromfile("solution/ddh.0000", order='F')
  *      uv = uv.reshape(-1, 2)
  *      U  = uv[:, 0] + 1j * uv[:, 1]
- * 
+ *
  *      # visualize the modulus of U
  *      matplotlib.pyplot.tricontourf(x, y, np.abs(U))
  */
-
+#include "Helmholtz.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
 
@@ -62,11 +62,11 @@ __device__ static double f(const double X[2], double omega)
 {
     const double x = X[0], y = X[1];
     double s = omega * omega;
-    
-    double r = (x+0.5)*(x+0.5) + y * y;
+
+    double r = (x + 0.5) * (x + 0.5) + y * y;
     double F = s / M_PI * std::exp(-s * r);
-    
-    r = (x-0.5)*(x-0.5) + (y+0.5)*(y+0.5);
+
+    r = (x - 0.5) * (x - 0.5) + (y + 0.5) * (y + 0.5);
     F += s / M_PI * std::exp(-s * r);
     return F;
 }
@@ -74,8 +74,8 @@ __device__ static double f(const double X[2], double omega)
 // variable coefficient
 __device__ static double alpha(const double X[2])
 {
-    const double r = X[0]*X[0] + X[1]*X[1];
-    
+    const double r = X[0] * X[0] + X[1] * X[1];
+
     if (r < 0.0625)
         return 0.2;
     else
@@ -84,21 +84,23 @@ __device__ static double alpha(const double X[2])
 
 int main()
 {
-    const int deg = 3; // polynomial degree of basis functions
-    const int nx = 128; // number of elements along each direction. Mesh will have nx^2 elements
+    const int deg = 3;                       // polynomial degree of basis functions
+    const int nx = 64;                       // number of elements along each direction. Mesh will have nx^2 elements
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
-    const int gmres_m = 20; // number of vectors in the Krylov space used in each iteration of GMRES
-    const int gmres_maxit = 100; // maximum number of iterations of GMRES
-    const float gmres_tol = 1e-4; // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
-    const int gmres_verbose = 1; // 0: silent, 1: progress bar, 2: one line per iteration
-    
+    SolverParams opts = {
+        .m = 50,                             // number of vectors in the Krylov space used in each iteration of GMRES
+        .maxit = 200,                        // maximum number of iterations of GMRES
+        .tol = 1e-6,                         // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
+        .verbose = SolverParams::ProgressBar // verbosity level: Silent, ProgressBar, Iteration
+    };
+
     // Assemble the mesh
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
 
     // Construct 1D basis functions. On each element, the 2D basis functions are
     // tensor products of these 1D basis functions.
-    Basis basis(deg+1);
+    Basis basis(deg + 1);
 
     // The mesh and 1D basis functions are combined in H1Space2D to define the
     // total global degrees of freedom of the problem.
@@ -106,28 +108,24 @@ int main()
     EnsembleSpace efem = partition_uniform_rect(fem, nx, nx);
 
     const int ndof = fem.size(); // # of degrees of freedom
-    
+
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
 
-    host_device_dvec U(N);
-    host_device_dvec b(N);
-    host_device_dvec a(ndof);
+    auto Prec = [&]() -> DDH {
+        auto a = gridfunc(fem, [] __device__(const double X[2]) -> double { return alpha(X); });
+        double *d_a = thrust::raw_pointer_cast(a.data());
+        return DDH(omega, d_a, fem, efem, {.maxit = 30});
+    }();
 
-    double * d_U = U.device_write(); // the solution vector [u; v]
-    double * d_b = b.device_write(); // the right hand side b(phi)
-    double * d_a = a.device_write(); // the variable coefficient
+    thrust::universal_vector<double> U(N);
+    thrust::universal_vector<double> B(N);
 
-    LinearFunctional l(fem); // computes (f, phi)
-    DiagInvMassMatrix mi(fem);
-    l.action([=] __device__ (const double X[2]) -> double {return f(X, omega);}, d_b); // bu[i] <- (f, phi[i])
+    double *u = thrust::raw_pointer_cast(U.data()); // the solution vector [u; v]
+    double *b = thrust::raw_pointer_cast(B.data()); // the right hand side b(phi)
 
-    l.action([] __device__ (const double X[2]) -> double {return alpha(X);}, d_a);
-    mi.action(d_a, d_a); // project the coefficient d_a onto the basis
-
-    const double * h_a = a.host_read(); // right now the DDH setup requires a host array for the coefficient.
-    
-    DDH F(omega, h_a, fem, efem);
-    const int n_lambda = F.size(); // number of degrees of freedom in substructured problem
+    l2_project(b, MassMatrix(fem), [=] __device__(const double X[2]) -> double {
+        return f(X, omega);
+    }); // compute the right hand side b(phi) = (f, phi)
 
     std::cout << "Solving the Helmholtz equation...\n"
               << "\tomega = " << omega << "\n"
@@ -135,20 +133,25 @@ int main()
               << "\tpolynomial degree = " << deg << "\n"
               << "\t#dof = " << 2 * ndof << "\n"
               << "\t#subdomains = " << efem.size() << "\n"
-              << "\t#lambda = " << n_lambda << "\n";
+              << "\t#lambda = " << Prec.n_lambda() << "\n";
 
-    HostDeviceArray<float> L(n_lambda);
-    HostDeviceArray<float> Y(n_lambda);
-    float * d_L = L.device_write();
-    float * d_Y = Y.device_write();
+    auto A = [&]() -> Helmholtz {
+        ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
+        TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
 
-    F.rhs(d_b, d_Y); // compute the right hand side of the substructured problem from the Helmholtz right hand side
+        auto a2 = gridfunc(fem, [] __device__(const double X[2]) -> double {
+            double ax = alpha(X);
+            return ax * ax;
+        });
+        double *d_a2 = thrust::raw_pointer_cast(a2.data()); // variable coefficient projected onto H1Space2D
 
-    auto out = gmres(n_lambda, d_L, &F, d_Y, gmres_m, gmres_maxit, gmres_tol, gmres_verbose);
-    F.postprocess(d_L, d_b, d_U); // get solution from solution of substructured problem
+        auto a = trace(fs, [] __device__(const double X[2]) -> double { return alpha(X); });
+        double *d_a = thrust::raw_pointer_cast(a.data()); // variable coefficient projected onto TraceSpace2D
 
-    // copy solution to host
-    const double * h_U = U.host_read();
+        return Helmholtz(omega, d_a2, d_a, fem, fs);
+    }();
+
+    auto out = fgmres(N, u, &A, b, &Prec, opts);
 
     // save solution and collocation nodes to file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
@@ -156,10 +159,10 @@ int main()
     const char xy_file[] = "solution/xy.0000";
     const char sol_file[] = "solution/ddh.0000";
     const char res_file[] = "solution/residuals.0000";
-    
+
     if (to_file(xy_file, N, xy.data()))
         std::cout << "\ncoordinates written to: " << xy_file << "\n";
-    if (to_file(sol_file, N, h_U))
+    if (to_file(sol_file, N, u))
         std::cout << "Solution written to: " << sol_file << "\n";
     if (to_file(res_file, out.res_norm.size(), out.res_norm.data()))
         std::cout << "Residuals written to: " << res_file << "\n";

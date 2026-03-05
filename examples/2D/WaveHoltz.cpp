@@ -77,13 +77,15 @@ constexpr double maxvel = 5.0; // maximum reciprocal of alpha
 int main()
 {
     const int deg = 3;                       // polynomial degree
-    const int nx = 128;                      // number of elements in each direction
+    const int nx = 64;                       // number of elements in each direction
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
-    const int gmres_m = 20;        // GMRES restart parameter
-    const int gmres_maxit = 100;   // maximum number of GMRES iterations
-    const double gmres_tol = 1e-6; // GMRES tolerance
-    const int gmres_verbose = 1;   // GMRES verbosity level
+    const SolverParams opts = {
+        .m = 50,                              // GMRES restart parameter
+        .maxit = 200,                         // maximum number of GMRES iterations
+        .tol = 1e-6,                          // GMRES tolerance
+        .verbose = SolverParams::ProgressBar, // verbosity level: ProgressBar, Iteration, or Silent
+    };
 
     // Create a uniform rectangular mesh
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
@@ -97,33 +99,30 @@ int main()
     const int ndof = fem.size(); // number of degrees of freedom
     const int N = 2 * ndof;      // total degrees of freedom in [u, v] (U := u + i v)
 
-    ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
-    TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
+    auto W = [&]() -> WaveHoltz {
+        ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
+        TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
 
-    thrust::universal_vector<double> U(N, 0.0), Gb(N, 0.0);
+        auto a2 = gridfunc(fem, [] __device__(const double X[2]) -> double {
+            double aX = alpha(X);
+            return aX * aX;
+        });
 
-    auto a2 = gridfunc(fem, [] __device__(const double X[2]) -> double {
-        double aX = alpha(X);
-        return aX * aX;
-    });
+        auto a = trace(fs, [] __device__(const double X[2]) -> double { return alpha(X); });
 
-    auto a = trace(fs, [] __device__(const double X[2]) -> double { return alpha(X); });
+        auto d_a2 = thrust::raw_pointer_cast(a2.data());
+        auto d_a = thrust::raw_pointer_cast(a.data());
 
-    MassMatrix M(fem);
-    thrust::universal_vector<double> b(N, 0.0);
+        return WaveHoltz(omega, maxvel, d_a2, d_a, fem, fs);
+    }();
 
-    double *d_U = thrust::raw_pointer_cast(U.data());   // device pointer to solution vector
-    double *d_b = thrust::raw_pointer_cast(b.data());   // device pointer to right-hand side vector
-    double *d_a2 = thrust::raw_pointer_cast(a2.data()); // device pointer to variable coefficient
-    double *d_a = thrust::raw_pointer_cast(a.data());   // device pointer to variable coefficient on trace space
-    double *d_Gb = thrust::raw_pointer_cast(Gb.data()); // device pointer to G applied to b
+    thrust::universal_vector<double> U(N, 0.0), B(N, 0.0), GB(N, 0.0);
 
-    l2_project(d_b, M, [=] __device__(const double X[2]) -> double { return f(X, omega); });
+    double *u = thrust::raw_pointer_cast(U.data());   // device pointer to solution vector
+    double *b = thrust::raw_pointer_cast(B.data());   // device pointer to right-hand side vector
+    double *Gb = thrust::raw_pointer_cast(GB.data()); // device pointer to G applied to b
 
-    // Initialize the WaveHoltz operator
-    WaveHoltz W(omega, maxvel, d_a2, d_a, fem, fs);
-
-    W.G(d_b, d_Gb); // apply G to the right-hand side vector
+    l2_project(b, MassMatrix(fem), [=] __device__(const double X[2]) -> double { return f(X, omega); });
 
     std::cout << "Solving the Helmholtz equation...\n"
               << "\tomega = " << omega << "\n"
@@ -132,20 +131,34 @@ int main()
               << "\t#dof = " << 2 * ndof << std::endl;
 
     // Solve the system using GMRES
-    solver_out out = gmres(N, d_U, &W, d_Gb, gmres_m, gmres_maxit, gmres_tol, gmres_verbose);
+    W.G(b, Gb); // apply G to the right-hand side vector
+    SolverResults out = gmres(N, u, &W, Gb, opts);
 
     double res_norm = [&]() {
-        thrust::universal_vector<double> res(N);
-        double *d_res = thrust::raw_pointer_cast(res.data());
+        thrust::universal_vector<double> Res(N);
+        double *res = thrust::raw_pointer_cast(Res.data());
+
+        ivec boundary_faces = mesh.boundary_edges();
+        TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
+
+        auto a2 = gridfunc(fem, [] __device__(const double X[2]) -> double {
+            double aX = alpha(X);
+            return aX * aX;
+        });
+
+        auto a = trace(fs, [] __device__(const double X[2]) -> double { return alpha(X); });
+
+        auto d_a2 = thrust::raw_pointer_cast(a2.data());
+        auto d_a = thrust::raw_pointer_cast(a.data());
 
         Helmholtz A(omega, d_a2, d_a, fem, fs);
-        A.action(d_U, d_res);            // compute residuals
-        axpby(N, -1.0, d_b, 1.0, d_res); // res = A U - b
+        A.action(u, res);            // compute residuals
+        axpby(N, -1.0, b, 1.0, res); // res = A U - b
 
-        return cuddh::norm(N, d_res) / cuddh::norm(N, d_b);
+        return cuddh::norm(N, res) / cuddh::norm(N, b);
     }();
 
-    std::cout << "Relative residual norm ||A U - b|| / ||b|| = " << res_norm << std::endl;
+    std::cout << "Relative residual norm ||A u - b|| / ||b|| = " << res_norm << std::endl;
 
     // save the solution to a file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
