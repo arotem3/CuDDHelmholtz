@@ -88,7 +88,7 @@ private:
     const Operator *P;
 };
 
-static void validate_opts(solver_opts &opts)
+static void validate_opts(SolverParams &opts)
 {
     cuddh_verify(opts.m > 0, printf("solver error: m must be positive\n"));
     cuddh_verify(opts.maxit > 0, printf("solver error: maxit must be positive\n"));
@@ -122,7 +122,7 @@ static std::string format_time(double t)
 }
 
 template <typename scalar, typename OpType>
-inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, solver_opts &opts)
+inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b, SolverParams &opts)
 {
     constexpr scalar one = 1, zero = 0;
 
@@ -143,7 +143,7 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, so
     Vec<scalar> cs(opts.m);
     Vec<scalar> eta(m1);
 
-    solver_out out;
+    SolverResults out;
     out.res_norm.reserve((opts.maxit + 1) * opts.m);
     out.time.reserve((opts.maxit + 1) * opts.m);
     out.num_matvec = 0;
@@ -163,7 +163,7 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, so
     {
         out.success = true;
 
-        if (opts.verbose)
+        if (opts.verbose != SolverParams::Silent)
         {
             std::cout << "After 0 iterations, GMRES achieved rel. residual of " << out.res_norm.back() / bnrm
                       << std::endl;
@@ -174,7 +174,7 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, so
     }
 
     ProgressBar bar(opts.maxit);
-    if (opts.verbose)
+    if (opts.verbose != SolverParams::Silent)
         std::cout << std::setprecision(5) << std::scientific;
 
     int it = 1;
@@ -219,13 +219,13 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, so
             rnrm = std::abs(eta(k1));
             out.res_norm.push_back((double)rnrm);
 
-            if (opts.verbose == 1)
+            if (opts.verbose == SolverParams::ProgressBar)
             {
                 ++bar;
                 std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it << " / " << opts.maxit
                           << " || rel. res. = " << std::setw(10) << rnrm / bnrm << "\r" << std::flush;
             }
-            else if (opts.verbose >= 2)
+            else if (opts.verbose == SolverParams::Iteration)
             {
                 std::cout << "iteration " << std::setw(10) << it << " / " << opts.maxit
                           << " || rel. res. = " << std::setw(10) << rnrm / bnrm << std::endl;
@@ -261,9 +261,9 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, so
         out.time.back() = dur;
     }
 
-    if (opts.verbose == 1)
+    if (opts.verbose == SolverParams::ProgressBar)
         std::cout << std::endl;
-    if (opts.verbose)
+    if (opts.verbose != SolverParams::Silent)
     {
         std::cout << "After " << it << " iterations (" << format_time(out.time.back())
                   << "), GMRES achieved rel. residual of " << out.res_norm.back() / bnrm << std::endl;
@@ -277,12 +277,12 @@ inline solver_out t_gmres(int n, scalar *x, const OpType *A, const scalar *b, so
     return out;
 }
 
-solver_out cuddh::gmres(int n, double *x, const Operator *A, const double *b, solver_opts opts)
+SolverResults cuddh::gmres(int n, double *x, const Operator *A, const double *b, SolverParams opts)
 {
     return t_gmres<double>(n, x, A, b, opts);
 }
 
-solver_out cuddh::gmres(int n, double *x, const Operator *A, const double *b, const Operator *P, solver_opts opts)
+SolverResults cuddh::gmres(int n, double *x, const Operator *A, const double *b, const Operator *P, SolverParams opts)
 {
     PreconditionedSystem PA(n, A, P);
 
@@ -293,14 +293,14 @@ solver_out cuddh::gmres(int n, double *x, const Operator *A, const double *b, co
     return t_gmres<double>(n, x, &PA, d_r0, opts);
 }
 
-solver_out cuddh::gmres(int n, float *x, const SinglePrecisionOperator *A, const float *b, solver_opts opts)
+SolverResults cuddh::gmres(int n, float *x, const SinglePrecisionOperator *A, const float *b, SolverParams opts)
 {
     return t_gmres<float>(n, x, A, b, opts);
 }
 
-cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const double *b, solver_opts opts)
+cuddh::SolverResults cuddh::minres(int n, double *x, const Operator *A, const double *b, SolverParams opts)
 {
-    solver_out out{.success = false, .num_iter = 0, .num_matvec = 0, .res_norm = {}, .time = {}};
+    SolverResults out{.success = false, .num_iter = 0, .num_matvec = 0, .res_norm = {}, .time = {}};
     out.res_norm.reserve(opts.maxit + 1);
     out.time.reserve(opts.maxit + 1);
 
@@ -329,7 +329,7 @@ cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const doubl
     {
         out.success = true;
 
-        if (opts.verbose)
+        if (opts.verbose != SolverParams::Silent)
         {
             std::cout << "After 0 iterations, MINRES achieved rel. residual of " << out.res_norm.back() / bnrm
                       << std::endl;
@@ -339,7 +339,7 @@ cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const doubl
     }
 
     ProgressBar bar(opts.maxit);
-    if (opts.verbose)
+    if (opts.verbose != SolverParams::Silent)
         std::cout << std::setprecision(5) << std::scientific;
 
     // v = r / phi
@@ -388,13 +388,13 @@ cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const doubl
         auto t1 = std::chrono::high_resolution_clock::now();
         double dur = 1e-9 * std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
         out.time.push_back(dur);
-        if (opts.verbose == 1)
+        if (opts.verbose == SolverParams::ProgressBar)
         {
             ++bar;
             std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it + 1 << " / " << opts.maxit
                       << " || rel. res. = " << std::setw(10) << std::abs(phi) / bnrm << "\r" << std::flush;
         }
-        else if (opts.verbose >= 2)
+        else if (opts.verbose == SolverParams::Iteration)
         {
             std::cout << "iteration " << std::setw(10) << it + 1 << " / " << opts.maxit
                       << " || rel. res. = " << std::setw(10) << std::abs(phi) / bnrm << std::endl;
@@ -417,9 +417,9 @@ cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const doubl
 
     out.num_iter = it + 1;
 
-    if (opts.verbose == 1)
+    if (opts.verbose == SolverParams::ProgressBar)
         std::cout << std::endl;
-    if (opts.verbose)
+    if (opts.verbose != SolverParams::Silent)
     {
         std::cout << "After " << out.num_iter << " iterations (" << format_time(out.time.back())
                   << "), MINRES achieved rel. residual of " << out.res_norm.back() / bnrm << std::endl;
@@ -433,8 +433,8 @@ cuddh::solver_out cuddh::minres(int n, double *x, const Operator *A, const doubl
     return out;
 }
 
-solver_out cuddh::fgmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
-                         solver_opts opts)
+SolverResults cuddh::fgmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
+                            SolverParams opts)
 {
     validate_opts(opts);
 
@@ -454,7 +454,7 @@ solver_out cuddh::fgmres(int n, double *x, const Operator *A, const double *b, c
     Vec<double> cs(opts.m);
     Vec<double> eta(opts.m + 1);
 
-    solver_out out;
+    SolverResults out;
     out.res_norm.reserve((opts.maxit + 1) * opts.m);
     out.time.reserve((opts.maxit + 1) * opts.m);
     out.num_matvec = 0;
@@ -475,7 +475,7 @@ solver_out cuddh::fgmres(int n, double *x, const Operator *A, const double *b, c
     {
         out.success = true;
 
-        if (opts.verbose)
+        if (opts.verbose != SolverParams::Silent)
         {
             std::cout << "After 0 iterations, F-GMRES achieved rel. residual of " << out.res_norm.back() / bnrm
                       << std::endl;
@@ -486,7 +486,7 @@ solver_out cuddh::fgmres(int n, double *x, const Operator *A, const double *b, c
     }
 
     ProgressBar bar(opts.maxit);
-    if (opts.verbose)
+    if (opts.verbose != SolverParams::Silent)
         std::cout << std::setprecision(5) << std::scientific;
 
     int it = 1;
@@ -530,13 +530,13 @@ solver_out cuddh::fgmres(int n, double *x, const Operator *A, const double *b, c
             rnrm = std::abs(eta(k + 1));
             out.res_norm.push_back(rnrm);
 
-            if (opts.verbose == 1)
+            if (opts.verbose == SolverParams::ProgressBar)
             {
                 ++bar;
                 std::cout << "[" << bar.get() << "] || iteration " << std::setw(10) << it << " / " << opts.maxit
                           << " || rel. res. = " << std::setw(10) << rnrm / bnrm << "\r" << std::flush;
             }
-            else if (opts.verbose >= 2)
+            else if (opts.verbose == SolverParams::Iteration)
             {
                 std::cout << "iteration " << std::setw(10) << it << " / " << opts.maxit
                           << " || rel. res. = " << std::setw(10) << rnrm / bnrm << std::endl;
@@ -572,9 +572,9 @@ solver_out cuddh::fgmres(int n, double *x, const Operator *A, const double *b, c
         out.time.back() = dur;
     }
 
-    if (opts.verbose == 1)
+    if (opts.verbose == SolverParams::ProgressBar)
         std::cout << std::endl;
-    if (opts.verbose)
+    if (opts.verbose != SolverParams::Silent)
     {
         std::cout << "After " << it << " iterations (" << format_time(out.time.back())
                   << "), F-GMRES achieved rel. residual of " << out.res_norm.back() / bnrm << std::endl;
