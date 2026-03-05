@@ -1,15 +1,22 @@
 #ifndef CUDDH_ENSEMBLE_SPACE_HPP
 #define CUDDH_ENSEMBLE_SPACE_HPP
 
+#include <algorithm>
 #include <array>
 #include <utility>
-#include <algorithm>
 
 #include "H1Space2D.hpp"
 #include "Tensor.hpp"
 
 namespace cuddh
 {
+    struct LambdaDof
+    {
+        int subspaces[2];
+        int local_dof_indices[2];
+        float face_mass;
+    };
+
     class EnsembleSpace
     {
     public:
@@ -127,9 +134,9 @@ namespace cuddh
         /// freedom corresponds to the i-th face DOF of subspace p, and the j-th
         /// face DOF of subspace q. The map is sorted with respect to p, and
         /// does not store the symmetric set [q, p, j, i].
-        const_imat_wrapper connectivity_map(MemorySpace m) const
+        auto connectivity_map(MemorySpace m) const
         {
-            return reshape(cmap.read(m), 4, n_shared_dofs);
+            return reshape(cmap.read(m), n_shared_dofs);
         }
 
     private:
@@ -150,7 +157,8 @@ namespace cuddh
         host_device_ivec sI;
         host_device_ivec fI;
         host_device_ivec s_fdof;
-        host_device_ivec cmap;
+        // host_device_ivec cmap;
+        HostDeviceArray<LambdaDof> cmap;
     };
 
     EnsembleSpace partition_uniform_rect(const H1Space2D &fem, int nx, int ny, int max_dof_1d = 16);

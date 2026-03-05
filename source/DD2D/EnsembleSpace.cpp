@@ -13,7 +13,7 @@ namespace
         void set_subdomain_elements(imat_wrapper &h_elems) const;
         int set_subdomain_num_boundary_faces(ivec_wrapper &h_s_faces) const;
         void set_subdomain_face_indices(imat_wrapper &h_faces) const;
-        int compute_shared_dof_map(HostDeviceArray<int> &cmap, const TensorWrapper<3, int> &h_fI) const;
+        int compute_shared_dof_map(HostDeviceArray<LambdaDof> &cmap, const TensorWrapper<3, int> &h_fI) const;
         void compute_fdof_indices(TensorWrapper<3, int> &h_fI, const TensorWrapper<4, int> &h_sI) const;
         int set_subdomain_num_dofs(ivec_wrapper &h_s_dof) const;
         int set_subdomain_num_fdofs(ivec_wrapper &h_s_fdof) const;
@@ -28,7 +28,7 @@ namespace
         std::vector<std::vector<int>> s2g;               // subspace index to global index
         std::vector<std::vector<int>> f2s;               // face index to subspace index
     };
-}
+} // namespace
 
 EnsembleSpace::EnsembleSpace(const H1Space2D &fem, int n_spaces_, const int *element_labels)
     : n_spaces{n_spaces_},
@@ -90,8 +90,8 @@ EnsembleSpace cuddh::partition_uniform_rect(const H1Space2D &fem, int nx, int ny
     const int n_basis = fem.basis().size();
     const int elems_per_domain_x = max_dof_1d / n_basis;
 
-    if (nx % elems_per_domain_x != 0 || ny % elems_per_domain_x != 0)
-        cuddh_error("Only nx x ny meshes with nx and ny multiples of 32 / n_basis allowed.");
+    cuddh_verify(nx % elems_per_domain_x == 0 && ny % elems_per_domain_x == 0,
+                 printf("Only nx x ny meshes with nx and ny multiples of %d allowed.", elems_per_domain_x));
 
     const int num_domains_x = nx / elems_per_domain_x;
     const int num_domains_y = ny / elems_per_domain_x;
@@ -114,12 +114,6 @@ EnsembleSpace cuddh::partition_uniform_rect(const H1Space2D &fem, int nx, int ny
     return EnsembleSpace(fem, n_domains, element_labels);
 }
 
-template <typename Map, typename Key>
-static bool contains(const Map &map, Key key)
-{
-    return map.find(key) != map.end();
-}
-
 static auto compute_subspace_elements(int nel, int n_spaces, const int *element_labels)
 {
     std::vector<std::vector<int>> E(n_spaces); // elements
@@ -127,8 +121,7 @@ static auto compute_subspace_elements(int nel, int n_spaces, const int *element_
     for (int el = 0; el < nel; ++el)
     {
         const int p = element_labels[el];
-        if (p < 0 || p >= n_spaces)
-            cuddh_error("EnsembleSpace error: an element was illogically labeled.");
+        cuddh_assert(0 <= p && p < n_spaces, printf("EnsembleSpace error: an element was illogically labeled."));
         E.at(p).push_back(el);
     }
 
@@ -138,36 +131,36 @@ static auto compute_subspace_elements(int nel, int n_spaces, const int *element_
 static auto compute_subdomain_boundary_faces(const Mesh2D &mesh, int n_spaces, const int *element_labels)
 {
     std::vector<std::vector<std::pair<int, int>>> F(n_spaces); // faces in each subspace
-    std::vector<std::array<int, 4>> shared_faces;              // {subdomain0, subdomain1, subdomain face index0, ..face..1}
-    const int g_faces = mesh.n_edges();                        // global number of faces
-    for (int e = 0; e < g_faces; ++e)
+    std::vector<std::array<int, 4>> shared_faces; // {subdomain0, subdomain1, subdomain face index0, ..face..1}
+    const int g_faces = mesh.n_edges();           // global number of faces
+    for (int face_index = 0; face_index < g_faces; ++face_index)
     {
         // loop over faces and check if an edge is on the boundary of a
         // subdomain. Boundary faces are automatically on the boundary, and
         // interior faces are on the boundary only if the element[0] != element[1].
 
-        const Edge *edge = mesh.edge(e);
+        const Edge *edge = mesh.edge(face_index);
 
         const int el0 = edge->elements[0];
-        const int S0 = element_labels[el0];
+        const int domain0 = element_labels[el0];
 
         if (edge->type == FaceType::BOUNDARY)
         {
-            F.at(S0).push_back({e, 0});
+            F.at(domain0).push_back({face_index, 0});
         }
         else
         {
             const int el1 = edge->elements[1];
-            const int S1 = element_labels[el1];
+            const int domain1 = element_labels[el1];
 
-            if (S0 != S1)
+            if (domain0 != domain1)
             {
-                F.at(S0).push_back({e, 0});
-                F.at(S1).push_back({e, 1});
+                F.at(domain0).push_back({face_index, 0});
+                F.at(domain1).push_back({face_index, 1});
 
-                const int l0 = F.at(S0).size() - 1; // the index of face e in the subdomain face space
-                const int l1 = F.at(S1).size() - 1;
-                shared_faces.push_back({S0, S1, l0, l1});
+                const int local_face_index0 = F.at(domain0).size() - 1;
+                const int local_face_index1 = F.at(domain1).size() - 1;
+                shared_faces.push_back({domain0, domain1, local_face_index0, local_face_index1});
             }
         }
     }
@@ -211,7 +204,7 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
 
     for (int i = 0; i < ndof; ++i)
     {
-        if (contains(pp, i))
+        if (pp.contains(i))
             continue;
 
         perm.at(l) = i;
@@ -225,8 +218,7 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
     }
 }
 
-::EnsembleSpaceBuilder::EnsembleSpaceBuilder(const H1Space2D &fem, int n_spaces, const int *element_labels)
-    : fem{fem}
+::EnsembleSpaceBuilder::EnsembleSpaceBuilder(const H1Space2D &fem, int n_spaces, const int *element_labels) : fem{fem}
 {
     E = compute_subspace_elements(fem.mesh().n_elem(), n_spaces, element_labels);
     std::tie(F, shared_faces) = compute_subdomain_boundary_faces(fem.mesh(), n_spaces, element_labels);
@@ -256,7 +248,7 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
                 for (int i = 0; i < n_basis; ++i)
                 {
                     const int g_idx = g_inds(i, j, g_el); // global index
-                    if (not contains(unique, g_idx))
+                    if (not unique.contains(g_idx))
                     {
                         unique[g_idx] = l;
                         dof_indices.push_back(g_idx);
@@ -286,14 +278,12 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
             {
                 // map face index to element index
                 const int j = (reversed) ? (n_basis - 1 - i) : i;
-                const int m = (s == 0 || s == 2) ? j : (s == 1) ? (n_basis - 1)
-                                                                : 0;
-                const int n = (s == 1 || s == 3) ? j : (s == 2) ? (n_basis - 1)
-                                                                : 0;
+                const int m = (s == 0 || s == 2) ? j : (s == 1) ? (n_basis - 1) : 0;
+                const int n = (s == 1 || s == 3) ? j : (s == 2) ? (n_basis - 1) : 0;
 
                 const int idx = unique.at(g_inds(m, n, g_el));
 
-                if (not contains(funique, idx))
+                if (not funique.contains(idx))
                 {
                     funique[idx] = l;
                     fdof_indices.push_back(idx);
@@ -320,8 +310,7 @@ int ::EnsembleSpaceBuilder::set_subdomain_num_elements(ivec_wrapper &h_s_elems) 
         mn = std::min(mn, n);
     }
 
-    if (mn < 1)
-        cuddh_error("EnsembleSpace error: atleast one space is empty");
+    cuddh_verify(mn >= 1, printf("EnsembleSpace error: atleast one space is empty."));
 
     return mx;
 }
@@ -375,44 +364,74 @@ void ::EnsembleSpaceBuilder::set_subdomain_face_indices(imat_wrapper &h_faces) c
     }
 }
 
-int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<int> &cmap, const TensorWrapper<3, int> &h_fI) const
+int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &cmap,
+                                                   const TensorWrapper<3, int> &h_fI) const
 {
+    const Mesh2D &mesh = fem.mesh();
+    auto &q = fem.basis().quadrature();
+
     const int n_shared = shared_faces.size(); // total number of faces shared between subdomains
     const int n_basis = fem.basis().size();
     const int n_spaces = E.size();
 
-    std::vector<std::array<int, 4>> shared_dofs;                    // list of all pairs of shared DOFs identifying the respective subspaces
-    std::unordered_map<int, std::unordered_set<int>> unique_shared; // maps pairs of subspaces to unique DOFs shared between them
+    // std::vector<std::array<int, 4>> shared_dofs;                    // list of all pairs of shared DOFs identifying
+    // the respective subspaces
+    // std::vector<LambdaDof> shared_dofs; // list of all pairs of shared DOFs identifying the respective subspaces
+    // std::unordered_map<int, std::unordered_set<int>>
+    //     unique_shared; // maps pairs of subspaces to unique DOFs shared between them
 
-    for (auto [S0, S1, f0, f1] : shared_faces)
+    std::unordered_map<int, std::unordered_map<int, LambdaDof>> shared_dofs;
+
+    for (auto [domain0, domain1, local_face_index0, local_face_index1] : shared_faces)
     {
-        const int key = (S0 < S1) ? (S0 + n_spaces * S1) : (S1 + n_spaces * S0); // key is same for (S0, S1) and (S1, S0) symmetric pairs
+        // sanity check that the shared face indices match up
+        cuddh_verify(F.at(domain0).at(local_face_index0).first == F.at(domain1).at(local_face_index1).first,
+                     printf("EnsembleSpace error: shared face indices do not match up."));
 
-        auto &unq = unique_shared[key]; // unique face dofs
+        // key is same for (domain0, domain1) and (domain1, domain0) symmetric pairs
+        const int key = std::min(domain0, domain1) + n_spaces * std::max(domain0, domain1);
+
+        auto &dofs = shared_dofs[key];
+
         for (int i = 0; i < n_basis; ++i)
         {
-            const int j0 = h_fI(i, f0, S0);
-            const int j1 = h_fI(i, f1, S1);
+            const int local_dof0 = h_fI(i, local_face_index0, domain0);
+            const int local_dof1 = h_fI(i, local_face_index1, domain1);
 
-            const int lkey = (S0 < S1) ? j0 : j1; // key is same for symmetric pairs
-            if (not contains(unq, lkey))
+            const int lkey = (domain0 < domain1) ? local_dof0 : local_dof1; // key is same for symmetric pairs
+
+            if (not dofs.contains(lkey))
             {
-                shared_dofs.push_back({S0, S1, j0, j1});
-                unq.insert(lkey);
+                LambdaDof dof;
+                dof.subspaces[0] = domain0;
+                dof.subspaces[1] = domain1;
+                dof.local_dof_indices[0] = local_dof0;
+                dof.local_dof_indices[1] = local_dof1;
+                dof.face_mass = 0.0;
+
+                dofs[lkey] = dof;
             }
+
+            const Edge *edge = mesh.edge(F.at(domain0).at(local_face_index0).first);
+            dofs.at(lkey).face_mass += q.w(i) * edge->measure(q.x(i));
         }
     }
 
-    int n_shared_dofs = shared_dofs.size();
-    cmap.resize(4 * n_shared_dofs);
-    auto h_cmap = reshape(cmap.host_write(), 4, n_shared_dofs);
-    for (int i = 0; i < n_shared_dofs; ++i)
+    int n_shared_dofs = 0;
+    for (const auto &[_, dofs] : shared_dofs)
+        n_shared_dofs += dofs.size();
+
+    cmap.resize(n_shared_dofs);
+
+    auto h_cmap = reshape(cmap.host_write(), n_shared_dofs);
+    int i = 0;
+    for (const auto &[_, dofs] : shared_dofs)
     {
-        auto [S0, S1, j0, j1] = shared_dofs.at(i);
-        h_cmap(0, i) = S0;
-        h_cmap(1, i) = S1;
-        h_cmap(2, i) = j0;
-        h_cmap(3, i) = j1;
+        for (const auto &[__, dof] : dofs)
+        {
+            h_cmap(i) = dof;
+            i++;
+        }
     }
 
     return n_shared_dofs;
@@ -449,10 +468,8 @@ void ::EnsembleSpaceBuilder::compute_fdof_indices(TensorWrapper<3, int> &h_fI, c
             {
                 // map face index to element index
                 const int j = (reversed) ? (n_basis - 1 - i) : i;
-                const int m = (s == 0 || s == 2) ? j : (s == 1) ? (n_basis - 1)
-                                                                : 0;
-                const int n = (s == 1 || s == 3) ? j : (s == 2) ? (n_basis - 1)
-                                                                : 0;
+                const int m = (s == 0 || s == 2) ? j : (s == 1) ? (n_basis - 1) : 0;
+                const int n = (s == 1 || s == 3) ? j : (s == 2) ? (n_basis - 1) : 0;
 
                 const int idx = h_sI(m, n, el, p);
 
