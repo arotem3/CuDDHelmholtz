@@ -16,6 +16,7 @@
 #include "include/H1Space2D.hpp"
 #include "include/H1Space3D.hpp"
 #include "include/HostDeviceArray.hpp"
+#include "include/LinearSolvers/gmres.hpp"
 #include "include/Mesh2D/Edge.hpp"
 #include "include/Mesh2D/Element.hpp"
 #include "include/Mesh2D/Mesh2D.hpp"
@@ -41,7 +42,6 @@
 #include "include/Tensor.hpp"
 #include "include/cuddh_error.hpp"
 #include "include/forall.hpp"
-#include "include/gmres.hpp"
 #include "include/linalg.hpp"
 
 #endif
