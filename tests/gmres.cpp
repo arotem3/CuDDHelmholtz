@@ -1,4 +1,6 @@
-#include "test.hpp"
+#include <cstdlib>
+
+#include "test_common.hpp"
 
 using namespace cuddh;
 
@@ -11,22 +13,22 @@ namespace
         TestMatrix(int n_) : _n{n_} {}
         ~TestMatrix() = default;
 
-        void action(const double * x, double * y) const override
+        void action(const double *x, double *y) const override
         {
             const int n = _n;
-            forall(n, [=] __device__ (int i) -> void {
+            forall(n, [=] __device__(int i) -> void {
                 constexpr double c[] = {1.0, -3.0, 1.5};
 
                 if (i == 0)
                     y[0] = c[1] * x[0] + c[2] * x[1];
-                else if (i == n-1)
-                    y[n-1] = c[0] * x[n-2] + c[1] * x[n-1];
+                else if (i == n - 1)
+                    y[n - 1] = c[0] * x[n - 2] + c[1] * x[n - 1];
                 else
-                    y[i] = c[0] * x[i-1] + c[1] * x[i] + c[2] * x[i+1];
+                    y[i] = c[0] * x[i - 1] + c[1] * x[i] + c[2] * x[i + 1];
             });
         }
 
-        void action(double c, const double * x, double * y) const override
+        void action(double c, const double *x, double *y) const override
         {
             // not needed
         }
@@ -34,44 +36,55 @@ namespace
     private:
         int _n;
     };
+} // namespace
+
+static void run_gmres_test(TestLogger &summary)
+{
+    const int n = 1 << 10;
+
+    host_device_dvec _x(n);
+
+    dvec_wrapper h_x(_x.host_write(), n);
+    for (int i = 0; i < n; ++i)
+        h_x(i) = static_cast<double>(rand()) / RAND_MAX;
+
+    host_device_dvec _y(n);
+    double *y = _y.device_write();
+
+    double *x = _x.device_read_write();
+
+    TestMatrix a(n);
+    a.action(x, y); // y <- A * random
+
+    zeros(n, x);
+
+    const gmresParams opts = {
+        .m = 20, .maxit = 200, .tol = 1e-10, .atol = 0.0, .verbose = SolverVerbosity::ProgressBar};
+    auto out = cuddh::gmres(n, x, &a, y, opts);
+
+    host_device_dvec _r(n);
+    double *r = _r.device_write();
+    a.action(x, r);
+    axpby(n, 1.0, y, -1.0, r);
+
+    const double b_norm = cuddh::norm(n, y);
+    const double rel_res = cuddh::norm(n, r) / b_norm;
+    const double target = opts.tol + opts.atol / b_norm;
+
+    if (out.success && rel_res <= target)
+    {
+        summary.pass("gmres tridiagonal solve");
+    }
+    else
+    {
+        summary.fail("gmres tridiagonal solve",
+                     std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
+    }
 }
 
-namespace cuddh_test
+int main()
 {
-    void t_gmres(int& n_test, int& n_passed)
-    {
-        const int n = 1<<10;
-
-        host_device_dvec _x(n);
-
-        dvec_wrapper h_x(_x.host_write(), n);
-        for (int i = 0; i < n; ++i)
-            h_x(i) = (double)rand() / RAND_MAX;
-
-        host_device_dvec _y(n);
-        double * y = _y.device_write();
-
-        double * x = _x.device_read_write();
-
-        TestMatrix a(n);
-        a.action(x, y); // y <- A * random
-
-        zeros(n, x);
-
-        const int m = 5;
-        const int maxit = 100;
-        const double tol = 1e-10;
-        auto out = cuddh::gmres(n, x, &a, y, m, maxit, tol);
-
-        n_test++;
-        if (out.success)
-        {
-            std::cout << "\t[ + ] t_gmres() test successful." << std::endl;
-            n_passed++;
-        }
-        else
-        {
-            std::cout << "\t[ - ] t_gmres() test failed.\n\t\tFinal residual ~ " << out.res_norm.back() << " > specified tol. (" << tol << ")" << std::endl;
-        }
-    }
-} // namespace cuddh_test
+    TestLogger summary;
+    run_gmres_test(summary);
+    return summary.finish();
+}

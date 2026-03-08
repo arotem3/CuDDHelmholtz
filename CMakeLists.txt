@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.18)
 # Project setup
 project(cuddh LANGUAGES CUDA CXX)
 
+enable_testing()
+
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -45,18 +47,39 @@ target_compile_options(cuddh PUBLIC --extended-lambda --expt-relaxed-constexpr -
 set_target_properties(cuddh PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 target_compile_features(cuddh PUBLIC cxx_std_17)
 
-# Find and link LAPACK
+# Find and link LAPACK/LAPACKE
 find_package(LAPACK REQUIRED)
-if(LAPACK_FOUND)
-    target_link_libraries(cuddh PUBLIC ${LAPACK_LIBRARIES})
+
+# LAPACKE can be provided either as liblapacke or bundled in OpenBLAS.
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(PC_LAPACKE QUIET lapacke)
+endif()
+
+find_path(
+    LAPACKE_INCLUDE_DIR
+    NAMES lapacke.h
+    HINTS ${PC_LAPACKE_INCLUDE_DIRS}
+    PATH_SUFFIXES openblas
+)
+
+find_library(
+    LAPACKE_LIBRARY
+    NAMES lapacke openblas
+    HINTS ${PC_LAPACKE_LIBRARY_DIRS}
+)
+
+if(LAPACK_FOUND AND LAPACKE_INCLUDE_DIR AND LAPACKE_LIBRARY)
+    target_include_directories(cuddh PUBLIC ${LAPACKE_INCLUDE_DIR})
+    target_link_libraries(cuddh PUBLIC ${LAPACK_LIBRARIES} ${LAPACKE_LIBRARY})
 else()
-    message(FATAL_ERROR "LAPACK not found")
+    message(FATAL_ERROR "LAPACK/LAPACKE not found. Install LAPACKE development headers and libraries.")
 endif()
 
 # Find and link CUDA runtime library (cudart)
 find_package(CUDAToolkit 12 REQUIRED)
 if(CUDAToolkit_FOUND)
-    target_link_libraries(cuddh PUBLIC CUDA::cudart)
+    target_link_libraries(cuddh PUBLIC CUDA::cudart CUDA::cublas)
 else()
     message(FATAL_ERROR "CUDAToolkit not found")
 endif()

@@ -1,27 +1,29 @@
-#include "test.hpp"
+#include <cmath>
+
+#include "test_common.hpp"
+
+using namespace cuddh;
 
 __device__ static double func(double3 r)
 {
-    double x5 = pow(r.x, 5);
-    double y3 = pow(r.y, 3);
-    double z4 = pow(r.z, 4);
+    const double x5 = pow(r.x, 5);
+    const double y3 = pow(r.y, 3);
+    const double z4 = pow(r.z, 4);
     return (x5 - 5.0 * r.x) * (y3 - 3.0 * r.y) + (z4 - 2.0 * r.z * r.z);
 }
 
 __device__ static double L(double3 r)
 {
-    double x3 = pow(r.x, 3);
-    double x4 = r.x * x3;
+    const double x3 = pow(r.x, 3);
+    const double x4 = r.x * x3;
 
     return 4.0 - 6.0 * r.x * r.y * (x4 - 5.0) - 20.0 * x3 * r.y * (r.y * r.y - 3.0) - 12.0 * r.z * r.z;
 }
 
-using namespace cuddh;
-
-static void t_stiffness3d(int &n_test, int &n_passed, const Mesh3D &mesh, const Basis &basis, const std::string &test_name)
+static void run_stiffness3d_case(TestLogger &summary, const Mesh3D &mesh, const Basis &basis,
+                                 const std::string &test_name)
 {
     constexpr double tol = 1e-6;
-    const int n_basis = basis.size();
 
     H1Space3D fem(mesh, basis);
     const int ndof = fem.size();
@@ -36,44 +38,40 @@ static void t_stiffness3d(int &n_test, int &n_passed, const Mesh3D &mesh, const 
 
     auto x = fem.physical_coordinates(MemorySpace::DEVICE);
 
-    // evaluate func
-    forall(ndof, [=] __device__(int i) -> void
-    {
+    forall(ndof, [=] __device__(int i) -> void {
         const double3 xi = x[i];
         f[i] = func(xi);
     });
 
     MassMatrix3D M(fem);
-    l2_project(M, [=] __device__ (const double3 r) -> double { return L(r); }, Lf);
+    l2_project(M, [=] __device__(const double3 r) -> double { return L(r); }, Lf);
 
     StiffnessMatrix3D A(fem);
     A.action(f, Af);
 
     const double err = dist(ndof, Af, Lf) / cuddh::norm(ndof, Lf);
-
     if (err < tol)
-    {
-        std::cout << "\t[ + ] t_stiffness3d("  << test_name << ") test successful." << std::endl;
-        n_passed++;
-    }
+        summary.pass(std::format("stiffness3d {}", test_name));
     else
-    {
-        std::cout << "\t[ - ] t_stiffness3d(" << test_name << ") test failed.\n\t\tComputed error ~ " << err << " > tol (" << tol << ")" << std::endl;
-    }
-
-    n_test++;
+        summary.fail(std::format("stiffness3d {}", test_name),
+                     std::format("relative error {} exceeds tolerance {}", err, tol));
 }
 
-void cuddh_test::t_stiffness3d(int &n_test, int &n_passed)
+static void run_stiffness3d_tests(TestLogger &summary)
 {
     const int nx = 10;
     const Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, nx, -1.0, 1.0, nx, -1.0, 1.0);
-    
+
     for (int p : {5, 6, 7, 8})
     {
         const Basis basis(p);
-        std::string test_name = "uniform cube | p = " + std::to_string(p);
-
-        ::t_stiffness3d(n_test, n_passed, mesh, basis, test_name);
+        run_stiffness3d_case(summary, mesh, basis, std::format("uniform cube p={}", p));
     }
+}
+
+int main()
+{
+    TestLogger summary;
+    run_stiffness3d_tests(summary);
+    return summary.finish();
 }
