@@ -4,9 +4,9 @@
 
 using namespace cuddh;
 
-static void run_gmres_test(TestLogger &summary)
+static void run_minres_test(TestLogger &summary)
 {
-    auto a = asym_test_mat<double>();
+    auto a = sym_test_mat<double>();
     const int n = a.size();
 
     host_device_dvec _x(n);
@@ -24,9 +24,8 @@ static void run_gmres_test(TestLogger &summary)
 
     dla::zeros(n, x);
 
-    const gmresParams opts = {
-        .m = 50, .maxit = 500, .tol = 1e-10, .atol = 0.0, .verbose = SolverVerbosity::ProgressBar};
-    auto out = cuddh::gmres(n, x, &a, y, opts);
+    const gmresParams opts = {.maxit = n, .tol = 1e-10, .atol = 0.0, .verbose = SolverVerbosity::ProgressBar};
+    auto out = cuddh::minres(n, x, &a, y, opts);
 
     host_device_dvec _r(n);
     double *r = _r.device_write();
@@ -51,6 +50,6 @@ static void run_gmres_test(TestLogger &summary)
 int main()
 {
     TestLogger summary;
-    run_gmres_test(summary);
+    run_minres_test(summary);
     return summary.finish();
 }

@@ -54,9 +54,6 @@ void SolverLogger::log_iteration(double res_norm)
         results.time.push_back(timer.elapsed());
     }
 
-    results.res_norm.push_back(res_norm);
-    results.num_iter++;
-
     if (verbosity == SolverVerbosity::ProgressBar)
     {
         std::cout << std::format("\r[{}] || iteration {:10d} / {} || rel. res. = {:10.2e}",
@@ -68,6 +65,9 @@ void SolverLogger::log_iteration(double res_norm)
         std::cout << std::format("iteration {:10d} / {} || rel. res. = {:10.2e}", results.num_iter, maxit, res_norm)
                   << std::endl;
     }
+
+    results.res_norm.push_back(res_norm);
+    results.num_iter++;
 }
 
 SolverResults SolverLogger::log_summary(double res_norm, bool success)

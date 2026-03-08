@@ -30,10 +30,7 @@ struct TestLogger
         std::cout << std::format("{}[FAIL]{} {}: {}\n", kRed, kReset, name, details);
     }
 
-    [[nodiscard]] bool ok() const
-    {
-        return total == passed;
-    }
+    [[nodiscard]] bool ok() const { return total == passed; }
 
     int finish() const
     {
@@ -83,3 +80,96 @@ static inline cuddh::Mesh2D load_unstructured_square()
 
     return cuddh::Mesh2D::from_vertices(n_pts, x.data(), n_elem, elems.data());
 }
+
+/**
+ * @brief Test Matrix
+ *
+ * @details 2D Finite Difference Advection-Diffusion Operator:
+ *  -ε Δu + v.∇u = f
+ * Square grid: n x n with ndof = n^2 total degrees of freedom
+ * Linear indexing: global_index = i*n + j
+ */
+template <typename scalar_t>
+class TestMatrix : public cuddh::Operator<scalar_t>
+{
+public:
+    TestMatrix(int n1d, scalar_t epsilon_, scalar_t vx_, scalar_t vy_)
+        : n{n1d}, ndof{n * n}, epsilon{epsilon_}, vx{vx_}, vy{vy_}
+    {}
+
+    constexpr ~TestMatrix() = default;
+
+    void action(const scalar_t *x, scalar_t *y) const override
+    {
+        const scalar_t h = 1.0 / (n - 1);
+
+        cuddh::forall(ndof, [=, *this] __device__(int idx) -> void {
+            int i = idx / n;
+            int j = idx % n;
+
+            int ip1 = (i + 1) * n + j;
+            int im1 = (i - 1) * n + j;
+            int jp1 = i * n + (j + 1);
+            int jm1 = i * n + (j - 1);
+
+            scalar_t xip1 = (i + 1 < n) ? x[ip1] : scalar_t(0.0);
+            scalar_t xim1 = (i - 1 >= 0) ? x[im1] : scalar_t(0.0);
+            scalar_t xjp1 = (j + 1 < n) ? x[jp1] : scalar_t(0.0);
+            scalar_t xjm1 = (j - 1 >= 0) ? x[jm1] : scalar_t(0.0);
+
+            scalar_t laplacian = (xip1 + xim1 + xjp1 + xjm1 - 4 * x[idx]) / (h * h);
+
+            scalar_t du_dx = (xjp1 - xjm1) / (2 * h);
+            scalar_t du_dy = (xip1 - xim1) / (2 * h);
+            scalar_t advection = vx * du_dx + vy * du_dy;
+
+            y[idx] = -epsilon * laplacian + advection;
+        });
+    }
+
+    void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
+    {
+        cuddh_verify(false, printf("Not Implemented."));
+    }
+
+    constexpr int size() { return ndof; }
+
+private:
+    int n, ndof;
+    scalar_t epsilon, vx, vy;
+};
+
+template <typename scalar_t>
+inline auto asym_test_mat()
+{
+    return TestMatrix<scalar_t>(32, 0.1, 1.0, 0.5);
+}
+
+template <typename scalar_t>
+inline auto sym_test_mat()
+{
+    return TestMatrix<scalar_t>(32, 1.0, 0.0, 0.0);
+}
+
+template <typename scalar_t>
+class InexactPreconditioner : public cuddh::Operator<scalar_t>
+{
+public:
+    InexactPreconditioner(int n_, const cuddh::Operator<scalar_t> &A_) : n{n_}, A{&A_} {}
+
+    void action(const scalar_t *x, scalar_t *y) const override
+    {
+        using namespace cuddh;
+        dla::zeros(n, y);
+        gmres(n, y, A, x, {.m = 5, .maxit = 5, .tol = 1e-2, .atol = 0.0, .verbose = SolverVerbosity::Silent});
+    }
+
+    void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
+    {
+        cuddh_verify(false, printf("Not Implemented."));
+    }
+
+private:
+    int n;
+    const cuddh::Operator<scalar_t> *A;
+};

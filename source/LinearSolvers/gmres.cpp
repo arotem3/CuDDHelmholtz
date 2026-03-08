@@ -273,8 +273,12 @@ SolverResults cuddh::fgmres(int n, double *x, const Operator<double> *A, const d
             double *vk1 = V + k1 * n;
             double *zk = Z + k * n;
 
-            Precond->action(vk, zk); // z[k] <- Precond * v[k]
-            A->action(zk, vk1);      // v[k+1] <- A * z[k]
+            if (Precond)
+                Precond->action(vk, zk); // z[k] <- Precond * v[k]
+            else
+                dla::copy(n, vk, zk);
+
+            A->action(zk, vk1); // v[k+1] <- A * z[k]
             logger.log_matvec();
 
             // Modified Gram-Schmidt

@@ -1,12 +1,11 @@
-#include "LinearSolvers/gcro.hpp"
-
 #include <cstdlib>
 
+#include "LinearSolvers/gcro.hpp"
 #include "test_common.hpp"
 
 using namespace cuddh;
 
-static void run_gcro_test(TestLogger &summary)
+static void run_fgmres_test(TestLogger &summary)
 {
     std::srand(1337);
 
@@ -32,21 +31,22 @@ static void run_gcro_test(TestLogger &summary)
     // Test 1: WITHOUT preconditioner
     {
         dla::zeros(n, x);
-        const GCROParams opts = {
+        const gmresParams opts = {
+            .m = 20,
             .maxit = 1000,
-            .rtol = 1e-6,
+            .tol = 1e-6,
             .atol = 0.0,
             .verbose = SolverVerbosity::ProgressBar,
         };
 
-        const SolverResults out = GCRO<double>(n, A, nullptr, 10, 5).solve(x, b, opts);
+        const SolverResults out = fgmres(n, x, &A, b, nullptr, opts);
 
         A.action(x, r);
         dla::axpby(n, 1.0, b, -1.0, r);
 
         const double b_norm = dla::norm(n, b);
         const double rel_res = dla::norm(n, r) / b_norm;
-        const double target = opts.rtol + opts.atol / b_norm;
+        const double target = opts.tol + opts.atol / b_norm;
 
         if (out.success && rel_res <= target)
         {
@@ -63,21 +63,22 @@ static void run_gcro_test(TestLogger &summary)
     {
         dla::zeros(n, x);
         InexactPreconditioner<double> M(n, A);
-        const GCROParams opts = {
-            .maxit = 100,
-            .rtol = 1e-6,
+        const gmresParams opts = {
+            .m = 20,
+            .maxit = 1000,
+            .tol = 1e-6,
             .atol = 0.0,
             .verbose = SolverVerbosity::ProgressBar,
         };
 
-        const SolverResults out = GCRO<double>(n, A, &M, 10, 5).solve(x, b, opts);
+        const SolverResults out = fgmres(n, x, &A, b, &M, opts);
 
         A.action(x, r);
         dla::axpby(n, 1.0, b, -1.0, r);
 
         const double b_norm = dla::norm(n, b);
         const double rel_res = dla::norm(n, r) / b_norm;
-        const double target = opts.rtol + opts.atol / b_norm;
+        const double target = opts.tol + opts.atol / b_norm;
 
         if (out.success && rel_res <= target)
         {
@@ -94,6 +95,6 @@ static void run_gcro_test(TestLogger &summary)
 int main()
 {
     TestLogger summary;
-    run_gcro_test(summary);
+    run_fgmres_test(summary);
     return summary.finish();
 }
