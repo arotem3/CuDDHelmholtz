@@ -9,7 +9,7 @@ using namespace cuddh;
 
 /// @brief FEM discretization of the Helmholtz equation -div(grad u) - omega^2 u == f
 /// with boundary conditions: du/dn + i omega u == 0.
-class Helmholtz : public Operator
+class Helmholtz : public Operator<double>
 {
 public:
     Helmholtz(double omega_, const double *a2x, const double *ax, const H1Space2D &fem, const TraceSpace2D &fs)

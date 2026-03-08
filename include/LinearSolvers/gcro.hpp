@@ -21,7 +21,7 @@ namespace cuddh
     class GCRO
     {
     public:
-        GCRO(int _n, Operator &_A, Operator *_M = nullptr, int _kdim = 40, int _edim = 20)
+        GCRO(int _n, Operator<double> &_A, Operator<double> *_M = nullptr, int _kdim = 40, int _edim = 20)
             : n{_n},
               kdim{_kdim},
               edim{_edim},
@@ -43,20 +43,11 @@ namespace cuddh
             cublasCreate(&cublas_handle);
         }
 
-        ~GCRO()
-        {
-            cublasDestroy(cublas_handle);
-        }
+        ~GCRO() { cublasDestroy(cublas_handle); }
 
-        constexpr void toggle_deflation_update(bool update)
-        {
-            update_deflation = update;
-        }
+        constexpr void toggle_deflation_update(bool update) { update_deflation = update; }
 
-        constexpr void reset_deflation()
-        {
-            active_edim = 0;
-        }
+        constexpr void reset_deflation() { active_edim = 0; }
 
         SolverResults solve(real_t *x, const real_t *b, GCROParams opts = {}) const
         {
@@ -264,8 +255,8 @@ namespace cuddh
 
         mutable int active_edim; // current deflation dimension
 
-        const Operator *A;
-        const Operator *Prec;
+        const Operator<double> *A;
+        const Operator<double> *Prec;
 
         bool update_deflation;
 

@@ -12,7 +12,7 @@ namespace
     // -ε Δu + v.∇u = f
     // Square grid: n x n with ndof = n^2 total degrees of freedom
     // Linear indexing: global_index = i*n + j
-    class AdvectionDiffusionOperator2D : public Operator
+    class AdvectionDiffusionOperator2D : public Operator<double>
     {
     public:
         AdvectionDiffusionOperator2D(int n1d, double epsilon_ = 0.1, double vx_ = 1.0, double vy_ = 0.5)
@@ -60,10 +60,10 @@ namespace
         double epsilon, vx, vy;
     };
 
-    class InexactPreconditioner : public Operator
+    class InexactPreconditioner : public Operator<double>
     {
     public:
-        InexactPreconditioner(int n_, const Operator &A_) : n{n_}, A{&A_} {}
+        InexactPreconditioner(int n_, const Operator<double> &A_) : n{n_}, A{&A_} {}
 
         void action(const double *x, double *y) const override
         {
@@ -78,7 +78,7 @@ namespace
 
     private:
         int n;
-        const Operator *A;
+        const Operator<double> *A;
     };
 } // namespace
 

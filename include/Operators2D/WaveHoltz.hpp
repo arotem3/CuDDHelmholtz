@@ -20,7 +20,7 @@ namespace cuddh
      * Or accelerated with gmres as the system:
      *  action(u) = G(f).
      */
-    class WaveHoltz : public Operator
+    class WaveHoltz : public Operator<double>
     {
     public:
         WaveHoltz(double omega, double maximum_velocity, const double *a2x, const double *ax, const H1Space2D &fem_,
@@ -61,10 +61,7 @@ namespace cuddh
         mutable HostDeviceArray<double> acc;
         mutable HostDeviceArray<double> w;
 
-        inline double filter(double n) const
-        {
-            return (2.0 / nt) * (std::cos(2.0 * M_PI * n / nt) - shift);
-        }
+        inline double filter(double n) const { return (2.0 / nt) * (std::cos(2.0 * M_PI * n / nt) - shift); }
     };
 } // namespace cuddh
 

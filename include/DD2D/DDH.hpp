@@ -28,7 +28,7 @@ namespace cuddh
         float mass = 0.0f;
     };
 
-    class DDSubstructedProblem : public SinglePrecisionOperator
+    class DDSubstructedProblem : public Operator<float>
     {
     public:
         /// @brief initialize domain decomposition Helmholtz approximate solver.
@@ -41,10 +41,7 @@ namespace cuddh
         ~DDSubstructedProblem() = default;
 
         /// return the number of degrees of freedom for the substructured problem.
-        int size() const
-        {
-            return 2 * n_lambda;
-        }
+        int size() const { return 2 * n_lambda; }
 
         // Compute the right hand side `b` of the substructured problem from the
         // forcing `f` of the Helmholtz problem (i.e. the right hand side of the
@@ -58,6 +55,11 @@ namespace cuddh
         /// @brief y <- A * x where A is the approximate inverse of the
         /// Helmholtz equation estimated the domain decomposition method.
         void action(const float *x, float *y) const override;
+
+        void action(float c, const float *x, float *y) const override
+        {
+            cuddh_verify(false, printf("DDSubstructedProblem::action(c, x, y) not implemented\n"));
+        }
 
         void residual(const double *u, const double *f, double *res) const;
 
@@ -89,7 +91,7 @@ namespace cuddh
         thrust::universal_vector<float> _partition_of_unity;
     };
 
-    class DDH : public Operator
+    class DDH : public Operator<double>
     {
     public:
         DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem,
@@ -97,10 +99,7 @@ namespace cuddh
             : ndof{fem.size()}, opts{opts}, F(omega, h_a, fem, efem), lambda(F.size()), Y(F.size())
         {}
 
-        int n_lambda() const
-        {
-            return F.size();
-        }
+        int n_lambda() const { return F.size(); }
 
         void action(const double *x, double *y) const override
         {

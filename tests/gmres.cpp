@@ -7,7 +7,7 @@ using namespace cuddh;
 namespace
 {
     /// @brief non-symmetric tridiagonal toeplitz matrix
-    class TestMatrix : public cuddh::Operator
+    class TestMatrix : public cuddh::Operator<double>
     {
     public:
         TestMatrix(int n_) : _n{n_} {}

@@ -2,15 +2,12 @@
 
 using namespace cuddh;
 
-class PreconditionedSystem : public Operator
+class PreconditionedSystem : public Operator<double>
 {
 public:
-    PreconditionedSystem(int n, const Operator *A_, const Operator *P_) : q(n), A{A_}, P{P_} {}
+    PreconditionedSystem(int n, const Operator<double> *A_, const Operator<double> *P_) : q(n), A{A_}, P{P_} {}
 
-    void action(double c, const double *x, double *y) const override
-    {
-        cuddh_verify(false, printf("Not implemented"));
-    }
+    void action(double c, const double *x, double *y) const override { cuddh_verify(false, printf("Not implemented")); }
 
     void action(const double *x, double *y) const override
     {
@@ -21,8 +18,8 @@ public:
 
 private:
     mutable thrust::universal_vector<double> q;
-    const Operator *A;
-    const Operator *P;
+    const Operator<double> *A;
+    const Operator<double> *P;
 };
 
 static void validate_opts(gmresParams &opts, bool ignore_m = false)
@@ -127,12 +124,13 @@ inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b,
     return logger.log_summary(rnrm / bnrm, rnrm <= tol);
 }
 
-SolverResults cuddh::gmres(int n, double *x, const Operator *A, const double *b, gmresParams opts)
+SolverResults cuddh::gmres(int n, double *x, const Operator<double> *A, const double *b, gmresParams opts)
 {
     return t_gmres<double>(n, x, A, b, opts);
 }
 
-SolverResults cuddh::gmres(int n, double *x, const Operator *A, const double *b, const Operator *P, gmresParams opts)
+SolverResults cuddh::gmres(int n, double *x, const Operator<double> *A, const double *b, const Operator<double> *P,
+                           gmresParams opts)
 {
     PreconditionedSystem PA(n, A, P);
 
@@ -143,12 +141,12 @@ SolverResults cuddh::gmres(int n, double *x, const Operator *A, const double *b,
     return t_gmres<double>(n, x, &PA, d_r0, opts);
 }
 
-SolverResults cuddh::gmres(int n, float *x, const SinglePrecisionOperator *A, const float *b, gmresParams opts)
+SolverResults cuddh::gmres(int n, float *x, const Operator<float> *A, const float *b, gmresParams opts)
 {
     return t_gmres<float>(n, x, A, b, opts);
 }
 
-cuddh::SolverResults cuddh::minres(int n, double *x, const Operator *A, const double *b, gmresParams opts)
+cuddh::SolverResults cuddh::minres(int n, double *x, const Operator<double> *A, const double *b, gmresParams opts)
 {
     validate_opts(opts, true);
     SolverLogger logger(opts.verbose, opts.maxit);
@@ -230,8 +228,8 @@ cuddh::SolverResults cuddh::minres(int n, double *x, const Operator *A, const do
     return logger.log_summary(std::abs(phi) / bnrm, std::abs(phi) <= tol);
 }
 
-SolverResults cuddh::fgmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
-                            gmresParams opts)
+SolverResults cuddh::fgmres(int n, double *x, const Operator<double> *A, const double *b,
+                            const Operator<double> *Precond, gmresParams opts)
 {
     validate_opts(opts);
     SolverLogger logger(opts.verbose, opts.maxit);

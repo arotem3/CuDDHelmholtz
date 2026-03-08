@@ -23,11 +23,11 @@ namespace cuddh
     /// @param[in] b DEVICE. length n. The right hand side of A * x == b.
     /// @param[in] Precond DEVICE KERNEL. an operator such that Precond.action(x, y) computes y <- P * x where P ~
     /// inv(A).
-    SolverResults gmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
+    SolverResults gmres(int n, double *x, const Operator<double> *A, const double *b, const Operator<double> *Precond,
                         gmresParams opts = {});
-    SolverResults gmres(int n, double *x, const Operator *A, const double *b, gmresParams opts = {});
+    SolverResults gmres(int n, double *x, const Operator<double> *A, const double *b, gmresParams opts = {});
 
-    SolverResults gmres(int n, float *x, const SinglePrecisionOperator *A, const float *b, gmresParams opts = {});
+    SolverResults gmres(int n, float *x, const Operator<float> *A, const float *b, gmresParams opts = {});
 
     /**
      * @brief MINRES for solving A * x == b where A is symmetric (not necessarily positive definite).
@@ -40,7 +40,7 @@ namespace cuddh
      * @param opts
      * @return SolverResults
      */
-    SolverResults minres(int n, double *x, const Operator *A, const double *b, gmresParams opts = {});
+    SolverResults minres(int n, double *x, const Operator<double> *A, const double *b, gmresParams opts = {});
 
     /**
      * @brief Flexible GMRES(m) for solving A * x == b where the preconditioner can change at each iteration.
@@ -53,7 +53,7 @@ namespace cuddh
      * @param Precond Right preconditioner.
      * @return SolverResults
      */
-    SolverResults fgmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
+    SolverResults fgmres(int n, double *x, const Operator<double> *A, const double *b, const Operator<double> *Precond,
                          gmresParams opts = {});
 } // namespace cuddh
 

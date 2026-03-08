@@ -9,7 +9,7 @@
 namespace cuddh
 {
     /// @brief m(u, v) = (u, v) or m(u, v) = (a(x)*u, v)
-    class MassMatrix : public Operator
+    class MassMatrix : public Operator<double>
     {
     public:
         /// @brief initialize weighted mass matrix m(u, v) = (a(x)*u, v)
@@ -23,10 +23,7 @@ namespace cuddh
         void action(const double *x, double *y) const override;
 
         // returns the mass matrix as a dvec_wrapper of managed memory
-        VectorWrapper<const double> to_device() const
-        {
-            return reshape(_m, _m.size());
-        }
+        VectorWrapper<const double> to_device() const { return reshape(_m, _m.size()); }
 
     private:
         const H1Space2D &fem;
