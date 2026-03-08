@@ -2,6 +2,27 @@
 
 using namespace cuddh;
 
+template <typename real_t>
+static inline void _rotate_vecs(int n, real_t *d_X, real_t *d_Y, real_t cs, real_t sn)
+{
+    forall(n, [=] __device__(int i) {
+        real_t x = d_X[i], y = d_Y[i];
+
+        d_X[i] = cs * x + sn * y;
+        d_Y[i] = -sn * x + cs * y;
+    });
+}
+
+void cuddh::rotate_vecs(int n, double *d_X, double *d_Y, double cs, double sn)
+{
+    _rotate_vecs<double>(n, d_X, d_Y, cs, sn);
+}
+
+void cuddh::rotate_vecs(int n, float *d_X, float *d_Y, float cs, float sn)
+{
+    _rotate_vecs<float>(n, d_X, d_Y, cs, sn);
+}
+
 template <typename scalar_t, typename... Args>
 static void gges(Args &&...args)
 {

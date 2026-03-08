@@ -12,12 +12,12 @@
 #include "DDStiffnessMatrix.hpp"
 #include "EnsembleSpace.hpp"
 #include "HostDeviceArray.hpp"
+#include "LinearSolvers/gmres.hpp"
 #include "Operator.hpp"
 #include "Operators2D/MassMatrix.hpp"
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
 #include "forall.hpp"
-#include "gmres.hpp"
 #include "linalg.hpp"
 
 namespace cuddh
@@ -113,7 +113,7 @@ namespace cuddh
             F.rhs(x, d_Y);
             gmres(F.size(), d_L, &F, d_Y, opts);
 
-            zeros(2 * ndof, y);
+            dla::zeros(2 * ndof, y);
             F.postprocess(d_L, x, y);
         }
 

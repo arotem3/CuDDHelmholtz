@@ -66,25 +66,25 @@ namespace cuddh
 
             SolverLogger logger(opts.verbose, opts.maxit);
 
-            const real_t bnrm = cuddh::norm(n, b);
+            const real_t bnrm = dla::norm(n, b);
             const real_t tol = std::max(opts.rtol * bnrm, opts.atol);
 
             auto r = reshape(_r, n);
             A->action(x, r); // r <- A * x
             logger.log_matvec();
-            axpby(n, 1.0, b, -1.0, r); // r <- b - r = b - A * x
+            dla::axpby(n, 1.0, b, -1.0, r); // r <- b - r = b - A * x
 
             // apply deflation correction
             for (int i = 0; i < active_edim; ++i)
             {
                 auto w = thrust::raw_pointer_cast(_W.data()) + n * i;
                 auto z = thrust::raw_pointer_cast(_Z.data()) + n * i;
-                real_t alpha = dot(n, w, r);
-                axpby(n, alpha, z, real_t(1.0), x);  // x += (w, r) * z
-                axpby(n, -alpha, w, real_t(1.0), r); // r -= (w, r) * w
+                real_t alpha = dla::dot(n, w, r);
+                dla::axpby(n, alpha, z, real_t(1.0), x);  // x += (w, r) * z
+                dla::axpby(n, -alpha, w, real_t(1.0), r); // r -= (w, r) * w
             }
 
-            real_t rnrm = cuddh::norm(n, r);
+            real_t rnrm = dla::norm(n, r);
 
             logger.log_iteration(rnrm / bnrm);
 
@@ -118,7 +118,7 @@ namespace cuddh
             for (int i = 0; i < k; ++i)
                 H(i, i) = one;
 
-            axpby(n, one / rnrm, r, zero, W + n * k); // w[k] <- r / ||r||
+            dla::axpby(n, one / rnrm, r, zero, W + n * k); // w[k] <- r / ||r||
             y[k] = rnrm;
 
             int actual_kdim = 0;
@@ -132,7 +132,7 @@ namespace cuddh
                 if (Prec)
                     Prec->action(w, z);
                 else
-                    cuddh::copy(n, w, z);
+                    dla::copy(n, w, z);
 
                 w = W + n * (col + 1);
                 A->action(z, w);
@@ -142,19 +142,19 @@ namespace cuddh
                 for (int i = 0; i <= col; ++i)
                 {
                     const real_t *v = W + n * i;
-                    real_t hij = cuddh::dot(n, v, w);
+                    real_t hij = dla::dot(n, v, w);
                     H(i, col) = hij;
-                    axpby(n, -hij, v, one, w); // w -= (v, w) * v
+                    dla::axpby(n, -hij, v, one, w); // w -= (v, w) * v
                 }
 
-                real_t wnrm = cuddh::norm(n, w);
+                real_t wnrm = dla::norm(n, w);
                 H(col + 1, col) = wnrm;
 
                 bool breakdown = wnrm < eps;
                 if (breakdown)
-                    zeros(n, w);
+                    dla::zeros(n, w);
                 else
-                    scal(n, one / wnrm, w); // w /= ||w||
+                    dla::scal(n, one / wnrm, w); // w /= ||w||
 
                 // Update QR of H and RHS via Givens rotations
                 for (int i = 0; i < j; ++i)
@@ -184,8 +184,8 @@ namespace cuddh
             solve_triu(ncol, H.data(), H.shape(0), y.data()); // solve R * y = Q^T * f
 
             for (int i = 0; i < ncol; ++i)
-                axpby(n, y[i], Z + n * i, one, x);    // x += y[i] * Z[:, i]
-            axpby(n, y[ncol], W + n * ncol, zero, r); // r = y[ncol] * W[:, ncol]
+                dla::axpby(n, y[i], Z + n * i, one, x);    // x += y[i] * Z[:, i]
+            dla::axpby(n, y[ncol], W + n * ncol, zero, r); // r = y[ncol] * W[:, ncol]
 
             return ncol;
         }
@@ -199,7 +199,7 @@ namespace cuddh
             // X = H[:m+1, :m]' * H[:m+1, :m]
             Matrix<real_t> X(m, m);
             int ldh = H.shape(0); // leading dimension of H (kdim+1)
-            gemm(m, m, m + 1, one, H.data(), ldh, H.data(), ldh, zero, X.data(), m, true, false);
+            hla::gemm(m, m, m + 1, one, H.data(), ldh, H.data(), ldh, zero, X.data(), m, true, false);
 
             // S = W[:, :m+1]' * Z[:, :m]
             // Use cuBLAS for device matrix multiplication
@@ -208,14 +208,14 @@ namespace cuddh
                 const real_t *d_W = thrust::raw_pointer_cast(_W.data());
                 const real_t *d_Z = thrust::raw_pointer_cast(_Z.data());
                 real_t *d_S = thrust::raw_pointer_cast(S_dev.data());
-                gemm_device(cublas_handle, m + 1, m, n, one, d_W, n, d_Z, n, zero, d_S, m + 1, true, false);
+                dla::gemm(cublas_handle, m + 1, m, n, one, d_W, n, d_Z, n, zero, d_S, m + 1, true, false);
                 thrust::host_vector<real_t> S_host = S_dev;
                 return S_host;
             }();
 
             // Y = H[:m+1, :m]' * WZ
             Matrix<real_t> Y(m, m);
-            gemm(m, m, m + 1, one, H.data(), ldh, WZ.data(), m + 1, zero, Y.data(), m, true, false);
+            hla::gemm(m, m, m + 1, one, H.data(), ldh, WZ.data(), m + 1, zero, Y.data(), m, true, false);
 
             // Real QZ + invariant subspace extraction.
             // X and Y are overwritten in-place with the Schur form
@@ -224,7 +224,7 @@ namespace cuddh
 
             // HP = H[:m+1, :m] * P[:, :active_edim]
             Matrix<real_t> HP(m + 1, active_edim);
-            gemm(m + 1, active_edim, m, one, H.data(), ldh, P.data(), m, zero, HP.data(), m + 1);
+            hla::gemm(m + 1, active_edim, m, one, H.data(), ldh, P.data(), m, zero, HP.data(), m + 1);
 
             // Compute QR decomposition of HP in place: HP = Q * R
             std::vector<real_t> tau_W;

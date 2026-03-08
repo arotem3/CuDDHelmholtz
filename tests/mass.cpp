@@ -36,7 +36,7 @@ static void run_mass_case(TestLogger &summary, const Mesh2D &mesh, Basis basis, 
 
     m.action(f, Mf);
 
-    double err = dist(ndof, Mf, b) / cuddh::norm(ndof, b);
+    double err = dla::dist(ndof, Mf, b) / dla::norm(ndof, b);
 
     if (err < tol)
         summary.pass(std::format("mass forward {}", test_name));

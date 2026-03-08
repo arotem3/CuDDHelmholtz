@@ -43,7 +43,7 @@ inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b,
     validate_opts(opts);
     SolverLogger logger(opts.verbose, opts.maxit);
 
-    const scalar bnrm = cuddh::norm(n, b);
+    const scalar bnrm = dla::norm(n, b);
     const scalar tol = std::max(opts.tol * bnrm, opts.atol);
     const int m1 = opts.m + 1;
 
@@ -61,9 +61,9 @@ inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b,
 
     A->action(x, r); // r <- A * x
     logger.log_matvec();
-    axpby(n, one, b, -one, r); // r <- b - r = b - A * x
+    dla::axpby(n, one, b, -one, r); // r <- b - r = b - A * x
 
-    scalar rnrm = cuddh::norm(n, r);
+    scalar rnrm = dla::norm(n, r);
     logger.log_iteration(rnrm / bnrm);
 
     while (logger.num_iterations() <= opts.maxit && rnrm > tol)
@@ -71,7 +71,7 @@ inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b,
         scalar *vk = V;
         scalar *vk1;
 
-        cuddh::axpby(n, one / rnrm, r, zero, vk); // v[0] <- r / ||r||
+        dla::axpby(n, one / rnrm, r, zero, vk); // v[0] <- r / ||r||
 
         std::fill(eta.begin(), eta.end(), 0.0);
         eta(0) = rnrm;
@@ -89,16 +89,16 @@ inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b,
             for (int j = 0; j < k1; ++j)
             {
                 const scalar *vj = V + j * n;
-                H(j, k) = cuddh::dot(n, vk1, vj);
-                cuddh::axpby(n, -H(j, k), vj, one, vk1); // v[k+1] <- v[k+1] - H(j, k) * v[j]
+                H(j, k) = dla::dot(n, vk1, vj);
+                dla::axpby(n, -H(j, k), vj, one, vk1); // v[k+1] <- v[k+1] - H(j, k) * v[j]
             }
 
-            H(k1, k) = cuddh::norm(n, vk1);
+            H(k1, k) = dla::norm(n, vk1);
 
             if (H(k1, k) == 0.0)
                 break;
 
-            cuddh::scal(n, one / H(k1, k), vk1); // v[k+1] <- v[k+1] / ||v[k+1]||
+            dla::scal(n, one / H(k1, k), vk1); // v[k+1] <- v[k+1] / ||v[k+1]||
 
             for (int i = 0; i < k; ++i)
                 apply_givens(H(i, k), H(i + 1, k), cs(i), sn(i));
@@ -115,13 +115,13 @@ inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b,
 
         solve_triu(k1, H.data(), H.shape(0), eta.data());
         for (int k = 0; k < k1; ++k)
-            cuddh::axpby(n, eta(k), V + k * n, one, x); // x <- x + eta[k] * v[k]
+            dla::axpby(n, eta(k), V + k * n, one, x); // x <- x + eta[k] * v[k]
 
         A->action(x, r); // r <- A * x
         logger.log_matvec();
-        cuddh::axpby(n, one, b, -one, r); // r <- b - r = b - A * x
+        dla::axpby(n, one, b, -one, r); // r <- b - r = b - A * x
 
-        rnrm = cuddh::norm(n, r);
+        rnrm = dla::norm(n, r);
     }
 
     return logger.log_summary(rnrm / bnrm, rnrm <= tol);
@@ -161,19 +161,19 @@ cuddh::SolverResults cuddh::minres(int n, double *x, const Operator *A, const do
     double *vp = thrust::raw_pointer_cast(_vp.data());
     double *wpp = thrust::raw_pointer_cast(_wpp.data());
 
-    const double bnrm = cuddh::norm(n, b);
+    const double bnrm = dla::norm(n, b);
     const double tol = std::max(opts.tol * bnrm, opts.atol);
 
     // r = b - A * x
     A->action(x, r);
     logger.log_matvec();
-    axpby(n, 1.0, b, -1.0, r);
+    dla::axpby(n, 1.0, b, -1.0, r);
 
-    double phi = norm(n, r);
+    double phi = dla::norm(n, r);
     logger.log_iteration(phi / bnrm);
 
     // v = r / phi
-    axpby(n, 1.0 / phi, r, 0.0, v);
+    dla::axpby(n, 1.0 / phi, r, 0.0, v);
 
     double cp = 1.0, sp = 0.0;
     double c = 1.0, s = 0.0;
@@ -184,7 +184,7 @@ cuddh::SolverResults cuddh::minres(int n, double *x, const Operator *A, const do
         // Lanczos step
         A->action(v, r); // r = A * v
         logger.log_matvec();
-        double alpha = dot(n, v, r); // (v, A*v)
+        double alpha = dla::dot(n, v, r); // (v, A*v)
 
         // r = A * v - alpha * v - beta * vp
         forall(n, [=] __device__(int i) { r[i] -= alpha * v[i] + beta * vp[i]; });
@@ -196,7 +196,7 @@ cuddh::SolverResults cuddh::minres(int n, double *x, const Operator *A, const do
         double rho1 = c * gamma + s * alpha;
         double delta = -s * gamma + c * alpha;
 
-        beta = norm(n, r);
+        beta = dla::norm(n, r);
 
         double rho3 = std::hypot(delta, beta);
         cp = c;
@@ -236,7 +236,7 @@ SolverResults cuddh::fgmres(int n, double *x, const Operator *A, const double *b
     validate_opts(opts);
     SolverLogger logger(opts.verbose, opts.maxit);
 
-    const double bnrm = cuddh::norm(n, b);
+    const double bnrm = dla::norm(n, b);
     const double tol = std::max(opts.tol * bnrm, opts.atol);
 
     // DEVICE DATA:
@@ -256,14 +256,14 @@ SolverResults cuddh::fgmres(int n, double *x, const Operator *A, const double *b
     // compute initial residual
     A->action(x, r); // r <- A * x
     logger.log_matvec();
-    axpby(n, 1.0, b, -1.0, r); // r <- b - A * x
+    dla::axpby(n, 1.0, b, -1.0, r); // r <- b - A * x
 
-    double rnrm = cuddh::norm(n, r);
+    double rnrm = dla::norm(n, r);
     logger.log_iteration(rnrm / bnrm);
 
     while (logger.num_iterations() <= opts.maxit)
     {
-        axpby(n, 1.0 / rnrm, r, 0.0, V); // v[0] <- r / ||r||
+        dla::axpby(n, 1.0 / rnrm, r, 0.0, V); // v[0] <- r / ||r||
         eta(0) = rnrm;
 
         // Arnoldi process with variable preconditioner
@@ -283,16 +283,16 @@ SolverResults cuddh::fgmres(int n, double *x, const Operator *A, const double *b
             for (int j = 0; j <= k; ++j)
             {
                 const double *vj = V + j * n;
-                H(j, k) = cuddh::dot(n, vk1, vj);
-                cuddh::axpby(n, -H(j, k), vj, 1.0, vk1); // v[k+1] <- v[k+1] - H(j, k) * v[j]
+                H(j, k) = dla::dot(n, vk1, vj);
+                dla::axpby(n, -H(j, k), vj, 1.0, vk1); // v[k+1] <- v[k+1] - H(j, k) * v[j]
             }
 
-            H(k + 1, k) = cuddh::norm(n, vk1);
+            H(k + 1, k) = dla::norm(n, vk1);
 
             if (H(k + 1, k) < 1e-14)
                 break;
 
-            cuddh::scal(n, 1.0 / H(k + 1, k), vk1); // v[k+1] <- v[k+1] / ||v[k+1||
+            dla::scal(n, 1.0 / H(k + 1, k), vk1); // v[k+1] <- v[k+1] / ||v[k+1||
 
             for (int i = 0; i < k; ++i)
                 apply_givens(H(i, k), H(i + 1, k), cs(i), sn(i));
@@ -309,13 +309,13 @@ SolverResults cuddh::fgmres(int n, double *x, const Operator *A, const double *b
 
         solve_triu(k1, H.data(), H.shape(0), eta.data());
         for (int k = 0; k < k1; ++k)
-            cuddh::axpby(n, eta(k), Z + k * n, 1.0, x); // x <- x + eta[k] * z[k]
+            dla::axpby(n, eta(k), Z + k * n, 1.0, x); // x <- x + eta[k] * z[k]
 
         A->action(x, r); // r <- A * x
         logger.log_matvec();
-        axpby(n, 1.0, b, -1.0, r); // r <- b - r = b - A * x
+        dla::axpby(n, 1.0, b, -1.0, r); // r <- b - r = b - A * x
 
-        rnrm = cuddh::norm(n, r);
+        rnrm = dla::norm(n, r);
 
         if (rnrm <= tol)
             break;

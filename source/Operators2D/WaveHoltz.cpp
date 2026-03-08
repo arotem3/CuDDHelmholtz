@@ -19,14 +19,14 @@ WaveHoltz::WaveHoltz(double omega, double maxvel, const double *a2x, const doubl
 
 void WaveHoltz::action(double c, const double *x, double *y) const
 {
-    axpby(2 * ndof, c, x, 1.0, y); // y <- y + c * x
-    S(-c, x, y);                   // y <- y - c * S(x) = y + c * (I - S) * x
+    dla::axpby(2 * ndof, c, x, 1.0, y); // y <- y + c * x
+    S(-c, x, y);                        // y <- y - c * S(x) = y + c * (I - S) * x
 }
 
 void WaveHoltz::action(const double *x, double *y) const
 {
-    copy(2 * ndof, x, y); // y <- x
-    S(-1.0, x, y);        // y <- y - S(x) = x - S(x)
+    dla::copy(2 * ndof, x, y); // y <- x
+    S(-1.0, x, y);             // y <- y - S(x) = x - S(x)
 }
 
 void WaveHoltz::evolve_project(double C, const double *d_u, const double *d_f, double *d_out) const

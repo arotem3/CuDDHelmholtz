@@ -67,7 +67,7 @@ namespace
 
         void action(const double *x, double *y) const override
         {
-            zeros(n, y);
+            dla::zeros(n, y);
             gmres(n, y, A, x, {.m = 5, .maxit = 5, .tol = 1e-2, .atol = 0.0, .verbose = SolverVerbosity::Silent});
         }
 
@@ -105,11 +105,11 @@ static void run_gcro_advection_diffusion_2d_test(TestLogger &summary)
         x_exact[i] = static_cast<double>(std::rand()) / RAND_MAX - 0.5;
 
     A.action(x_exact, b);
-    zeros(ndof, x);
+    dla::zeros(ndof, x);
 
     // Test 1: WITHOUT preconditioner
     {
-        zeros(ndof, x);
+        dla::zeros(ndof, x);
         const GCROParams opts = {
             .maxit = 1000,
             .rtol = 1e-6,
@@ -120,10 +120,10 @@ static void run_gcro_advection_diffusion_2d_test(TestLogger &summary)
         const SolverResults out = GCRO<double>(ndof, A, nullptr, 10, 5).solve(x, b, opts);
 
         A.action(x, r);
-        axpby(ndof, 1.0, b, -1.0, r);
+        dla::axpby(ndof, 1.0, b, -1.0, r);
 
-        const double b_norm = cuddh::norm(ndof, b);
-        const double rel_res = cuddh::norm(ndof, r) / b_norm;
+        const double b_norm = dla::norm(ndof, b);
+        const double rel_res = dla::norm(ndof, r) / b_norm;
         const double target = opts.rtol + opts.atol / b_norm;
 
         if (out.success && rel_res <= target)
@@ -139,7 +139,7 @@ static void run_gcro_advection_diffusion_2d_test(TestLogger &summary)
 
     // Test 2: WITH GMRES(5) preconditioner
     {
-        zeros(ndof, x);
+        dla::zeros(ndof, x);
         InexactPreconditioner M(ndof, A);
         const GCROParams opts = {
             .maxit = 100,
@@ -151,10 +151,10 @@ static void run_gcro_advection_diffusion_2d_test(TestLogger &summary)
         const SolverResults out = GCRO<double>(ndof, A, &M, 10, 5).solve(x, b, opts);
 
         A.action(x, r);
-        axpby(ndof, 1.0, b, -1.0, r);
+        dla::axpby(ndof, 1.0, b, -1.0, r);
 
-        const double b_norm = cuddh::norm(ndof, b);
-        const double rel_res = cuddh::norm(ndof, r) / b_norm;
+        const double b_norm = dla::norm(ndof, b);
+        const double rel_res = dla::norm(ndof, r) / b_norm;
         const double target = opts.rtol + opts.atol / b_norm;
 
         if (out.success && rel_res <= target)

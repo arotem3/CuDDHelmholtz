@@ -56,7 +56,7 @@ static void run_gmres_test(TestLogger &summary)
     TestMatrix a(n);
     a.action(x, y); // y <- A * random
 
-    zeros(n, x);
+    dla::zeros(n, x);
 
     const gmresParams opts = {
         .m = 20, .maxit = 200, .tol = 1e-10, .atol = 0.0, .verbose = SolverVerbosity::ProgressBar};
@@ -65,10 +65,10 @@ static void run_gmres_test(TestLogger &summary)
     host_device_dvec _r(n);
     double *r = _r.device_write();
     a.action(x, r);
-    axpby(n, 1.0, y, -1.0, r);
+    dla::axpby(n, 1.0, y, -1.0, r);
 
-    const double b_norm = cuddh::norm(n, y);
-    const double rel_res = cuddh::norm(n, r) / b_norm;
+    const double b_norm = dla::norm(n, y);
+    const double rel_res = dla::norm(n, r) / b_norm;
     const double target = opts.tol + opts.atol / b_norm;
 
     if (out.success && rel_res <= target)

@@ -2,15 +2,12 @@
 
 namespace cuddh
 {
-    static void setup_geometric_factors(int n_elem,
-                                    const cuddh::QuadratureRule& quad,
-                                    const double * _J,
-                                    double * _G)
+    static void setup_geometric_factors(int n_elem, const cuddh::QuadratureRule &quad, const double *_J, double *_G)
     {
         const int n_quad = quad.size();
 
         host_device_dvec _w(n_quad);
-        double * h_w = _w.host_write();
+        double *h_w = _w.host_write();
         for (int i = 0; i < n_quad; ++i)
             h_w[i] = quad.w(i);
         auto w = reshape(_w.device_read(), n_quad);
@@ -18,26 +15,25 @@ namespace cuddh
         auto J = reshape(_J, 2, 2, n_quad, n_quad, n_elem);
         auto G = reshape(_G, 3, n_quad, n_quad, n_elem);
 
-        forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) mutable -> void
-        {
+        forall_2d(n_quad, n_quad, n_elem, [=] __device__(int el) mutable -> void {
             const int i = threadIdx.x;
             const int j = threadIdx.y;
 
             const double W = w(i) * w(j);
             const double Y_eta = J(1, 1, i, j, el);
             const double X_eta = J(0, 1, i, j, el);
-            const double Y_xi  = J(1, 0, i, j, el);
-            const double X_xi  = J(0, 0, i, j, el);
+            const double Y_xi = J(1, 0, i, j, el);
+            const double X_xi = J(0, 0, i, j, el);
 
             const double detJ = X_xi * Y_eta - X_eta * Y_xi;
 
-            G(0, i, j, el) =  W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
-            G(1, i, j, el) = -W * (Y_xi  * Y_eta + X_xi  * X_eta) / detJ;
-            G(2, i, j, el) =  W * (Y_xi  * Y_xi  + X_xi  * X_xi)  / detJ;
+            G(0, i, j, el) = W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
+            G(1, i, j, el) = -W * (Y_xi * Y_eta + X_xi * X_eta) / detJ;
+            G(2, i, j, el) = W * (Y_xi * Y_xi + X_xi * X_xi) / detJ;
         });
     }
 
-    StiffnessMatrix::StiffnessMatrix(const H1Space2D& fem_)
+    StiffnessMatrix::StiffnessMatrix(const H1Space2D &fem_)
         : fem{fem_},
           ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
@@ -51,15 +47,15 @@ namespace cuddh
         fem.basis().eval(n_quad, quad.x(), _P.host_write());
         fem.basis().deriv(n_quad, quad.x(), _D.host_write());
 
-        auto& metrics = fem.mesh().element_metrics(quad);
-        const double * J = metrics.jacobians(MemorySpace::DEVICE);
-        
-        double * G = _G.device_write();
+        auto &metrics = fem.mesh().element_metrics(quad);
+        const double *J = metrics.jacobians(MemorySpace::DEVICE);
+
+        double *G = _G.device_write();
 
         setup_geometric_factors(n_elem, quad, J, G);
     }
 
-    StiffnessMatrix::StiffnessMatrix(const H1Space2D& fem_, const QuadratureRule& quad)
+    StiffnessMatrix::StiffnessMatrix(const H1Space2D &fem_, const QuadratureRule &quad)
         : fem{fem_},
           ndof{fem.size()},
           n_elem{fem.mesh().n_elem()},
@@ -72,35 +68,26 @@ namespace cuddh
         fem.basis().eval(n_quad, quad.x(), _P.host_write());
         fem.basis().deriv(n_quad, quad.x(), _D.host_write());
 
-        auto& metrics = fem.mesh().element_metrics(quad);
-        const double * J = metrics.jacobians(MemorySpace::DEVICE);
+        auto &metrics = fem.mesh().element_metrics(quad);
+        const double *J = metrics.jacobians(MemorySpace::DEVICE);
 
-        double * G = _G.device_write();
+        double *G = _G.device_write();
 
         setup_geometric_factors(n_elem, quad, J, G);
     }
 
     template <int NQ>
-    static void stiffness_action(int n_elem,
-                                 int n_quad,
-                                 int n_basis,
-                                 const double * d_P,
-                                 const double * d_D,
-                                 const double * d_G,
-                                 const int * d_I,
-                                 double c,
-                                 const double * d_u,
-                                 double * d_out)
+    static void stiffness_action(int n_elem, int n_quad, int n_basis, const double *d_P, const double *d_D,
+                                 const double *d_G, const int *d_I, double c, const double *d_u, double *d_out)
     {
         auto _P = reshape(d_P, n_quad, n_basis);
         auto _D = reshape(d_D, n_quad, n_basis);
-        
+
         auto I = reshape(d_I, n_basis, n_basis, n_elem);
-        
+
         auto G = reshape(d_G, 3, n_quad, n_quad, n_elem);
-        
-        forall_2d(n_quad, n_quad, n_elem, [=] __device__ (int el) -> void
-        {
+
+        forall_2d(n_quad, n_quad, n_elem, [=] __device__(int el) -> void {
             __shared__ double u[NQ][NQ];
             __shared__ double Pu[NQ][NQ];
             __shared__ double Du[NQ][NQ];
@@ -178,17 +165,17 @@ namespace cuddh
                     Su += P[j][ty] * Du[tx][j] + D[j][ty] * Pu[tx][j];
                 Su *= c;
 
-                atomicAdd(d_out+idx, Su);
+                atomicAdd(d_out + idx, Su);
             }
         });
     }
 
-    void StiffnessMatrix::action(double c, const double * x, double * y) const
+    void StiffnessMatrix::action(double c, const double *x, double *y) const
     {
-        const double * d_P = _P.device_read();
-        const double * d_D = _D.device_read();
-        const double * d_G = _G.device_read();
-        const int * d_I = fem.global_indices(MemorySpace::DEVICE);
+        const double *d_P = _P.device_read();
+        const double *d_D = _D.device_read();
+        const double *d_G = _G.device_read();
+        const int *d_I = fem.global_indices(MemorySpace::DEVICE);
 
         if (n_quad <= 4)
             stiffness_action<4>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
@@ -201,12 +188,13 @@ namespace cuddh
         else if (n_quad <= 24)
             stiffness_action<24>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
         else
-            cuddh_verify(false, printf("StiffnessMatrix::action does not support quadrature rules with more than 24 points."));
+            cuddh_verify(false,
+                         printf("StiffnessMatrix::action does not support quadrature rules with more than 24 points."));
     }
 
-    void StiffnessMatrix::action(const double * x, double * y) const
+    void StiffnessMatrix::action(const double *x, double *y) const
     {
-        zeros(ndof, y);
+        dla::zeros(ndof, y);
         action(1.0, x, y);
     }
 } // namespace cuddh

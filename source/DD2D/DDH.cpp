@@ -127,7 +127,7 @@ static void ddh_action(
     const float rw = 1.0f / W.omega;
 
     if (y)
-        zeros(2 * g_ndof, y);
+        dla::zeros(2 * g_ndof, y);
 
     const float *g_lambda = (d_lambda) ? d_lambda : nullptr;
     const float *g_mu = (d_lambda) ? (d_lambda + n_lambda) : nullptr;
@@ -523,7 +523,7 @@ void DDSubstructedProblem::action(const double *fem_in, double *fem_out, const f
 void DDSubstructedProblem::action(const float *d_lambda, float *d_update) const
 {
     action((const double *)nullptr, (double *)nullptr, d_lambda, d_update);
-    axpby(2 * n_lambda, 1.0f, d_lambda, -1.0f, d_update);
+    dla::axpby(2 * n_lambda, 1.0f, d_lambda, -1.0f, d_update);
 }
 
 void DDSubstructedProblem::rhs(const double *f, float *b) const

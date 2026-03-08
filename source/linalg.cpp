@@ -1,61 +1,40 @@
 #include "linalg.hpp"
 
-// The reduction kernel performs a binary tree summation reduction. SZ is the
-// block size and NR is the number of reads performed by each thread.
-// result = sum_k op(k, x, y). e.g. for dot product op(k, x, y) = x[k] * y[k]
-template <int SZ, int NR, typename scalar, typename LAMBDA>
-__global__ static void sum_reduction_kernel(int n, const scalar *x, const scalar *y, scalar *__restrict__ result,
-                                            LAMBDA op)
+template <typename real_t>
+struct dist_op
 {
-#ifndef CUDDH_DEBUG
-    assert(blockDim.x == SZ);
-#endif
-
-    const int thread_id = threadIdx.x;
-    const int block_id = blockIdx.x;
-
-    __shared__ scalar s[SZ];
-
-    scalar sum = 0.0;
-
-#pragma unroll
-    for (int j = 0; j < NR; ++j)
+    __host__ __device__ constexpr real_t operator()(thrust::tuple<real_t, real_t> t) const
     {
-        const int k = thread_id + SZ * (j + NR * block_id);
-        if (k < n)
-            sum += op(k, x, y);
+        real_t x = thrust::get<0>(t);
+        real_t y = thrust::get<1>(t);
+        return (x - y) * (x - y);
     }
+};
 
-    s[thread_id] = sum;
-
-    // tree reduction
-    for (int m = SZ >> 1; m > 0; m >>= 1)
-    {
-        __syncthreads();
-
-        if (thread_id < m)
-        {
-            s[thread_id] += s[thread_id + m];
-        }
-    }
-
-    if (thread_id == 0)
-    {
-        sum = s[0];
-        atomicAdd(result, sum);
-    }
-}
-
-namespace cuddh
+template <typename real_t>
+struct axpby_op
 {
-    void axpby(int n, double a, const double *__restrict__ x, double b, double *__restrict__ y)
+    real_t a, b;
+
+    __host__ __device__ real_t operator()(real_t x, real_t y) const { return a * x + b * y; }
+};
+
+namespace cuddh::dla
+{
+    void axpby(int n, double a, const double *x, double b, double *y)
     {
-        forall(n, [=] __device__(int i) -> void { y[i] = a * x[i] + b * y[i]; });
+        auto px = thrust::device_pointer_cast(x);
+        auto py = thrust::device_pointer_cast(y);
+
+        thrust::transform(px, px + n, py, py, axpby_op<double>{a, b});
     }
 
     void axpby(int n, float a, const float *__restrict__ x, float b, float *__restrict__ y)
     {
-        forall(n, [=] __device__(int i) -> void { y[i] = a * x[i] + b * y[i]; });
+        auto px = thrust::device_pointer_cast(x);
+        auto py = thrust::device_pointer_cast(y);
+
+        thrust::transform(px, px + n, py, py, axpby_op<float>{a, b});
     }
 
     double dot(int n, const double *x, const double *y)
@@ -76,61 +55,45 @@ namespace cuddh
 
     double dist(int n, const double *x, const double *y)
     {
-        host_device_dvec result(1);
+        auto px = thrust::device_pointer_cast(x);
+        auto py = thrust::device_pointer_cast(y);
 
-        constexpr int block_size = 32;
-        constexpr int num_reads = 8;
-        constexpr int data_per_block = block_size * num_reads;
+        auto begin = thrust::make_zip_iterator(thrust::make_tuple(px, py));
+        auto end = thrust::make_zip_iterator(thrust::make_tuple(px + n, py + n));
 
-        const int n_blocks = (n + data_per_block - 1) / data_per_block;
-
-        double *d_result = result.device_read_write();
-        zeros(1, d_result);
-
-        sum_reduction_kernel<block_size, num_reads>
-            <<<n_blocks, block_size>>>(n, x, y, d_result, [] __device__(int k, const double *X, const double *Y) {
-                double e = X[k] - Y[k];
-                return e * e;
-            });
-
-        return std::sqrt(*result.host_read());
+        return std::sqrt(thrust::transform_reduce(begin, end, dist_op<double>{}, 0.0, thrust::plus<double>()));
     }
 
     float dist(int n, const float *x, const float *y)
     {
-        HostDeviceArray<float> result(1);
+        auto px = thrust::device_pointer_cast(x);
+        auto py = thrust::device_pointer_cast(y);
 
-        constexpr int block_size = 32;
-        constexpr int num_reads = 8;
-        constexpr int data_per_block = block_size * num_reads;
+        auto begin = thrust::make_zip_iterator(thrust::make_tuple(px, py));
+        auto end = thrust::make_zip_iterator(thrust::make_tuple(px + n, py + n));
 
-        const int n_blocks = (n + data_per_block - 1) / data_per_block;
-
-        float *d_result = result.device_read_write();
-        zeros(1, d_result);
-
-        sum_reduction_kernel<block_size, num_reads, float>
-            <<<n_blocks, block_size>>>(n, x, y, d_result, [] __device__(int k, const float *X, const float *Y) {
-                float e = X[k] - Y[k];
-                return e * e;
-            });
-
-        return std::sqrt(*result.host_read());
+        return std::sqrt(thrust::transform_reduce(begin, end, dist_op<float>{}, 0.0f, thrust::plus<float>()));
     }
 
-    void copy(int n, const double *__restrict__ x, double *__restrict__ y)
+    void copy(int n, const double *x, double *y)
     {
-        forall(n, [=] __device__(int i) -> void { y[i] = x[i]; });
+        auto px = thrust::device_pointer_cast(x);
+        auto py = thrust::device_pointer_cast(y);
+        thrust::copy(px, px + n, py);
     }
 
-    void copy(int n, const float *__restrict__ x, float *__restrict__ y)
+    void copy(int n, const float *x, float *y)
     {
-        forall(n, [=] __device__(int i) -> void { y[i] = x[i]; });
+        auto px = thrust::device_pointer_cast(x);
+        auto py = thrust::device_pointer_cast(y);
+        thrust::copy(px, px + n, py);
     }
 
-    void copy(int n, const int *__restrict__ x, int *__restrict__ y)
+    void copy(int n, const int *x, int *y)
     {
-        forall(n, [=] __device__(int i) -> void { y[i] = x[i]; });
+        auto px = thrust::device_pointer_cast(x);
+        auto py = thrust::device_pointer_cast(y);
+        thrust::copy(px, px + n, py);
     }
 
     void scal(int n, double a, double *x)
@@ -145,16 +108,19 @@ namespace cuddh
 
     void fill(int n, double a, double *x)
     {
-        forall(n, [=] __device__(int i) -> void { x[i] = a; });
+        auto px = thrust::device_pointer_cast(x);
+        thrust::fill(px, px + n, a);
     }
 
     void fill(int n, float a, float *x)
     {
-        forall(n, [=] __device__(int i) -> void { x[i] = a; });
+        auto px = thrust::device_pointer_cast(x);
+        thrust::fill(px, px + n, a);
     }
 
     void fill(int n, int a, int *x)
     {
-        forall(n, [=] __device__(int i) -> void { x[i] = a; });
+        auto px = thrust::device_pointer_cast(x);
+        thrust::fill(px, px + n, a);
     }
-} // namespace cuddh
+} // namespace cuddh::dla

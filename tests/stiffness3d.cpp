@@ -49,7 +49,7 @@ static void run_stiffness3d_case(TestLogger &summary, const Mesh3D &mesh, const 
     StiffnessMatrix3D A(fem);
     A.action(f, Af);
 
-    const double err = dist(ndof, Af, Lf) / cuddh::norm(ndof, Lf);
+    const double err = dla::dist(ndof, Af, Lf) / dla::norm(ndof, Lf);
     if (err < tol)
         summary.pass(std::format("stiffness3d {}", test_name));
     else
