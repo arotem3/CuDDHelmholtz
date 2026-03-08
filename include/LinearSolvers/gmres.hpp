@@ -1,29 +1,11 @@
 #ifndef CUDDH_GMRES_HPP
 #define CUDDH_GMRES_HPP
 
-#include <thrust/device_vector.h>
-
-#include <chrono>
-#include <format>
-#include <iomanip>
-#include <iostream>
-
-#include "Operator.hpp"
-#include "Tensor.hpp"
-#include "linalg.hpp"
+#include "LinearSolvers/SolverBase.hpp"
 
 namespace cuddh
 {
-    struct SolverResults
-    {
-        bool success;
-        int num_iter;
-        int num_matvec;
-        std::vector<double> res_norm;
-        std::vector<double> time;
-    };
-
-    struct SolverParams
+    struct gmresParams
     {
         enum Verbosity
         {
@@ -49,10 +31,10 @@ namespace cuddh
     /// inv(A).
     /// each iteration to cout; if verbose == 0, gmres is silent.
     SolverResults gmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
-                        SolverParams opts = {});
-    SolverResults gmres(int n, double *x, const Operator *A, const double *b, SolverParams opts = {});
+                        gmresParams opts = {});
+    SolverResults gmres(int n, double *x, const Operator *A, const double *b, gmresParams opts = {});
 
-    SolverResults gmres(int n, float *x, const SinglePrecisionOperator *A, const float *b, SolverParams opts = {});
+    SolverResults gmres(int n, float *x, const SinglePrecisionOperator *A, const float *b, gmresParams opts = {});
 
     /**
      * @brief MINRES for solving A * x == b where A is symmetric (not necessarily positive definite).
@@ -65,7 +47,7 @@ namespace cuddh
      * @param opts
      * @return SolverResults
      */
-    SolverResults minres(int n, double *x, const Operator *A, const double *b, SolverParams opts = {});
+    SolverResults minres(int n, double *x, const Operator *A, const double *b, gmresParams opts = {});
 
     /**
      * @brief Flexible GMRES(m) for solving A * x == b where the preconditioner can change at each iteration.
@@ -79,7 +61,7 @@ namespace cuddh
      * @return SolverResults
      */
     SolverResults fgmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
-                         SolverParams opts = {});
+                         gmresParams opts = {});
 } // namespace cuddh
 
 #endif

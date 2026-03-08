@@ -88,11 +88,11 @@ int main()
     const int nx = 64;                       // number of elements along each direction. Mesh will have nx^2 elements
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
-    SolverParams opts = {
-        .m = 50,                             // number of vectors in the Krylov space used in each iteration of GMRES
-        .maxit = 200,                        // maximum number of iterations of GMRES
-        .tol = 1e-6,                         // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
-        .verbose = SolverParams::ProgressBar // verbosity level: Silent, ProgressBar, Iteration
+    gmresParams opts = {
+        .m = 50,                            // number of vectors in the Krylov space used in each iteration of GMRES
+        .maxit = 200,                       // maximum number of iterations of GMRES
+        .tol = 1e-6,                        // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
+        .verbose = gmresParams::ProgressBar // verbosity level: Silent, ProgressBar, Iteration
     };
 
     // Assemble the mesh

@@ -80,11 +80,11 @@ int main()
     const int nx = 64;                       // number of elements in each direction
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
-    const SolverParams opts = {
-        .m = 50,                              // GMRES restart parameter
-        .maxit = 200,                         // maximum number of GMRES iterations
-        .tol = 1e-6,                          // GMRES tolerance
-        .verbose = SolverParams::ProgressBar, // verbosity level: ProgressBar, Iteration, or Silent
+    const gmresParams opts = {
+        .m = 50,                             // GMRES restart parameter
+        .maxit = 200,                        // maximum number of GMRES iterations
+        .tol = 1e-6,                         // GMRES tolerance
+        .verbose = gmresParams::ProgressBar, // verbosity level: ProgressBar, Iteration, or Silent
     };
 
     // Create a uniform rectangular mesh

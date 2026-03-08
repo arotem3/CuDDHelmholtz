@@ -93,7 +93,7 @@ namespace cuddh
     {
     public:
         DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem,
-            SolverParams opts = {.m = 20, .maxit = 20, .tol = 1e-6})
+            gmresParams opts = {.m = 20, .maxit = 20, .tol = 1e-6})
             : ndof{fem.size()}, opts{opts}, F(omega, h_a, fem, efem), lambda(F.size()), Y(F.size())
         {}
 
@@ -124,7 +124,7 @@ namespace cuddh
 
     private:
         const int ndof;
-        const SolverParams opts;
+        const gmresParams opts;
         DDSubstructedProblem F;
         mutable thrust::device_vector<float> lambda;
         mutable thrust::device_vector<float> Y;
