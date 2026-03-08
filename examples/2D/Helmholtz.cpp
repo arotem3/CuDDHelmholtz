@@ -101,9 +101,9 @@ int main()
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
     const gmresParams opts = {
-        .maxit = 100'000,                   // maximum number of iterations of MINRES
-        .tol = 1e-6,                        // relative tolerance. MINRES stops when ||b-A*x|| < tol*||b||
-        .verbose = gmresParams::ProgressBar // verbosity level: ProgressBar, Iteration, or Silent
+        .maxit = 100'000,                       // maximum number of iterations of MINRES
+        .tol = 1e-6,                            // relative tolerance. MINRES stops when ||b-A*x|| < tol*||b||
+        .verbose = SolverVerbosity::ProgressBar // verbosity level: ProgressBar, Iteration, or Silent
     };
 
     // Assemble the mesh

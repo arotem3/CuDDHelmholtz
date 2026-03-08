@@ -81,10 +81,10 @@ int main()
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
     const gmresParams opts = {
-        .m = 50,                             // GMRES restart parameter
-        .maxit = 200,                        // maximum number of GMRES iterations
-        .tol = 1e-6,                         // GMRES tolerance
-        .verbose = gmresParams::ProgressBar, // verbosity level: ProgressBar, Iteration, or Silent
+        .m = 50,                                 // GMRES restart parameter
+        .maxit = 200,                            // maximum number of GMRES iterations
+        .tol = 1e-6,                             // GMRES tolerance
+        .verbose = SolverVerbosity::ProgressBar, // verbosity level: ProgressBar, Iteration, or Silent
     };
 
     // Create a uniform rectangular mesh
