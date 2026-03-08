@@ -114,7 +114,7 @@ inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b,
                 break;
         }
 
-        solve_triu(H.shape(0), k1, H.data(), eta.data());
+        solve_triu(k1, H.data(), H.shape(0), eta.data());
         for (int k = 0; k < k1; ++k)
             cuddh::axpby(n, eta(k), V + k * n, one, x); // x <- x + eta[k] * v[k]
 
@@ -309,7 +309,7 @@ SolverResults cuddh::fgmres(int n, double *x, const Operator *A, const double *b
                 break;
         }
 
-        solve_triu(H.shape(0), k1, H.data(), eta.data());
+        solve_triu(k1, H.data(), H.shape(0), eta.data());
         for (int k = 0; k < k1; ++k)
             cuddh::axpby(n, eta(k), Z + k * n, 1.0, x); // x <- x + eta[k] * z[k]
 

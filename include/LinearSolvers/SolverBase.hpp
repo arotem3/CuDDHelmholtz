@@ -1,15 +1,12 @@
 #pragma once
 
-#include <thrust/device_vector.h>
-#include <thrust/universal_vector.h>
-
 #include <chrono>
 #include <format>
-#include <iomanip>
 #include <iostream>
 
 #include "Operator.hpp"
 #include "Tensor.hpp"
+#include "cuddh_config.hpp"
 #include "linalg.hpp"
 
 namespace cuddh
