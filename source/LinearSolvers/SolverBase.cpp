@@ -28,7 +28,7 @@ static std::string format_time(double t)
 static std::string progress_bar(int it, int maxit, int len = 30)
 {
     int filled = (it * len) / maxit;
-    std::string bar(filled, '=');
+    std::string bar(filled, '#');
     std::string empty(len - filled, '-');
     return bar + empty;
 }
