@@ -70,21 +70,20 @@ void SolverLogger::log_iteration(double res_norm)
     }
 }
 
-SolverResults SolverLogger::log_summary(double res_norm, double tol)
+SolverResults SolverLogger::log_summary(double res_norm, bool success)
 {
-    if (res_norm <= tol)
-        results.success = true;
+    results.success = success;
 
     if (verbosity != SolverVerbosity::Silent)
     {
-        std::cout << std::format("\nAfter {} iterations ({}), achieved rel. residual of {:10.2e}", results.num_iter,
-                                 format_time(timer.elapsed()), res_norm)
+        std::cout << std::format("\nAfter {} iterations ({}), solver achieved rel. residual of {:10.2e}",
+                                 results.num_iter, format_time(timer.elapsed()), res_norm)
                   << std::endl;
-        if (res_norm <= tol)
-            std::cout << "Solver successfully converged within desired tolerance." << std::endl;
+        if (success)
+            std::cout << "Solver successfully converged within the maximum number of iterations." << std::endl;
         else
-            std::cout << "Solver failed to converge within desired tolerance." << std::endl;
+            std::cout << "Solver failed to converge within the maximum number of iterations." << std::endl;
     }
 
-    return results;
+    return std::move(results);
 }

@@ -97,7 +97,7 @@ namespace cuddh
                     compute_deflation_ritz_vecs(m);
             }
 
-            return logger.log_summary(rnrm / bnrm, tol);
+            return logger.log_summary(rnrm / bnrm, rnrm <= tol);
         }
 
     private:

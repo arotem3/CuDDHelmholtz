@@ -66,8 +66,7 @@ inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b,
     scalar rnrm = cuddh::norm(n, r);
     logger.log_iteration(rnrm / bnrm);
 
-    int it = 1;
-    while (it <= opts.maxit && rnrm > tol)
+    while (logger.num_iterations() <= opts.maxit && rnrm > tol)
     {
         scalar *vk = V;
         scalar *vk1;
@@ -78,7 +77,7 @@ inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b,
         eta(0) = rnrm;
 
         int k1 = 0;
-        for (int k = 0; k < opts.m && it <= opts.maxit; ++k, ++it)
+        for (int k = 0; k < opts.m && logger.num_iterations() <= opts.maxit; ++k)
         {
             k1 = k + 1;
             vk = V + k * n;
@@ -125,7 +124,7 @@ inline SolverResults t_gmres(int n, scalar *x, const OpType *A, const scalar *b,
         rnrm = cuddh::norm(n, r);
     }
 
-    return logger.log_summary(rnrm / bnrm, tol);
+    return logger.log_summary(rnrm / bnrm, rnrm <= tol);
 }
 
 SolverResults cuddh::gmres(int n, double *x, const Operator *A, const double *b, gmresParams opts)
@@ -180,7 +179,7 @@ cuddh::SolverResults cuddh::minres(int n, double *x, const Operator *A, const do
     double c = 1.0, s = 0.0;
     double beta = 0.0;
 
-    for (int it = 0; it < opts.maxit; ++it)
+    while (logger.num_iterations() <= opts.maxit)
     {
         // Lanczos step
         A->action(v, r); // r = A * v
@@ -216,7 +215,7 @@ cuddh::SolverResults cuddh::minres(int n, double *x, const Operator *A, const do
 
         logger.log_iteration(std::abs(phi) / bnrm);
 
-        if (std::abs(phi) < tol)
+        if (std::abs(phi) <= tol)
             break;
 
         // prepare for next iteration
@@ -228,7 +227,7 @@ cuddh::SolverResults cuddh::minres(int n, double *x, const Operator *A, const do
         });
     }
 
-    return logger.log_summary(std::abs(phi) / bnrm, tol);
+    return logger.log_summary(std::abs(phi) / bnrm, std::abs(phi) <= tol);
 }
 
 SolverResults cuddh::fgmres(int n, double *x, const Operator *A, const double *b, const Operator *Precond,
@@ -262,15 +261,14 @@ SolverResults cuddh::fgmres(int n, double *x, const Operator *A, const double *b
     double rnrm = cuddh::norm(n, r);
     logger.log_iteration(rnrm / bnrm);
 
-    int it = 1;
-    while (it <= opts.maxit)
+    while (logger.num_iterations() <= opts.maxit)
     {
         axpby(n, 1.0 / rnrm, r, 0.0, V); // v[0] <- r / ||r||
         eta(0) = rnrm;
 
         // Arnoldi process with variable preconditioner
         int k1 = 0;
-        for (int k = 0; k < opts.m && it <= opts.maxit; ++k, ++it)
+        for (int k = 0; k < opts.m && logger.num_iterations() <= opts.maxit; ++k)
         {
             k1 = k + 1;
             const double *vk = V + k * n;
@@ -323,5 +321,5 @@ SolverResults cuddh::fgmres(int n, double *x, const Operator *A, const double *b
             break;
     }
 
-    return logger.log_summary(rnrm / bnrm, tol);
+    return logger.log_summary(rnrm / bnrm, rnrm <= tol);
 }

@@ -64,7 +64,7 @@ namespace cuddh
 
         void log_iteration(double res_norm);
 
-        SolverResults log_summary(double res_norm, double tol);
+        SolverResults log_summary(double res_norm, bool success);
 
     private:
         int maxit;
