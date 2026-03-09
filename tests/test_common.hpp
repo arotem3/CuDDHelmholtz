@@ -161,7 +161,7 @@ public:
     {
         using namespace cuddh;
         dla::zeros(n, y);
-        gmres(n, y, A, x, {.m = 5, .maxit = 5, .tol = 1e-2, .atol = 0.0, .verbose = SolverVerbosity::Silent});
+        gmres(n, y, *A, x, 5, nullptr, {.maxit = 5, .rtol = 1e-2, .atol = 0.0, .verbose = SolverParams::Silent});
     }
 
     void action(scalar_t c, const scalar_t *x, scalar_t *y) const override

@@ -1,0 +1,42 @@
+#pragma once
+#include "LinearSolvers/KrylovHelpers.hpp"
+#include "LinearSolvers/SolverBase.hpp"
+
+namespace cuddh
+{
+    template <typename real_t>
+    class BaseArnoldiSolver
+    {
+    public:
+        BaseArnoldiSolver(int n, const Operator<real_t> &A, const Operator<real_t> *M, int kdim, bool flexible);
+
+        int arnoldi_cycle(SolverLogger &logger, int m, int k, real_t *x, real_t *r, real_t &rnrm, real_t bnrm,
+                          real_t tol) const;
+
+        inline void evaluate_residual(real_t *r, const real_t *x, const real_t *b) const
+        {
+            A->action(x, r);
+            dla::axpby(n, real_t(1.0), b, real_t(-1.0), r);
+        }
+
+    protected:
+        const int n;
+        const int kdim;
+        const bool flexible;
+
+        const Operator<real_t> *A;
+        const Operator<real_t> *M;
+
+        mutable thrust::device_vector<real_t> _Z; // flexible ? (n, kdim) : (n)
+        mutable thrust::device_vector<real_t> _W; // (n, kdim+1)
+
+        mutable Matrix<real_t> H;                // (kdim+1, kdim)
+        mutable thrust::host_vector<real_t> eta; // kdim+1
+
+        mutable Vec<real_t> cs; // (kdim)
+        mutable Vec<real_t> sn; // (kdim)
+    };
+
+    extern template class BaseArnoldiSolver<float>;
+    extern template class BaseArnoldiSolver<double>;
+} // namespace cuddh

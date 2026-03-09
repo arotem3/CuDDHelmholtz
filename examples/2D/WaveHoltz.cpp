@@ -80,11 +80,12 @@ int main()
     const int nx = 64;                       // number of elements in each direction
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
-    const gmresParams opts = {
-        .m = 50,                                 // GMRES restart parameter
-        .maxit = 200,                            // maximum number of GMRES iterations
-        .tol = 1e-6,                             // GMRES tolerance
-        .verbose = SolverVerbosity::ProgressBar, // verbosity level: ProgressBar, Iteration, or Silent
+    const int edim = 30; // dimension of deflation space.
+    const int kdim = 50; // Krylov dimension.
+    const SolverParams opts = {
+        .maxit = 200,                         // maximum number of iterations
+        .rtol = 1e-6,                         // relative tolerance
+        .verbose = SolverParams::ProgressBar, // verbosity level: ProgressBar, Iteration, or Silent
     };
 
     // Create a uniform rectangular mesh
@@ -132,7 +133,7 @@ int main()
 
     // Solve the system using GMRES
     W.G(b, Gb); // apply G to the right-hand side vector
-    SolverResults out = gmres(N, u, &W, Gb, opts);
+    SolverResults out = GCRO<double>(N, W, nullptr, kdim, edim).solve(u, Gb, opts);
 
     double res_norm = [&]() {
         thrust::universal_vector<double> Res(N);
@@ -152,10 +153,10 @@ int main()
         auto d_a = thrust::raw_pointer_cast(a.data());
 
         Helmholtz A(omega, d_a2, d_a, fem, fs);
-        A.action(u, res);            // compute residuals
-        axpby(N, -1.0, b, 1.0, res); // res = A U - b
+        A.action(u, res);                 // compute residuals
+        dla::axpby(N, -1.0, b, 1.0, res); // res = A U - b
 
-        return cuddh::norm(N, res) / cuddh::norm(N, b);
+        return dla::norm(N, res) / dla::norm(N, b);
     }();
 
     std::cout << "Relative residual norm ||A u - b|| / ||b|| = " << res_norm << std::endl;

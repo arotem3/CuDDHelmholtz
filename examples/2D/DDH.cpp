@@ -88,11 +88,11 @@ int main()
     const int nx = 64;                       // number of elements along each direction. Mesh will have nx^2 elements
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
-    gmresParams opts = {
-        .m = 50,                                // number of vectors in the Krylov space used in each iteration of GMRES
-        .maxit = 200,                           // maximum number of iterations of GMRES
-        .tol = 1e-6,                            // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
-        .verbose = SolverVerbosity::ProgressBar // verbosity level: Silent, ProgressBar, Iteration
+    const int kdim = 50; // Krylov dimension m of gmres(m)
+    const SolverParams opts = {
+        .maxit = 200,                        // maximum number of iterations of GMRES
+        .rtol = 1e-6,                        // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
+        .verbose = SolverParams::ProgressBar // verbosity level: Silent, ProgressBar, Iteration
     };
 
     // Assemble the mesh
@@ -114,7 +114,7 @@ int main()
     auto Prec = [&]() -> DDH {
         auto a = gridfunc(fem, [] __device__(const double X[2]) -> double { return alpha(X); });
         double *d_a = thrust::raw_pointer_cast(a.data());
-        return DDH(omega, d_a, fem, efem, {.maxit = 30});
+        return DDH(omega, d_a, fem, efem);
     }();
 
     thrust::universal_vector<double> U(N);
@@ -151,7 +151,7 @@ int main()
         return Helmholtz(omega, d_a2, d_a, fem, fs);
     }();
 
-    auto out = fgmres(N, u, &A, b, &Prec, opts);
+    auto out = fgmres(N, u, A, b, kdim, &Prec, opts);
 
     // save solution and collocation nodes to file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);

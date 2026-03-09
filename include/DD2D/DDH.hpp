@@ -12,7 +12,7 @@
 #include "DDStiffnessMatrix.hpp"
 #include "EnsembleSpace.hpp"
 #include "HostDeviceArray.hpp"
-#include "LinearSolvers/gmres.hpp"
+#include "LinearSolvers/gcro.hpp"
 #include "Operator.hpp"
 #include "Operators2D/MassMatrix.hpp"
 #include "cuddh_config.hpp"
@@ -94,9 +94,14 @@ namespace cuddh
     class DDH : public Operator<double>
     {
     public:
-        DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem,
-            gmresParams opts = {.m = 20, .maxit = 20, .tol = 1e-6})
-            : ndof{fem.size()}, opts{opts}, F(omega, h_a, fem, efem), lambda(F.size()), Y(F.size())
+        DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem, int kdim = 20,
+            int edim = 10, SolverParams opts = {.maxit = 30, .rtol = 1e-6})
+            : ndof{fem.size()},
+              opts{opts},
+              F(omega, h_a, fem, efem),
+              solver(F.size(), F, nullptr, kdim, edim),
+              lambda(F.size()),
+              Y(F.size())
         {}
 
         int n_lambda() const { return F.size(); }
@@ -110,7 +115,7 @@ namespace cuddh
             float *d_Y = thrust::raw_pointer_cast(Y.data());
 
             F.rhs(x, d_Y);
-            gmres(F.size(), d_L, &F, d_Y, opts);
+            solver.solve(d_L, d_Y, opts);
 
             dla::zeros(2 * ndof, y);
             F.postprocess(d_L, x, y);
@@ -123,8 +128,9 @@ namespace cuddh
 
     private:
         const int ndof;
-        const gmresParams opts;
+        const SolverParams opts;
         DDSubstructedProblem F;
+        GCRO<float> solver;
         mutable thrust::device_vector<float> lambda;
         mutable thrust::device_vector<float> Y;
     };

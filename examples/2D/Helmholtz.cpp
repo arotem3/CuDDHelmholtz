@@ -100,10 +100,10 @@ int main()
     const int nx = 64;                       // number of elements along each direction. Mesh will have nx^2 elements
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
-    const gmresParams opts = {
-        .maxit = 100'000,                       // maximum number of iterations of MINRES
-        .tol = 1e-6,                            // relative tolerance. MINRES stops when ||b-A*x|| < tol*||b||
-        .verbose = SolverVerbosity::ProgressBar // verbosity level: ProgressBar, Iteration, or Silent
+    const SolverParams opts = {
+        .maxit = 100'000,                    // maximum number of iterations of MINRES
+        .rtol = 1e-6,                        // relative tolerance. MINRES stops when ||b-A*x|| < tol*||b||
+        .verbose = SolverParams::ProgressBar // verbosity level: ProgressBar, Iteration, or Silent
     };
 
     // Assemble the mesh
@@ -158,7 +158,7 @@ int main()
 
     // solve a([u, v], phi) = b(phi)
     std::cout << "\nsolving with MINRES ... \n";
-    auto out = minres(N, u, &A, b, opts);
+    auto out = minres(N, u, A, b, opts);
 
     // save solution and collocation nodes to file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);

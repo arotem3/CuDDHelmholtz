@@ -1,5 +1,3 @@
-#include <cstdlib>
-
 #include "test_common.hpp"
 
 using namespace cuddh;
@@ -24,8 +22,8 @@ static void run_minres_test(TestLogger &summary)
 
     dla::zeros(n, x);
 
-    const gmresParams opts = {.maxit = n, .tol = 1e-10, .atol = 0.0, .verbose = SolverVerbosity::ProgressBar};
-    auto out = cuddh::minres(n, x, &a, y, opts);
+    const SolverParams opts = {.maxit = n, .rtol = 1e-10, .atol = 0.0, .verbose = SolverParams::ProgressBar};
+    auto out = cuddh::minres(n, x, a, y, opts);
 
     host_device_dvec _r(n);
     double *r = _r.device_write();
@@ -34,16 +32,15 @@ static void run_minres_test(TestLogger &summary)
 
     const double b_norm = dla::norm(n, y);
     const double rel_res = dla::norm(n, r) / b_norm;
-    const double target = opts.tol + opts.atol / b_norm;
+    const double target = opts.rtol + opts.atol / b_norm;
 
     if (out.success && rel_res <= target)
     {
-        summary.pass("gmres tridiagonal solve");
+        summary.pass("minres solve");
     }
     else
     {
-        summary.fail("gmres tridiagonal solve",
-                     std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
+        summary.fail("minres solve", std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
     }
 }
 

@@ -33,7 +33,7 @@ static std::string progress_bar(int it, int maxit, int len = 30)
     return bar + empty;
 }
 
-SolverLogger::SolverLogger(SolverVerbosity verbosity, int maxit) : verbosity(verbosity), maxit(maxit)
+SolverLogger::SolverLogger(SolverParams::Verbosity verbosity, int maxit) : verbosity(verbosity), maxit(maxit)
 {
     results.success = false;
     results.num_iter = 0;
@@ -54,13 +54,13 @@ void SolverLogger::log_iteration(double res_norm)
         results.time.push_back(timer.elapsed());
     }
 
-    if (verbosity == SolverVerbosity::ProgressBar)
+    if (verbosity == SolverParams::ProgressBar)
     {
         std::cout << std::format("\r[{}] || iteration {:10d} / {} || rel. res. = {:10.2e}",
                                  progress_bar(results.num_iter, maxit), results.num_iter, maxit, res_norm)
                   << std::flush;
     }
-    else if (verbosity == SolverVerbosity::Iteration)
+    else if (verbosity == SolverParams::Iteration)
     {
         std::cout << std::format("iteration {:10d} / {} || rel. res. = {:10.2e}", results.num_iter, maxit, res_norm)
                   << std::endl;
@@ -74,7 +74,7 @@ SolverResults SolverLogger::log_summary(double res_norm, bool success)
 {
     results.success = success;
 
-    if (verbosity != SolverVerbosity::Silent)
+    if (verbosity != SolverParams::Silent)
     {
         std::cout << std::format("\nAfter {} iterations ({}), solver achieved rel. residual of {:10.2e}",
                                  results.num_iter, format_time(timer.elapsed()), res_norm)

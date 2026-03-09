@@ -1,6 +1,3 @@
-#include <cstdlib>
-
-#include "LinearSolvers/gcro.hpp"
 #include "test_common.hpp"
 
 using namespace cuddh;
@@ -31,30 +28,29 @@ static void run_fgmres_test(TestLogger &summary)
     // Test 1: WITHOUT preconditioner
     {
         dla::zeros(n, x);
-        const gmresParams opts = {
-            .m = 20,
+        const SolverParams opts = {
             .maxit = 1000,
-            .tol = 1e-6,
+            .rtol = 1e-6,
             .atol = 0.0,
-            .verbose = SolverVerbosity::ProgressBar,
+            .verbose = SolverParams::ProgressBar,
         };
 
-        const SolverResults out = fgmres(n, x, &A, b, nullptr, opts);
+        const SolverResults out = fgmres(n, x, A, b, 20, nullptr, opts);
 
         A.action(x, r);
         dla::axpby(n, 1.0, b, -1.0, r);
 
         const double b_norm = dla::norm(n, b);
         const double rel_res = dla::norm(n, r) / b_norm;
-        const double target = opts.tol + opts.atol / b_norm;
+        const double target = opts.rtol + opts.atol / b_norm;
 
         if (out.success && rel_res <= target)
         {
-            summary.pass("gcro 2D advection-diffusion WITHOUT preconditioner");
+            summary.pass("fgmres solve WITHOUT preconditioner");
         }
         else
         {
-            summary.fail("gcro 2D advection-diffusion WITHOUT preconditioner",
+            summary.fail("fgmres solve WITHOUT preconditioner",
                          std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
         }
     }
@@ -63,30 +59,29 @@ static void run_fgmres_test(TestLogger &summary)
     {
         dla::zeros(n, x);
         InexactPreconditioner<double> M(n, A);
-        const gmresParams opts = {
-            .m = 20,
+        const SolverParams opts = {
             .maxit = 1000,
-            .tol = 1e-6,
+            .rtol = 1e-6,
             .atol = 0.0,
-            .verbose = SolverVerbosity::ProgressBar,
+            .verbose = SolverParams::ProgressBar,
         };
 
-        const SolverResults out = fgmres(n, x, &A, b, &M, opts);
+        const SolverResults out = fgmres(n, x, A, b, 5, &M, opts);
 
         A.action(x, r);
         dla::axpby(n, 1.0, b, -1.0, r);
 
         const double b_norm = dla::norm(n, b);
         const double rel_res = dla::norm(n, r) / b_norm;
-        const double target = opts.tol + opts.atol / b_norm;
+        const double target = opts.rtol + opts.atol / b_norm;
 
         if (out.success && rel_res <= target)
         {
-            summary.pass("gcro 2D advection-diffusion WITH GMRES(5) preconditioner");
+            summary.pass("fgmres solve WITH inexact preconditioner");
         }
         else
         {
-            summary.fail("gcro 2D advection-diffusion WITH GMRES(5) preconditioner",
+            summary.fail("fgmres solve WITH inexact preconditioner",
                          std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
         }
     }

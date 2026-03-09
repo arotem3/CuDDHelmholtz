@@ -1,7 +1,3 @@
-#include "LinearSolvers/gcro.hpp"
-
-#include <cstdlib>
-
 #include "test_common.hpp"
 
 using namespace cuddh;
@@ -32,11 +28,11 @@ static void run_gcro_test(TestLogger &summary)
     // Test 1: WITHOUT preconditioner
     {
         dla::zeros(n, x);
-        const GCROParams opts = {
+        const SolverParams opts = {
             .maxit = 1000,
             .rtol = 1e-6,
             .atol = 0.0,
-            .verbose = SolverVerbosity::ProgressBar,
+            .verbose = SolverParams::ProgressBar,
         };
 
         const SolverResults out = GCRO<double>(n, A, nullptr, 10, 5).solve(x, b, opts);
@@ -50,24 +46,24 @@ static void run_gcro_test(TestLogger &summary)
 
         if (out.success && rel_res <= target)
         {
-            summary.pass("gcro 2D advection-diffusion WITHOUT preconditioner");
+            summary.pass("gcro solve WITHOUT preconditioner");
         }
         else
         {
-            summary.fail("gcro 2D advection-diffusion WITHOUT preconditioner",
+            summary.fail("gcro solve WITHOUT preconditioner",
                          std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
         }
     }
 
-    // Test 2: WITH GMRES(5) preconditioner
+    // Test 2: WITH inexact preconditioner
     {
         dla::zeros(n, x);
         InexactPreconditioner<double> M(n, A);
-        const GCROParams opts = {
+        const SolverParams opts = {
             .maxit = 100,
             .rtol = 1e-6,
             .atol = 0.0,
-            .verbose = SolverVerbosity::ProgressBar,
+            .verbose = SolverParams::ProgressBar,
         };
 
         const SolverResults out = GCRO<double>(n, A, &M, 10, 5).solve(x, b, opts);
@@ -81,11 +77,11 @@ static void run_gcro_test(TestLogger &summary)
 
         if (out.success && rel_res <= target)
         {
-            summary.pass("gcro 2D advection-diffusion WITH GMRES(5) preconditioner");
+            summary.pass("gcro solve WITH inexact preconditioner");
         }
         else
         {
-            summary.fail("gcro 2D advection-diffusion WITH GMRES(5) preconditioner",
+            summary.fail("gcro solve WITH inexact preconditioner",
                          std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
         }
     }

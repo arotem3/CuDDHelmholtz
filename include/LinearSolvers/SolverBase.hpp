@@ -20,22 +20,34 @@ namespace cuddh
         std::vector<double> time;
     };
 
-    enum class SolverVerbosity
+    struct SolverParams
     {
-        Silent,
-        ProgressBar,
-        Iteration
+        enum Verbosity
+        {
+            Silent,
+            ProgressBar,
+            Iteration
+        };
+
+        int maxit = 100;    // maximum number of iterations
+        double rtol = 1e-3; // relative tolerance for an acceptable solution. Solvers stop when |A*x-b|/|b| < tol.
+        double atol = 0.0;  // absolute tolerance for an acceptable solution. Solvers stop when |A*x-b| < atol.
+        Verbosity verbose = Silent; // 0: silent, 1: progress bar, 2: one line per iteration
     };
+
+    inline void validate_params(const SolverParams &opts)
+    {
+        cuddh_verify(opts.maxit > 0, printf("solver error: maxit = %d must be positive\n", opts.maxit));
+        cuddh_verify(opts.rtol >= 0, printf("solver error: rtol = %f must be non-negative\n", opts.rtol));
+        cuddh_verify(opts.atol >= 0, printf("solver error: atol = %f must be non-negative\n", opts.atol));
+    }
 
     class Timer
     {
     public:
         Timer() : start_time(std::chrono::high_resolution_clock::now()) {}
 
-        void start()
-        {
-            start_time = std::chrono::high_resolution_clock::now();
-        }
+        void start() { start_time = std::chrono::high_resolution_clock::now(); }
 
         double elapsed() const
         {
@@ -50,17 +62,11 @@ namespace cuddh
     class SolverLogger
     {
     public:
-        SolverLogger(SolverVerbosity verbosity, int maxit);
+        SolverLogger(SolverParams::Verbosity verbosity, int maxit);
 
-        constexpr void log_matvec()
-        {
-            results.num_matvec++;
-        }
+        constexpr void log_matvec() { results.num_matvec++; }
 
-        constexpr int num_iterations() const
-        {
-            return results.num_iter;
-        }
+        constexpr int num_iterations() const { return results.num_iter; }
 
         void log_iteration(double res_norm);
 
@@ -68,7 +74,7 @@ namespace cuddh
 
     private:
         int maxit;
-        SolverVerbosity verbosity;
+        SolverParams::Verbosity verbosity;
         SolverResults results;
         Timer timer;
     };
