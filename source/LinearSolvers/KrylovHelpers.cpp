@@ -31,15 +31,35 @@ static void gges(Args &&...args)
 
     lapack_int info;
     if constexpr (std::is_same_v<scalar_t, double>)
-        info = LAPACKE_dgges(std::forward<Args>(args)...);
+        info = LAPACKE_dgges3(std::forward<Args>(args)...);
     else if constexpr (std::is_same_v<scalar_t, float>)
-        info = LAPACKE_sgges(std::forward<Args>(args)...);
+        info = LAPACKE_sgges3(std::forward<Args>(args)...);
 
     cuddh_verify(info == 0, {
         if (info < 0)
-            printf("LAPACKE_dgges: invalid argument index %d\n", -info);
+            printf("LAPACKE_Xgges3: invalid argument index %d\n", -info);
         else
-            printf("LAPACKE_dgges: QZ algorithm failed to converge (info=%d)\n", info);
+            printf("LAPACKE_Xgges3: QZ algorithm failed to converge (info=%d)\n", info);
+    });
+}
+
+template <typename scalar_t, typename... Args>
+static void tgsen(Args &&...args)
+{
+    static_assert(std::is_same_v<scalar_t, double> || std::is_same_v<scalar_t, float>,
+                  "gges implemented only for float and double.");
+
+    lapack_int info;
+    if constexpr (std::is_same_v<scalar_t, double>)
+        info = LAPACKE_dtgsen(std::forward<Args>(args)...);
+    else if constexpr (std::is_same_v<scalar_t, float>)
+        info = LAPACKE_stgsen(std::forward<Args>(args)...);
+
+    cuddh_verify(info == 0, {
+        if (info < 0)
+            printf("LAPACKE_Xtgsen: invalid argument index %d\n", -info);
+        else
+            printf("LAPACKE_Xtgsen: problem too ill-conditioned (info=%d)\n", info);
     });
 }
 
@@ -49,16 +69,15 @@ static Matrix<scalar_t> _qz_invariant_space(int n, int nkeep, scalar_t *A, int l
     cuddh_verify(0 <= nkeep && nkeep <= n, printf("qz_invariant_space: nkeep must be in [0,n]"));
     cuddh_verify(lda >= n && ldb >= n, printf("qz_invariant_space: leading dimensions must be at least n"));
 
-    Matrix<scalar_t> Q(n, n);
-    int ldq = Q.shape(0);
+    if (nkeep == 0)
+        return Matrix<scalar_t>(0, 0);
+
+    Matrix<scalar_t> Z(n, n);
 
     std::vector<scalar_t> alphar(n), alphai(n), beta(n);
     lapack_int sdim = 0;
-    gges<scalar_t>(LAPACK_COL_MAJOR, 'V', 'N', 'N', nullptr, n, A, lda, B, ldb, &sdim, alphar.data(), alphai.data(),
-                   beta.data(), Q.data(), ldq, nullptr, 1);
-
-    if (nkeep == 0)
-        return Matrix<scalar_t>(0, 0);
+    gges<scalar_t>(LAPACK_COL_MAJOR, 'N', 'V', 'N', nullptr, n, A, lda, B, ldb, &sdim, alphar.data(), alphai.data(),
+                   beta.data(), nullptr, 1, Z.data(), n);
 
     struct Block
     {
@@ -74,14 +93,12 @@ static Matrix<scalar_t> _qz_invariant_space(int n, int nkeep, scalar_t *A, int l
         return std::hypot(alphar[i], alphai[i]) / b;
     };
 
-    const double eps = 64.0 * std::numeric_limits<scalar_t>::epsilon();
     std::vector<Block> blocks;
     for (int i = 0; i < n;)
     {
-        const bool is_pair = (i + 1 < n) && (std::abs(alphai[i]) > eps) && (std::abs(alphai[i] + alphai[i + 1]) <= eps);
-        if (is_pair)
+        if (alphai[i] != 0.0)
         {
-            blocks.push_back({i, 2, std::min(eig_mag(i), eig_mag(i + 1))});
+            blocks.push_back({i, 2, eig_mag(i)});
             i += 2;
         }
         else
@@ -93,30 +110,32 @@ static Matrix<scalar_t> _qz_invariant_space(int n, int nkeep, scalar_t *A, int l
 
     std::sort(blocks.begin(), blocks.end(), [](const Block &a, const Block &b) { return a.key < b.key; });
 
-    std::vector<scalar_t> cols;
-    cols.reserve(nkeep + 1);
+    std::vector<lapack_logical> select(n, 0);
+    int count = 0;
     for (const auto &blk : blocks)
     {
-        if ((int)cols.size() >= nkeep)
+        if (count >= nkeep)
             break;
-        cols.push_back(blk.first);
+
+        select.at(blk.first) = 1;
         if (blk.size == 2)
-            cols.push_back(blk.first + 1);
+            select.at(blk.first + 1) = 1;
+        count += blk.size;
     }
 
-    std::sort(cols.begin(), cols.end());
+    // Reorder selected generalized eigenvalues to the leading block.
+    lapack_int m = 0;
+    scalar_t pl = 0.0, pr = 0.0;
+    scalar_t dif[2] = {0.0, 0.0};
+    tgsen<scalar_t>(LAPACK_COL_MAJOR, 0, 0, 1, select.data(), n, A, lda, B, ldb, alphar.data(), alphai.data(),
+                    beta.data(), nullptr, 1, Z.data(), n, &m, &pl, &pr, dif);
 
-    int nsel = (int)cols.size();
-    Matrix<scalar_t> Qsel(n, nsel);
+    count = static_cast<int>(m);
 
-    for (int j = 0; j < nsel; ++j)
-    {
-        const int src_col = cols[j];
-        for (int i = 0; i < n; ++i)
-            Qsel(i, j) = Q(i, src_col);
-    }
+    Matrix<scalar_t> Zsel(n, count);
+    std::copy(Z.data(), Z.data() + n * count, Zsel.data());
 
-    return Qsel;
+    return Zsel;
 }
 
 Matrix<float> cuddh::qz_invariant_space(int n, int nkeep, float *A, int lda, float *B, int ldb)
