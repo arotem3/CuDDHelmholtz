@@ -63,33 +63,32 @@ static void tgsen(Args &&...args)
     });
 }
 
-template <typename scalar_t>
-static Matrix<scalar_t> _qz_invariant_space(int n, int nkeep, scalar_t *A, int lda, scalar_t *B, int ldb)
+Matrix<double> cuddh::qz_invariant_space(int n, int nkeep, double *A, int lda, double *B, int ldb)
 {
     cuddh_verify(0 <= nkeep && nkeep <= n, printf("qz_invariant_space: nkeep must be in [0,n]"));
     cuddh_verify(lda >= n && ldb >= n, printf("qz_invariant_space: leading dimensions must be at least n"));
 
     if (nkeep == 0)
-        return Matrix<scalar_t>(0, 0);
+        return Matrix<double>(0, 0);
 
-    Matrix<scalar_t> Z(n, n);
+    Matrix<double> Z(n, n);
 
-    std::vector<scalar_t> alphar(n), alphai(n), beta(n);
+    std::vector<double> alphar(n), alphai(n), beta(n);
     lapack_int sdim = 0;
-    gges<scalar_t>(LAPACK_COL_MAJOR, 'N', 'V', 'N', nullptr, n, A, lda, B, ldb, &sdim, alphar.data(), alphai.data(),
-                   beta.data(), nullptr, 1, Z.data(), n);
+    gges<double>(LAPACK_COL_MAJOR, 'N', 'V', 'N', nullptr, n, A, lda, B, ldb, &sdim, alphar.data(), alphai.data(),
+                 beta.data(), nullptr, 1, Z.data(), n);
 
     struct Block
     {
         int first;
         int size;
-        scalar_t key;
+        double key;
     };
 
     auto eig_mag = [&](int i) {
-        const scalar_t b = std::abs(beta[i]);
-        if (b <= std::numeric_limits<scalar_t>::epsilon())
-            return std::numeric_limits<scalar_t>::infinity();
+        const double b = std::abs(beta[i]);
+        if (b <= std::numeric_limits<double>::epsilon())
+            return std::numeric_limits<double>::infinity();
         return std::hypot(alphar[i], alphai[i]) / b;
     };
 
@@ -125,14 +124,14 @@ static Matrix<scalar_t> _qz_invariant_space(int n, int nkeep, scalar_t *A, int l
 
     // Reorder selected generalized eigenvalues to the leading block.
     lapack_int m = 0;
-    scalar_t pl = 0.0, pr = 0.0;
-    scalar_t dif[2] = {0.0, 0.0};
-    tgsen<scalar_t>(LAPACK_COL_MAJOR, 0, 0, 1, select.data(), n, A, lda, B, ldb, alphar.data(), alphai.data(),
-                    beta.data(), nullptr, 1, Z.data(), n, &m, &pl, &pr, dif);
+    double pl = 0.0, pr = 0.0;
+    double dif[2] = {0.0, 0.0};
+    tgsen<double>(LAPACK_COL_MAJOR, 0, 0, 1, select.data(), n, A, lda, B, ldb, alphar.data(), alphai.data(),
+                  beta.data(), nullptr, 1, Z.data(), n, &m, &pl, &pr, dif);
 
     count = static_cast<int>(m);
 
-    Matrix<scalar_t> Zsel(n, count);
+    Matrix<double> Zsel(n, count);
     std::copy(Z.data(), Z.data() + n * count, Zsel.data());
 
     return Zsel;
@@ -140,12 +139,24 @@ static Matrix<scalar_t> _qz_invariant_space(int n, int nkeep, scalar_t *A, int l
 
 Matrix<float> cuddh::qz_invariant_space(int n, int nkeep, float *A, int lda, float *B, int ldb)
 {
-    return _qz_invariant_space<float>(n, nkeep, A, lda, B, ldb);
-}
+    Matrix<double> a(n, n);
+    auto Aview = reshape(A, lda, n);
+    for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i)
+            a(i, j) = Aview(i, j);
 
-Matrix<double> cuddh::qz_invariant_space(int n, int nkeep, double *A, int lda, double *B, int ldb)
-{
-    return _qz_invariant_space<double>(n, nkeep, A, lda, B, ldb);
+    Matrix<double> b(n, n);
+    auto Bview = reshape(B, ldb, n);
+    for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i)
+            b(i, j) = Bview(i, j);
+
+    auto P = qz_invariant_space(n, nkeep, a.data(), n, b.data(), n);
+
+    Matrix<float> p(n, P.shape(1));
+    std::copy(P.begin(), P.end(), p.begin());
+
+    return p;
 }
 
 template <typename scalar_t, typename... Args>

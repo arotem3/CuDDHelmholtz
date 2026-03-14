@@ -37,6 +37,10 @@ SolverResults GCRO<real_t>::solve(real_t *x, const real_t *b, SolverParams opts)
         int m = std::min(kdim, opts.maxit - logger.num_iterations());
         m = this->arnoldi_cycle(logger, m, active_edim, x, r, rnrm, bnrm, tol);
 
+        this->evaluate_residual(r, x, b);
+        logger.log_matvec();
+        rnrm = dla::norm(n, r);
+
         if (update_deflation)
             compute_deflation_ritz_vecs(m);
     }

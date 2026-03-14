@@ -6,7 +6,7 @@ template <typename real_t>
 int BaseArnoldiSolver<real_t>::arnoldi_cycle(SolverLogger &logger, int m, int k, real_t *x, real_t *r, real_t &rnrm,
                                              real_t bnrm, real_t tol) const
 {
-    constexpr real_t zero(0.0), one(1.0), eps{std::is_same_v<real_t, float> ? 1e-7 : 1e-14};
+    constexpr real_t zero(0.0), one(1.0), eps{64 * std::numeric_limits<real_t>::epsilon()};
 
     cuddh_verify(0 <= k && k <= kdim,
                  printf("The augmented dimension k = %d must be in the range [0, kdim = %d]\n", k, kdim));
@@ -18,10 +18,14 @@ int BaseArnoldiSolver<real_t>::arnoldi_cycle(SolverLogger &logger, int m, int k,
     real_t *Z = thrust::raw_pointer_cast(_Z.data());
 
     std::fill(H.begin(), H.end(), zero);
+    std::fill(Hqr.begin(), Hqr.end(), zero);
     std::fill(eta.begin(), eta.end(), zero);
 
     for (int i = 0; i < k; ++i)
+    {
         H(i, i) = one;
+        Hqr(i, i) = one;
+    }
 
     dla::axpby(n, one / rnrm, r, zero, W + n * k);
     eta[k] = rnrm;
@@ -68,12 +72,15 @@ int BaseArnoldiSolver<real_t>::arnoldi_cycle(SolverLogger &logger, int m, int k,
         {
             const real_t *v = W + n * i;
             real_t hij = dla::dot(n, v, w);
-            H(i, col) = hij;
             dla::axpby(n, -hij, v, one, w); // w -= (v, w) * v
+
+            H(i, col) = hij;
+            Hqr(i, col) = hij;
         }
 
         real_t wnrm = dla::norm(n, w);
         H(col + 1, col) = wnrm;
+        Hqr(col + 1, col) = wnrm;
 
         if (wnrm < eps)
         {
@@ -85,9 +92,9 @@ int BaseArnoldiSolver<real_t>::arnoldi_cycle(SolverLogger &logger, int m, int k,
 
         // update QR
         for (int i = 0; i < j; ++i)
-            apply_givens(H(k + i, col), H(k + i + 1, col), cs(i), sn(i));
-        std::tie(cs(j), sn(j)) = compute_givens(H(col, col), H(col + 1, col));
-        apply_givens(H(col, col), H(col + 1, col), cs(j), sn(j));
+            apply_givens(Hqr(k + i, col), Hqr(k + i + 1, col), cs(i), sn(i));
+        std::tie(cs(j), sn(j)) = compute_givens(Hqr(col, col), Hqr(col + 1, col));
+        apply_givens(Hqr(col, col), Hqr(col + 1, col), cs(j), sn(j));
         apply_givens(eta[col], eta[col + 1], cs(j), sn(j));
 
         rnrm = std::abs(eta[col + 1]);
@@ -97,26 +104,14 @@ int BaseArnoldiSolver<real_t>::arnoldi_cycle(SolverLogger &logger, int m, int k,
             break;
     }
 
-    // Apply givens to W
-    if (flexible)
-        for (int j = 0; j < m1; ++j)
-        {
-            real_t *w1 = W + n * (k + j);
-            real_t *w2 = w1 + n;
-            rotate_vecs(n, w1, w2, cs(j), sn(j));
-        }
-
     // solve LS
     int ncol = k + m1;
-    solve_triu(ncol, H.data(), H.shape(0), eta.data());
+    solve_triu(ncol, Hqr.data(), Hqr.shape(0), eta.data());
 
     // update solution and residual
     real_t *V = (flexible) ? Z : W;
     for (int i = 0; i < ncol; ++i)
         dla::axpby(n, eta[i], V + n * i, one, x); // x += y[i] * Z[:, i]
-
-    if (flexible)
-        dla::axpby(n, eta[ncol], W + n * ncol, zero, r); // r = y[ncol] * W[:, ncol]
 
     return ncol;
 }
@@ -131,6 +126,7 @@ BaseArnoldiSolver<real_t>::BaseArnoldiSolver(int n, const Operator<real_t> &A, c
       M{M},
       _W(n * (kdim + 1)),
       H(kdim + 1, kdim),
+      Hqr(kdim + 1, kdim),
       eta(kdim + 1),
       cs(kdim),
       sn(kdim)

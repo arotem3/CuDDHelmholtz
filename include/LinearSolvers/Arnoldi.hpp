@@ -15,8 +15,19 @@ namespace cuddh
 
         inline void evaluate_residual(real_t *r, const real_t *x, const real_t *b) const
         {
-            A->action(x, r);
-            dla::axpby(n, real_t(1.0), b, real_t(-1.0), r);
+            auto res = [&](const real_t *in, real_t *out) {
+                A->action(in, out);
+                dla::axpby(n, real_t(1.0), b, real_t(-1.0), out);
+            };
+
+            if (M && !flexible)
+            {
+                real_t *tmp = thrust::raw_pointer_cast(_Z.data());
+                res(x, tmp);
+                M->action(tmp, r);
+            }
+            else
+                res(x, r);
         }
 
     protected:
@@ -31,6 +42,7 @@ namespace cuddh
         mutable thrust::device_vector<real_t> _W; // (n, kdim+1)
 
         mutable Matrix<real_t> H;                // (kdim+1, kdim)
+        mutable Matrix<real_t> Hqr;              // (kdim+1, kdim)
         mutable thrust::host_vector<real_t> eta; // kdim+1
 
         mutable Vec<real_t> cs; // (kdim)

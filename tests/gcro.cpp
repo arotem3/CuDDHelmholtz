@@ -2,87 +2,89 @@
 
 using namespace cuddh;
 
-static void run_gcro_test(TestLogger &summary)
+template <typename real_t>
+static void run_gcro_test(TestLogger &summary, std::string_view precision, double rtol)
 {
     std::srand(1337);
 
-    auto A = asym_test_mat<double>();
+    auto A = asym_test_mat<real_t>();
     const int n = A.size();
 
-    thrust::universal_vector<double> _x_exact(n);
-    thrust::device_vector<double> _x(n);
-    thrust::device_vector<double> _b(n);
-    thrust::device_vector<double> _r(n);
+    thrust::universal_vector<real_t> _x_exact(n);
+    thrust::device_vector<real_t> _x(n);
+    thrust::device_vector<real_t> _b(n);
+    thrust::device_vector<real_t> _r(n);
 
-    double *x_exact = thrust::raw_pointer_cast(_x_exact.data());
-    double *x = thrust::raw_pointer_cast(_x.data());
-    double *b = thrust::raw_pointer_cast(_b.data());
-    double *r = thrust::raw_pointer_cast(_r.data());
+    real_t *x_exact = thrust::raw_pointer_cast(_x_exact.data());
+    real_t *x = thrust::raw_pointer_cast(_x.data());
+    real_t *b = thrust::raw_pointer_cast(_b.data());
+    real_t *r = thrust::raw_pointer_cast(_r.data());
 
     for (int i = 0; i < n; ++i)
-        x_exact[i] = static_cast<double>(std::rand()) / RAND_MAX - 0.5;
+        x_exact[i] = static_cast<real_t>(std::rand()) / static_cast<real_t>(RAND_MAX) - static_cast<real_t>(0.5);
 
     A.action(x_exact, b);
     dla::zeros(n, x);
 
+    const int kdim = 50;
+    const int edim = 20;
+    const SolverParams opts = {
+        .maxit = 1000,
+        .rtol = rtol,
+        .atol = 0.0,
+        .verbose = SolverParams::ProgressBar,
+    };
+
     // Test 1: WITHOUT preconditioner
     {
         dla::zeros(n, x);
-        const SolverParams opts = {
-            .maxit = 1000,
-            .rtol = 1e-6,
-            .atol = 0.0,
-            .verbose = SolverParams::ProgressBar,
-        };
 
-        const SolverResults out = GCRO<double>(n, A, nullptr, 10, 5).solve(x, b, opts);
+        auto solver = GCRO<real_t>(n, A, nullptr, kdim, edim);
+        const SolverResults out = solver.solve(x, b, opts);
 
         A.action(x, r);
-        dla::axpby(n, 1.0, b, -1.0, r);
+        dla::axpby(n, static_cast<real_t>(1.0), b, static_cast<real_t>(-1.0), r);
 
-        const double b_norm = dla::norm(n, b);
-        const double rel_res = dla::norm(n, r) / b_norm;
-        const double target = opts.rtol + opts.atol / b_norm;
+        const real_t b_norm = dla::norm(n, b);
+        const real_t rel_res = dla::norm(n, r) / b_norm;
+        const real_t target = static_cast<real_t>(opts.rtol + opts.atol / b_norm);
+
+        const auto test_name = std::format("gcro solve WITHOUT preconditioner ({})", precision);
 
         if (out.success && rel_res <= target)
         {
-            summary.pass("gcro solve WITHOUT preconditioner");
+            summary.pass(test_name);
         }
         else
         {
-            summary.fail("gcro solve WITHOUT preconditioner",
-                         std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
+            summary.fail(test_name, std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
         }
     }
 
     // Test 2: WITH inexact preconditioner
     {
         dla::zeros(n, x);
-        InexactPreconditioner<double> M(n, A);
-        const SolverParams opts = {
-            .maxit = 100,
-            .rtol = 1e-6,
-            .atol = 0.0,
-            .verbose = SolverParams::ProgressBar,
-        };
+        InexactPreconditioner<real_t> M(n, A);
 
-        const SolverResults out = GCRO<double>(n, A, &M, 10, 5).solve(x, b, opts);
+        auto solver = GCRO<real_t>(n, A, &M, kdim, edim);
+        const SolverResults out = solver.solve(x, b, opts);
 
         A.action(x, r);
-        dla::axpby(n, 1.0, b, -1.0, r);
+        dla::axpby(n, static_cast<real_t>(1.0), b, static_cast<real_t>(-1.0), r);
 
-        const double b_norm = dla::norm(n, b);
-        const double rel_res = dla::norm(n, r) / b_norm;
-        const double target = opts.rtol + opts.atol / b_norm;
+        const real_t b_norm = dla::norm(n, b);
+        const real_t rel_res = dla::norm(n, r) / b_norm;
+        const real_t target = static_cast<real_t>(opts.rtol + opts.atol / b_norm);
+
+        const auto test_name = std::format("gcro solve WITH inexact preconditioner ({})", precision);
 
         if (out.success && rel_res <= target)
         {
-            summary.pass("gcro solve WITH inexact preconditioner");
+            summary.pass(test_name);
         }
         else
         {
-            summary.fail("gcro solve WITH inexact preconditioner",
-                         std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
+            summary.fail(test_name, std::format("success={}, rel_res={}, target={}", out.success, rel_res, target));
         }
     }
 }
@@ -90,6 +92,7 @@ static void run_gcro_test(TestLogger &summary)
 int main()
 {
     TestLogger summary;
-    run_gcro_test(summary);
+    run_gcro_test<double>(summary, "double", 1e-10);
+    run_gcro_test<float>(summary, "float", 1e-6);
     return summary.finish();
 }

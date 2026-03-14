@@ -30,12 +30,9 @@ SolverResults GMRES<real_t>::solve(real_t *x, const real_t *b, SolverParams opts
         int m = std::min(kdim, opts.maxit - logger.num_iterations());
         this->arnoldi_cycle(logger, m, 0, x, r, rnrm, bnrm, tol);
 
-        if (not flexible)
-        {
-            this->evaluate_residual(r, x, b);
-            logger.log_matvec();
-            rnrm = dla::norm(n, r);
-        }
+        this->evaluate_residual(r, x, b);
+        logger.log_matvec();
+        rnrm = dla::norm(n, r);
     }
 
     return logger.log_summary(rnrm / bnrm, rnrm <= tol);

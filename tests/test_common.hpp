@@ -140,15 +140,15 @@ private:
 };
 
 template <typename scalar_t>
-inline auto asym_test_mat()
+inline auto asym_test_mat(int n = 64)
 {
-    return TestMatrix<scalar_t>(32, 0.1, 1.0, 0.5);
+    return TestMatrix<scalar_t>(n, 0.1, 1.0, 0.5);
 }
 
 template <typename scalar_t>
-inline auto sym_test_mat()
+inline auto sym_test_mat(int n = 64)
 {
-    return TestMatrix<scalar_t>(32, 1.0, 0.0, 0.0);
+    return TestMatrix<scalar_t>(n, 1.0, 0.0, 0.0);
 }
 
 template <typename scalar_t>
