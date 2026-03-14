@@ -117,8 +117,8 @@ int main()
         return DDH(omega, d_a, fem, efem);
     }();
 
-    thrust::universal_vector<double> U(N);
-    thrust::universal_vector<double> B(N);
+    thrust::universal_vector<double> U(N, 0.0);
+    thrust::universal_vector<double> B(N, 0.0);
 
     double *u = thrust::raw_pointer_cast(U.data()); // the solution vector [u; v]
     double *b = thrust::raw_pointer_cast(B.data()); // the right hand side b(phi)

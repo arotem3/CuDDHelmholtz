@@ -18,10 +18,7 @@ namespace
         float theta; // modified time step
         float sigma; // modified acceleration scaling
 
-        constexpr __host__ __device__ float filter(float cs) const
-        {
-            return weight * cs - shift;
-        }
+        constexpr __host__ __device__ float filter(float cs) const { return weight * cs - shift; }
     };
 
     waveholtz make_waveholtz(double omega, double dt)
@@ -408,6 +405,8 @@ static thrust::universal_vector<float> partition_of_unity(const H1Space2D &fem, 
         if (i < ndof)
             p(i, subsp) = d_ddm(i, subsp) / d_m[gI(i, subsp)];
     });
+
+    CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
 
     return P;
 }

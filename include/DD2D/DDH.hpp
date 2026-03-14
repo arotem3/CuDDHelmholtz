@@ -13,6 +13,7 @@
 #include "EnsembleSpace.hpp"
 #include "HostDeviceArray.hpp"
 #include "LinearSolvers/gcro.hpp"
+#include "LinearSolvers/gmres.hpp"
 #include "Operator.hpp"
 #include "Operators2D/MassMatrix.hpp"
 #include "cuddh_config.hpp"
@@ -99,7 +100,8 @@ namespace cuddh
             : ndof{fem.size()},
               opts{opts},
               F(omega, h_a, fem, efem),
-              solver(F.size(), F, nullptr, kdim, edim),
+              solver(F.size(), F, nullptr, kdim),
+              //   solver(F.size(), F, nullptr, kdim, edim),
               lambda(F.size()),
               Y(F.size())
         {}
@@ -130,7 +132,8 @@ namespace cuddh
         const int ndof;
         const SolverParams opts;
         DDSubstructedProblem F;
-        GCRO<float> solver;
+        // GCRO<float> solver;
+        GMRES<float> solver;
         mutable thrust::device_vector<float> lambda;
         mutable thrust::device_vector<float> Y;
     };

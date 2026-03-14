@@ -374,12 +374,6 @@ int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &c
     const int n_basis = fem.basis().size();
     const int n_spaces = E.size();
 
-    // std::vector<std::array<int, 4>> shared_dofs;                    // list of all pairs of shared DOFs identifying
-    // the respective subspaces
-    // std::vector<LambdaDof> shared_dofs; // list of all pairs of shared DOFs identifying the respective subspaces
-    // std::unordered_map<int, std::unordered_set<int>>
-    //     unique_shared; // maps pairs of subspaces to unique DOFs shared between them
-
     std::unordered_map<int, std::unordered_map<int, LambdaDof>> shared_dofs;
 
     for (auto [domain0, domain1, local_face_index0, local_face_index1] : shared_faces)
