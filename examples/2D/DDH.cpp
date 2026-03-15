@@ -85,18 +85,19 @@ __device__ static double alpha(const double X[2])
 int main()
 {
     const int deg = 3;                       // polynomial degree of basis functions
-    const int nx = 64;                       // number of elements along each direction. Mesh will have nx^2 elements
+    const int nx = 64, ny = 64;              // number of elements along each direction. Mesh will have nx^2 elements
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
     const int kdim = 50; // Krylov dimension m of gmres(m)
+    const int edim = 20; // deflation dimension
     const SolverParams opts = {
-        .maxit = 200,                        // maximum number of iterations of GMRES
-        .rtol = 1e-6,                        // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
+        .maxit = 1000,                       // maximum number of iterations of GMRES
+        .rtol = 1e-5,                        // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
         .verbose = SolverParams::ProgressBar // verbosity level: Silent, ProgressBar, Iteration
     };
 
     // Assemble the mesh
-    Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
+    Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, ny, -1.0, 1.0);
 
     // Construct 1D basis functions. On each element, the 2D basis functions are
     // tensor products of these 1D basis functions.
@@ -105,16 +106,16 @@ int main()
     // The mesh and 1D basis functions are combined in H1Space2D to define the
     // total global degrees of freedom of the problem.
     H1Space2D fem(mesh, basis);
-    EnsembleSpace efem = partition_uniform_rect(fem, nx, nx);
+    EnsembleSpace efem = partition_uniform_rect(fem, nx, ny);
 
     const int ndof = fem.size(); // # of degrees of freedom
 
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
 
-    auto Prec = [&]() -> DDH {
+    auto ddh = [&]() -> DDH<float> {
         auto a = gridfunc(fem, [] __device__(const double X[2]) -> double { return alpha(X); });
         double *d_a = thrust::raw_pointer_cast(a.data());
-        return DDH(omega, d_a, fem, efem);
+        return DDH<float>(omega, d_a, fem, efem, kdim, edim);
     }();
 
     thrust::universal_vector<double> U(N, 0.0);
@@ -133,9 +134,11 @@ int main()
               << "\tpolynomial degree = " << deg << "\n"
               << "\t#dof = " << 2 * ndof << "\n"
               << "\t#subdomains = " << efem.size() << "\n"
-              << "\t#lambda = " << Prec.n_lambda() << "\n";
+              << "\t#lambda = " << ddh.n_lambda() << "\n";
 
-    auto A = [&]() -> Helmholtz {
+    auto out = ddh.solve(u, b, opts);
+
+    double res = [&]() -> double {
         ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
         TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
 
@@ -148,10 +151,18 @@ int main()
         auto a = trace(fs, [] __device__(const double X[2]) -> double { return alpha(X); });
         double *d_a = thrust::raw_pointer_cast(a.data()); // variable coefficient projected onto TraceSpace2D
 
-        return Helmholtz(omega, d_a2, d_a, fem, fs);
+        Helmholtz A(omega, d_a2, d_a, fem, fs);
+
+        thrust::universal_vector<double> _Au(N, 0.0);
+        auto Au = thrust::raw_pointer_cast(_Au.data());
+        A.action(u, Au);
+
+        return dla::dist(N, Au, b) / dla::norm(N, b);
     }();
 
-    auto out = fgmres(N, u, A, b, kdim, &Prec, opts);
+    std::cout << std::format("Helmholtz residual |b - A u| / |b| ~ {:.2e}", res) << std::endl;
+
+    CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
 
     // save solution and collocation nodes to file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);

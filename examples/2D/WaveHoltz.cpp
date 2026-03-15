@@ -77,19 +77,19 @@ constexpr double maxvel = 5.0; // maximum reciprocal of alpha
 int main()
 {
     const int deg = 3;                       // polynomial degree
-    const int nx = 64;                       // number of elements in each direction
+    const int nx = 64, ny = 64;              // number of elements in each direction
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
-    const int edim = 30; // dimension of deflation space.
     const int kdim = 50; // Krylov dimension.
+    const int edim = 20; // dimension of deflation space.
     const SolverParams opts = {
-        .maxit = 200,                         // maximum number of iterations
-        .rtol = 1e-6,                         // relative tolerance
+        .maxit = 1000,                        // maximum number of iterations
+        .rtol = 1e-5,                         // relative tolerance
         .verbose = SolverParams::ProgressBar, // verbosity level: ProgressBar, Iteration, or Silent
     };
 
     // Create a uniform rectangular mesh
-    Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
+    Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, ny, -1.0, 1.0);
 
     // Construct 1D basis functions
     Basis basis(deg + 1);
@@ -159,7 +159,9 @@ int main()
         return dla::norm(N, res) / dla::norm(N, b);
     }();
 
-    std::cout << "Relative residual norm ||A u - b|| / ||b|| = " << res_norm << std::endl;
+    CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
+
+    std::cout << "Helmholtz Residual ||A u - b|| / ||b|| ~ " << res_norm << std::endl;
 
     // save the solution to a file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);

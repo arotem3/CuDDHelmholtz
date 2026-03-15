@@ -97,17 +97,17 @@ __device__ static double a(const double X[2])
 int main()
 {
     const int deg = 3;                       // polynomial degree of basis functions
-    const int nx = 64;                       // number of elements along each direction. Mesh will have nx^2 elements
+    const int nx = 64, ny = 64;              // number of elements along each direction. Mesh will have nx^2 elements
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
     const SolverParams opts = {
         .maxit = 100'000,                    // maximum number of iterations of MINRES
-        .rtol = 1e-6,                        // relative tolerance. MINRES stops when ||b-A*x|| < tol*||b||
+        .rtol = 1e-5,                        // relative tolerance. MINRES stops when ||b-A*x|| < tol*||b||
         .verbose = SolverParams::ProgressBar // verbosity level: ProgressBar, Iteration, or Silent
     };
 
     // Assemble the mesh
-    Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
+    Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, ny, -1.0, 1.0);
 
     // Construct 1D basis functions. On each element, the 2D basis functions are
     // tensor products of these 1D basis functions.
@@ -159,6 +159,7 @@ int main()
     // solve a([u, v], phi) = b(phi)
     std::cout << "\nsolving with MINRES ... \n";
     auto out = minres(N, u, A, b, opts);
+    CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
 
     // save solution and collocation nodes to file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
