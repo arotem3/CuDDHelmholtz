@@ -18,9 +18,9 @@
  *      a(v, phi) = (grad v, grad phi)
  *
  * And the linear operator b is defined as b(phi) = (f, phi) - (grad g, grad phi),
- * 
+ *
  * In cuddh, a is computed via StiffnessMatrix::action.
- * 
+ *
  * To compile & run this program:
  *  (1) From the CuDDHelmholtz directory, compile the library:
  *      cmake .
@@ -35,13 +35,13 @@
  * format.
  *
  * This format can be read and visualized, for example, in Python using numpy and matplotlib via:
- *      
+ *
  *      xy = numpy.fromfile("solution/xy.0000", order='F')
  *      xy = xy.reshape(2, -1)
  *      x, y = xy[0], xy[1]
  *
  *      u = numpy.fromfile("solution/poisson.0000")
- * 
+ *
  *      matplotlib.pyplot.tricontourf(x, y, u)
  */
 
@@ -51,19 +51,19 @@
 using namespace cuddh;
 
 /// @brief Bilinear form (grad u, grad phi) where phi are in H1_0.
-class Poisson : public Operator
+class Poisson : public Operator<double>
 {
 public:
-    Poisson(const H1Space2D& fem, const TraceSpace2D& fs);
+    Poisson(const H1Space2D &fem, const TraceSpace2D &fs);
 
-    void action(const double * x, double * y) const;
+    void action(const double *x, double *y) const;
 
-    void action(double c, const double * x, double * y) const;
+    void action(double c, const double *x, double *y) const;
 
 private:
     const int ndof;
     StiffnessMatrix a;
-    const TraceSpace2D& fs;
+    const TraceSpace2D &fs;
 };
 
 __device__ static double f(const double X[2])
@@ -85,18 +85,19 @@ int main()
 {
     const int deg = 3; // polynomial degree of basis functions
     const int nx = 15; // number of elements along each direction. Mesh will have nx^2 elements
-    
-    const int gmres_m = 20; // number of vectors in the Krylov space used in each iteration of GMRES
-    const int gmres_maxit = 20; // maximum number of iterations of GMRES
-    const double gmres_tol = 1e-6; // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
-    const int gmres_verbose = 1; // 0: silent, 1: progress bar, 2: one line per iteration
-    
+
+    SolverParams opts = {
+        .maxit = 1000,                       // maximum number of minres iterations
+        .rtol = 1e-6,                        // relative tolerance. minres stops when ||b-A*x|| < tol*||b||
+        .verbose = SolverParams::ProgressBar // Silent, ProgressBar, Iterations
+    };
+
     // Assemble the mesh
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
 
     // Construct 1D basis functions. On each element, the 2D basis functions are
     // tensor products of these 1D basis functions.
-    Basis basis(deg+1);
+    Basis basis(deg + 1);
 
     // The mesh and 1D basis functions are combined in H1Space2D to define the
     // total global degrees of freedom of the problem.
@@ -123,62 +124,51 @@ int main()
     host_device_dvec _b(ndof);
     host_device_dvec _G(ndof);
 
-    host_device_dvec _q(fdof);
-    host_device_dvec _y(fdof);
-
-    double * u = _u.device_write(); // the solution vector
-    double * b = _b.device_write(); // the right hand side: (f, phi) - (grad g, grad phi)
-    double * q = _q.device_write(); // projection of g onto face space
-    double * y = _y.device_write(); // <g, phi>
-    double * G = _G.device_write(); // the extension of q to H1
+    double *u = _u.device_write(); // the solution vector
+    double *b = _b.device_write(); // the right hand side: (f, phi) - (grad g, grad phi)
+    double *G = _G.device_write(); // the extension of q to H1
 
     // linear system
     Poisson A(fem, fs);
 
     // set up right hand side
-    LinearFunctional l(fem);
-    l.action(1.0, [] __device__ (const double X[2]) -> double {return f(X);}, b); // (f, phi)
+    l2_project(b, MassMatrix(fem), [] __device__(const double X[2]) -> double { return f(X); }); // (f, phi)
     fs.orth(b); // zero out boundary terms
 
-    // We project g onto the TraceSpace2D by solving <q, phi> = <g, phi> for the projection q.
-    FaceLinearFunctional fl(fs);
-    fl.action([] __device__ (const double X[2]) -> double {return g(X);}, y); // y <- <g, phi>
+    // evaluate g on the boundary faces
+    auto _q = trace(fs, [] __device__(const double X[2]) -> double { return g(X); });
+    double *q = thrust::raw_pointer_cast(_q.data());
 
-    FaceMassMatrix m(fs);
-    DiagInvFaceMassMatrix p(fs); // we can precondition the solve with a diagonal approximate inverse.
-    auto out = gmres(fdof, q, &m, y, &p, 5, 10, 1e-12); // solve <q, phi> = <g, phi>
-
-    fs.prolong(q, G); // extend q to H1
-
+    fs.prolong(q, G);     // extend q to H1
     A.action(-1.0, G, b); // b <- b - (grad G, grad phi)
 
-    // solve for u
-    std::cout << "\nsolving with GMRES(" << gmres_m << ") ... \n";
-    out = gmres(ndof, u, &A, b, gmres_m, gmres_maxit, gmres_tol, gmres_verbose);
+    // solve for u (without boundary conditions)
+    std::cout << "\nsolving with minres... \n";
+    auto out = minres(ndof, u, A, b, opts);
 
-    // add G to u
-    axpby(ndof, 1.0, G, 1.0, u); // u <- u + G
+    // add G to u (now u satisfies Dirichlet BCs)
+    dla::axpby(ndof, 1.0, G, 1.0, u); // u <- u + G
 
     // copy to host
-    const double * h_u = _u.host_read();
+    const double *h_u = _u.host_read();
 
     // save solution and collocation nodes to file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
-    
+
     const char xy_file[] = "solution/xy.0000";
     const char sol_file[] = "solution/poisson.0000";
     const char res_file[] = "solution/residuals.0000";
-    
-    if (to_file(xy_file, 2*ndof, xy.data()))
+
+    if (to_file(xy_file, 2 * ndof, xy.data()))
         std::cout << "Coordinates written to: " << xy_file << "\n";
     else
         std::cerr << "Failed to write coordinates to: " << xy_file << "\n";
-    
+
     if (to_file(sol_file, ndof, h_u))
         std::cout << "Solution written to: " << sol_file << "\n";
     else
         std::cerr << "Failed to write solution to: " << sol_file << "\n";
-    
+
     if (to_file(res_file, out.res_norm.size(), out.res_norm.data()))
         std::cout << "Residuals written to: " << res_file << "\n";
     else
@@ -187,18 +177,15 @@ int main()
     return 0;
 }
 
-Poisson::Poisson(const H1Space2D& fem, const TraceSpace2D& fs_)
-    : ndof{fem.size()},
-      a(fem),
-      fs{fs_} {}
+Poisson::Poisson(const H1Space2D &fem, const TraceSpace2D &fs_) : ndof{fem.size()}, a(fem), fs{fs_} {}
 
-void Poisson::action(double c, const double * x, double * y) const
+void Poisson::action(double c, const double *x, double *y) const
 {
     a.action(c, x, y);
     fs.orth(y);
 }
 
-void Poisson::action(const double * x, double * y) const
+void Poisson::action(const double *x, double *y) const
 {
     a.action(x, y);
     fs.orth(y);
