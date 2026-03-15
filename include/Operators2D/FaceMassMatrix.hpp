@@ -10,7 +10,7 @@
 namespace cuddh
 {
     /// @brief m(u, phi) = (a(x) * u, phi) for all phi in a TraceSpace2D
-    class FaceMassMatrix : public Operator
+    class FaceMassMatrix : public Operator<double>
     {
     public:
         FaceMassMatrix(const TraceSpace2D &fs, const double *d_a = nullptr);
@@ -26,10 +26,7 @@ namespace cuddh
         void action(const double *x, double *y) const override;
 
         /// @brief returns the (diagonal) mass matrix as VectorWrapper of managed memory
-        VectorWrapper<const double> to_device() const
-        {
-            return reshape(_m, _m.size());
-        }
+        VectorWrapper<const double> to_device() const { return reshape(_m, _m.size()); }
 
     private:
         thrust::universal_vector<double> _m;
