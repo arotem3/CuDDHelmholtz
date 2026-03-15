@@ -34,7 +34,6 @@
 #include "include/Operators2D/FaceMassMatrix.hpp"
 #include "include/Operators2D/MassMatrix.hpp"
 #include "include/Operators2D/StiffnessMatrix.hpp"
-#include "include/Operators2D/WaveEquation.hpp"
 #include "include/Operators2D/WaveHoltz.hpp"
 #include "include/Operators3D/FaceMassMatrix3D.hpp"
 #include "include/Operators3D/MassMatrix3D.hpp"
