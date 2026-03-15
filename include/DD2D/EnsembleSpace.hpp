@@ -29,72 +29,42 @@ namespace cuddh
         EnsembleSpace(const H1Space2D &fem, int n_spaces, const int *element_labels);
 
         /// @brief returns the number of subspaces
-        int size() const
-        {
-            return n_spaces;
-        }
+        int size() const { return n_spaces; }
 
         /// @brief returns the global indices of the subspace degrees of
         /// freedom. That is, global_indices(i, p) is the global index of the
         /// i-th degree of freedom of subspace p.
-        const_imat_wrapper global_indices(MemorySpace m) const
-        {
-            return reshape(gI.read(m), mx_ndof, n_spaces);
-        }
+        const_imat_wrapper global_indices(MemorySpace m) const { return reshape(gI.read(m), mx_ndof, n_spaces); }
 
         /// @brief returns the sizes of the subspaces. That is, sizes(p) is the
         /// size of subspace p.
-        const_ivec_wrapper sizes(MemorySpace m) const
-        {
-            return reshape(s_dof.read(m), n_spaces);
-        }
+        const_ivec_wrapper sizes(MemorySpace m) const { return reshape(s_dof.read(m), n_spaces); }
 
         /// @brief returns the maximum size of any subspace. That is, the maximum of sizes.
-        int max_size() const
-        {
-            return mx_ndof;
-        }
+        int max_size() const { return mx_ndof; }
 
         /// @brief returns the elements in each subspace. That is elements(el, p)
         /// is the element index of the el-th element in subspace p.
-        const_imat_wrapper elements(MemorySpace m) const
-        {
-            return reshape(elems.read(m), mx_elems, n_spaces);
-        }
+        const_imat_wrapper elements(MemorySpace m) const { return reshape(elems.read(m), mx_elems, n_spaces); }
 
         /// @brief returns the number of elements in each subspace. That is
         /// n_elems(p) is the number of elements in subspace p.
-        const_ivec_wrapper n_elems(MemorySpace m) const
-        {
-            return reshape(s_elems.read(m), n_spaces);
-        }
+        const_ivec_wrapper n_elems(MemorySpace m) const { return reshape(s_elems.read(m), n_spaces); }
 
         /// @brief returns the maximum number of elements in any subspace. That is, the maximum of n_elems.
-        int max_n_elem() const
-        {
-            return mx_elems;
-        }
+        int max_n_elem() const { return mx_elems; }
 
         /// @brief returns the boundary faces of each subspace.
         /// That is faces(f, p) is the face index of the f-th boundary face of
         /// subspace p.
-        const_imat_wrapper faces(MemorySpace m) const
-        {
-            return reshape(_faces.read(m), mx_faces, n_spaces);
-        }
+        const_imat_wrapper faces(MemorySpace m) const { return reshape(_faces.read(m), mx_faces, n_spaces); }
 
         /// @brief returns the number of boundary faces in each subspace. That
         /// is n_faces(p) is the number of faces in subspace p.
-        const_ivec_wrapper n_faces(MemorySpace m) const
-        {
-            return reshape(s_faces.read(m), n_spaces);
-        }
+        const_ivec_wrapper n_faces(MemorySpace m) const { return reshape(s_faces.read(m), n_spaces); }
 
         /// @brief returns the maximum number of faces in any subspace.  That is, the maximum of n_faces.
-        int max_n_faces() const
-        {
-            return mx_faces;
-        }
+        int max_n_faces() const { return mx_faces; }
 
         /// @brief returns the indices of subspace degrees of freedom
         /// corresponding to the local element degrees of freedom. Namely,
@@ -118,26 +88,17 @@ namespace cuddh
         /// @brief returns the number of face spaces degrees of freedom
         /// associated with each space. That is fsizes(p) is the number of
         /// degrees of freedom in the face space of subspace p.
-        const_ivec_wrapper fsizes(MemorySpace m) const
-        {
-            return reshape(s_fdof.read(m), n_spaces);
-        }
+        const_ivec_wrapper fsizes(MemorySpace m) const { return reshape(s_fdof.read(m), n_spaces); }
 
         /// @brief returns the maximum number of face space degrees of freedom. That is, the maximum of fsizes.
-        int max_fsize() const
-        {
-            return mx_fdof;
-        }
+        int max_fsize() const { return mx_fdof; }
 
         /// @brief connectivity_map(:, k) = [p, q, i, j] indicating the
         /// subspaces p and q share a face degree of freedom, and that degree of
         /// freedom corresponds to the i-th face DOF of subspace p, and the j-th
         /// face DOF of subspace q. The map is sorted with respect to p, and
         /// does not store the symmetric set [q, p, j, i].
-        auto connectivity_map(MemorySpace m) const
-        {
-            return reshape(cmap.read(m), n_shared_dofs);
-        }
+        auto connectivity_map(MemorySpace m) const { return reshape(cmap.read(m), n_shared_dofs); }
 
     private:
         const int n_spaces;

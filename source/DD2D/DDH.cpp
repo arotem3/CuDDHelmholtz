@@ -183,9 +183,10 @@ static void ddh_action(
             if (x && tid < ndof)
             {
                 const int g_idx = gI(tid, subsp);
+                const float weight = punity(tid, subsp);
 
-                F.x = x[g_idx];
-                F.y = x[g_ndof + g_idx];
+                F.x = weight * x[g_idx];
+                F.y = weight * x[g_ndof + g_idx];
             }
 
             if (d_lambda && tid < fdof)
@@ -482,6 +483,7 @@ DDSubstructedProblem::DDSubstructedProblem(double omega_, const double *h_a, con
     DD_gridfun(a.data(), h_a, &efem);
 
     std::tie(n_lambda, n_dupl) = lambda_dofs(_B, _T, efem, omega, a);
+
     _partition_of_unity = partition_of_unity(fem, efem);
 
     // time step determined by CFL condition: dt = C * h / (n_basis * n_basis * max_vel)
@@ -519,18 +521,20 @@ void DDSubstructedProblem::action(const double *fem_in, double *fem_out, const f
                lambda_out);
 }
 
-void DDSubstructedProblem::action(const float *d_lambda, float *d_update) const
+void DDSubstructedProblem::action(const float *x, float *y) const
 {
-    action((const double *)nullptr, (double *)nullptr, d_lambda, d_update);
-    dla::axpby(2 * n_lambda, 1.0f, d_lambda, -1.0f, d_update);
+    dla::zeros(2 * n_lambda, y);
+    action((const double *)nullptr, (double *)nullptr, x, y);
+    dla::axpby(2 * n_lambda, 1.0f, x, -1.0f, y);
 }
 
 void DDSubstructedProblem::rhs(const double *f, float *b) const
 {
+    dla::zeros(2 * n_lambda, b);
     action(f, (double *)nullptr, (const float *)nullptr, b);
 }
 
-void DDSubstructedProblem::postprocess(const float *d_lambda, const double *f, double *y) const
+void DDSubstructedProblem::postprocess(const float *lambda, const double *f, double *y) const
 {
-    action(f, y, d_lambda, (float *)nullptr);
+    action(f, y, lambda, (float *)nullptr);
 }

@@ -83,8 +83,8 @@ namespace cuddh
 
         const EnsembleSpace &efem;
 
-        thrust::universal_vector<int2> _B;  // B(o, face_index, subspace) = global lambda and dual indices
-        thrust::universal_vector<float> _T; // T = a * W.omega * (mi + mj) used in lambda update
+        thrust::universal_vector<int2> _B;
+        thrust::universal_vector<float> _T;
 
         DDStiffnessMatrix S;
         thrust::universal_vector<float2> alpha_beta; // (alpha, beta) time stepping coefficients
