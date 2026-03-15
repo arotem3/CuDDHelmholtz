@@ -1,16 +1,16 @@
 /**
  * @file WaveHoltz.cpp
  * @brief Example driver for solving the Helmholtz equation with the WaveHoltz solver.
- * 
+ *
  * @details This file is a driver for solving the Helmholtz equation with
  * approximate absorbing boundary conditions:
- * 
+ *
  *      -div(grad U) - omega^2 a^2(x) U == f    in  D := [-1, 1]^3
  *      i a(x) omega U + dU/dn == 0             on boundary of D
  *
  * Here omega is the frequency. We assume f is real valued, and U is complex
  * valued.
- * 
+ *
  * The WaveHoltz3D class implements the finite element discretization of this equation,
  * but is actually solving the wave eqution at each iteration.
  *
@@ -20,19 +20,20 @@
  * in binary format.
  */
 
+#include <format>
+
 #include "cuddh.hpp"
 #include "examples.hpp"
-#include <format>
 
 using namespace cuddh;
 
 __device__ static double f(double3 x, double omega)
 {
     double s = omega * omega;
-    double r1 = (x.x-0.5)*(x.x-0.5) + x.y * x.y + x.z * x.z;
+    double r1 = (x.x - 0.5) * (x.x - 0.5) + x.y * x.y + x.z * x.z;
     double F1 = std::pow(s / M_PI, 1.5) * std::exp(-s * r1);
 
-    double r2 = (x.x+0.7)*(x.x+0.7) + (x.y+0.7) * (x.y+0.7) + x.z * x.z;
+    double r2 = (x.x + 0.7) * (x.x + 0.7) + (x.y + 0.7) * (x.y + 0.7) + x.z * x.z;
     double F2 = std::pow(s / M_PI, 1.5) * std::exp(-s * r2);
 
     return F1 + F2;
@@ -48,14 +49,16 @@ constexpr double maxvel = 5.0; // maximum reciprocal of alpha
 
 int main()
 {
-    const int deg = 2; // polynomial degree
-    const int nx = 64; // number of elements in x direction
+    const int deg = 2;                       // polynomial degree
+    const int nx = 32;                       // number of elements in x direction
     const double omega = 2 * M_PI * nx / 10; // time-harmonic frequency
 
-    const int gmres_m = 20; // GMRES restart parameter
-    const int gmres_maxit = 100; // maximum number of GMRES iterations
-    const double gmres_tol = 1e-6; // GMRES tolerance
-    const int gmres_verbose = 1; // GMRES verbosity level
+    const SolverParams opts = {
+        .maxit = 1000,                       // maximum number of gmres iterations
+        .rtol = 1e-5,                        // relative tolerance. gmres stops when ||b - Ax|| <= rtol * ||b||
+        .verbose = SolverParams::ProgressBar // Silent, ProgressBar, Iteration
+    };
+    const int kdim = 20; // dimension of Krylov space in gmres
 
     // Create a uniform rectangular mesh
     Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, nx, -1.0, 1.0, nx, -1.0, 1.0);
@@ -67,23 +70,23 @@ int main()
     H1Space3D fem(mesh, basis);
 
     const int ndof = fem.size(); // number of degrees of freedom
-    const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
+    const int N = 2 * ndof;      // total degrees of freedom in [u, v] (U := u + i v)
 
-    auto boundary_faces = mesh.get_boundary_faces(); // identify boundary faces
+    auto boundary_faces = mesh.get_boundary_faces();             // identify boundary faces
     TraceSpace3D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
 
     const int fdof = fs.size(); // number of degrees of freedom in trace space
 
-    host_device_dvec U(N); // solution vector
-    host_device_dvec b(N); // forcing term
-    host_device_dvec Gb(N); // WaveHoltz G applied to b
+    host_device_dvec U(N);     // solution vector
+    host_device_dvec b(N);     // forcing term
+    host_device_dvec Gb(N);    // WaveHoltz G applied to b
     host_device_dvec a2(ndof); // variable coefficient on collocation points
-    host_device_dvec a(fdof); // variable coefficient on trace space
+    host_device_dvec a(fdof);  // variable coefficient on trace space
 
-    double *d_U = U.device_write(); // device pointer to solution vector
-    double *d_b = b.device_write(); // device pointer to right-hand side vector
+    double *d_U = U.device_write();   // device pointer to solution vector
+    double *d_b = b.device_write();   // device pointer to right-hand side vector
     double *d_a2 = a2.device_write(); // device pointer to variable coefficient
-    double *d_a = a.device_write(); // device pointer to variable coefficient on trace space
+    double *d_a = a.device_write();   // device pointer to variable coefficient on trace space
     double *d_Gb = Gb.device_write(); // device pointer to G applied to b
 
     // compute b = (f, phi)
@@ -91,7 +94,13 @@ int main()
     l2_project(M, [=] __device__(double3 x) -> double { return f(x, omega); }, d_b); // compute right-hand side
 
     // compute variable coefficient
-    gridfunc(fem, [=] __device__(double3 x) -> double { double ax = alpha(x); return ax*ax; }, d_a2); // compute variable coefficient
+    gridfunc(
+        fem,
+        [=] __device__(double3 x) -> double {
+            double ax = alpha(x);
+            return ax * ax;
+        },
+        d_a2); // compute variable coefficient
 
     // compute trace of the variable coefficient
     trace(fs, [=] __device__(double3 x) -> double { return alpha(x); }, d_a);
@@ -103,7 +112,8 @@ int main()
 
     // Peek at the last CUDA error without resetting it
     cudaError_t err = cudaPeekAtLastError();
-    if (err != cudaSuccess) {
+    if (err != cudaSuccess)
+    {
         std::cerr << "CUDA peek error after W.G: " << cudaGetErrorString(err) << std::endl;
     }
 
@@ -114,7 +124,19 @@ int main()
               << "\t#dof = " << 2 * ndof << std::endl;
 
     // Solve the system using GMRES
-    solver_out out = gmres(N, d_U, &W, d_Gb, gmres_m, gmres_maxit, gmres_tol, gmres_verbose);
+    SolverResults out = gmres(N, d_U, W, d_Gb, kdim, nullptr, opts);
+
+    double res = [&]() {
+        Helmholtz3D A(omega, d_a2, d_a, fem, fs);
+
+        thrust::device_vector<double> Au(N);
+        double *d_Au = thrust::raw_pointer_cast(Au.data());
+        A.action(d_U, d_Au);
+
+        return dla::dist(N, d_Au, d_b) / dla::norm(N, d_b);
+    }();
+
+    std::cout << std::format("Helmholtz residual |b - Ax| / |b| ~ {:.2e}", res) << std::endl;
 
     // save the solution to a file
     auto coo = fem.physical_coordinates(MemorySpace::HOST);
