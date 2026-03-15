@@ -18,9 +18,9 @@
  *      a(v, phi) = (grad v, grad phi)
  *
  * And the linear operator b is defined as b(phi) = (f, phi) - (grad g, grad phi),
- * 
+ *
  * In cuddh, a is computed via StiffnessMatrix::action.
- * 
+ *
  * To compile & run this program:
  *  (1) From the CuDDHelmholtz directory, compile the library:
  *      cmake .
@@ -35,14 +35,14 @@
  * format.
  *
  * This format can be read and visualized, for example, in Python using numpy and matplotlib via:
- *      
+ *
  *      x = numpy.fromfile("solution/x.0000", order='F')
  *      x = x.reshape(3, -1)
  *      x, y, z = x[0], x[1], x[2]
  *
  *      u = numpy.fromfile("solution/poisson.0000")
- * 
- *      
+ *
+ *
  */
 
 #include "cuddh.hpp"
@@ -51,16 +51,16 @@
 using namespace cuddh;
 
 /// @brief Bilinear form (grad u, grad phi) where phi are in H1_0.
-class Poisson3D : public Operator
+class Poisson3D : public Operator<double>
 {
 public:
-    Poisson3D(const H1Space3D& fem, const TraceSpace3D& fs);
+    Poisson3D(const H1Space3D &fem, const TraceSpace3D &fs);
 
-    void action(const double * x, double * y) const;
-    void action(double c, const double * x, double * y) const;
+    void action(const double *x, double *y) const;
+    void action(double c, const double *x, double *y) const;
 
 private:
-    const TraceSpace3D& tr;
+    const TraceSpace3D &tr;
     StiffnessMatrix3D a;
 };
 
@@ -79,17 +79,18 @@ int main()
     const int deg = 3; // polynomial degree of basis functions
     const int nx = 10; // number of elements in each direction. Mesh will have nx^3 elements
 
-    const int gmres_m = 20; // number of vectors in the Krylov space used in each iteration of GMRES
-    const int gmres_maxit = 100; // maximum number of iterations of GMRES
-    const double gmres_tol = 1e-10; // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
-    const int gmres_verbose = 1; // 0: silent, 1: progress bar, 2: one line per iteration
+    SolverParams opts = {
+        .maxit = 1000,                        // maximum number of iterations of minres
+        .rtol = 1e-10,                        // relative tolerance. minres stops when ||b-A*x|| < tol*||b||
+        .verbose = SolverParams::ProgressBar, // Silent, ProgressBar, Iteration
+    };
 
     // create the mesh
     Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, nx, -1.0, 1.0, nx, -1.0, 1.0);
 
     // Construct 1D basis functions. On each element, the 3D basis functions are
     // tensor products of these 1D basis functions.
-    Basis basis(deg+1);
+    Basis basis(deg + 1);
 
     // The mesh and 1D basis functions are combined in H1Space3D to define the
     // total global degrees of freedom of the problem.
@@ -104,7 +105,7 @@ int main()
     // identify the boundary faces in the mesh in order to define the TraceSpace3D
     // and FaceMassMatrix
     auto boundary_faces = mesh.get_boundary_faces();
-    
+
     // The TraceSpace3D is a subspace of the H1Space3D used to identify the degrees
     // of freedom needed on the boundary of the domain. In particular, we use
     // this object to restrict the solution to H1_0.
@@ -118,36 +119,36 @@ int main()
 
     host_device_dvec _q(fdof); // projection of g onto face space
 
-    double * u = _u.device_write();
-    double * b = _b.device_write();
-    double * q = _q.device_write();
-    double * G = _G.device_write();
+    double *u = _u.device_write();
+    double *b = _b.device_write();
+    double *q = _q.device_write();
+    double *G = _G.device_write();
 
     // linear system
     Poisson3D A(fem, tr);
 
     // set the right hand side
     MassMatrix3D M(fem);
-    l2_project(M, [] __device__ (double3 r) { return f(r); }, b); // (f, phi)
-    tr.orth(b); // zero out the boundary terms
+    l2_project(M, [] __device__(double3 r) { return f(r); }, b); // (f, phi)
+    tr.orth(b);                                                  // zero out the boundary terms
 
-    trace(tr, [] __device__ (double3 r) { return g(r); }, q); // evaluate on the boundary
+    trace(tr, [] __device__(double3 r) { return g(r); }, q); // evaluate on the boundary
 
-    tr.prolong(q, G); // extend q to H1
+    tr.prolong(q, G);     // extend q to H1
     A.action(-1.0, G, b); // b = b - (grad G, grad phi)
 
     // solve the linear system
-    std::cout << "\nsolving with gmres(" << gmres_m << ")...\n";
-    auto out = gmres(ndof, u, &A, b, gmres_m, gmres_maxit, gmres_tol, gmres_verbose);
+    std::cout << "\nsolving with minres...\n";
+    auto out = minres(ndof, u, A, b, opts);
 
     // add G to u
-    axpby(ndof, 1.0, G, 1.0, u);
+    dla::axpby(ndof, 1.0, G, 1.0, u);
 
     // compare against exact
     host_device_dvec _ue(ndof);
-    double * ue = _ue.device_write();
+    double *ue = _ue.device_write();
     auto x = fem.physical_coordinates(MemorySpace::DEVICE);
-    forall(ndof, [=] __device__ (int i) { ue[i] = g(x[i]); });
+    forall(ndof, [=] __device__(int i) { ue[i] = g(x[i]); });
     std::cout << "\nL2 error ~ " << l2_dist(M, u, ue) << "\n\n";
 
     // copy to host
@@ -168,18 +169,15 @@ int main()
     return 0;
 }
 
-Poisson3D::Poisson3D(const H1Space3D& fem, const TraceSpace3D& tr)
-    : tr(tr), a(fem)
-{
-}
+Poisson3D::Poisson3D(const H1Space3D &fem, const TraceSpace3D &tr) : tr(tr), a(fem) {}
 
-void Poisson3D::action(const double * x, double * y) const
+void Poisson3D::action(const double *x, double *y) const
 {
     a.action(x, y);
     tr.orth(y);
 }
 
-void Poisson3D::action(double c, const double * x, double * y) const
+void Poisson3D::action(double c, const double *x, double *y) const
 {
     a.action(c, x, y);
     tr.orth(y);
