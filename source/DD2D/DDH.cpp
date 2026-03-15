@@ -118,7 +118,6 @@ static void ddh_action(
     constexpr int wh_maxit = 20;
 
     const int n_domains = efem->size();
-    const int n_dupl = B.shape(0);
 
     auto gI = efem->global_indices(MemorySpace::DEVICE);   // global solution DOF associated with subdomain DOF
     auto sI = efem->subspace_indices(MemorySpace::DEVICE); // mapping from (i,j)-node on element to subspace DOF
@@ -195,7 +194,7 @@ static void ddh_action(
 
             if (d_lambda && tid < fdof)
             {
-                for (int o = 0; o < n_dupl; ++o)
+                for (int o = 0; o < 2; ++o)
                 {
                     int idx = B(o, tid, subsp).x;
                     if (idx >= 0)
@@ -283,7 +282,7 @@ static void ddh_action(
 
         // update Lambdas
         if (d_update && tid < fdof)
-            for (int o = 0; o < n_dupl; ++o)
+            for (int o = 0; o < 2; ++o)
             {
                 const auto [i, j] = B(o, tid, subsp);
 
@@ -306,7 +305,7 @@ static void ddh_action(
     });
 }
 
-static std::pair<int, int> lambda_dofs(auto &B, auto &T, const EnsembleSpace &efem, double omega, auto a)
+static int lambda_dofs(auto &B, auto &T, const EnsembleSpace &efem, double omega, auto a)
 {
     const int n_domains = efem.size();
     const int mx_fdof = efem.max_fsize();
@@ -314,28 +313,13 @@ static std::pair<int, int> lambda_dofs(auto &B, auto &T, const EnsembleSpace &ef
     auto cmap = efem.connectivity_map(MemorySpace::HOST);
     const int n_shared = cmap.shape(0);
 
-    int n_dupl = 1;
-    std::vector<std::unordered_map<int, int>> counter(n_domains);
-
-    for (const auto &dof : cmap)
-    {
-        for (int i = 0; i < 2; ++i)
-        {
-            int subspace = dof.subspaces[i];
-            int face_index = dof.local_dof_indices[i];
-            int &count = counter[subspace][face_index];
-            count++;
-            n_dupl = std::max(n_dupl, count);
-        }
-    }
-
-    B.resize(n_dupl * mx_fdof * n_domains);
-    T.resize(n_dupl * mx_fdof * n_domains);
+    B.resize(2 * mx_fdof * n_domains);
+    T.resize(2 * mx_fdof * n_domains);
     thrust::fill(B.begin(), B.end(), int2{-1, -1});
     thrust::fill(T.begin(), T.end(), 0.0);
 
-    auto b = reshape(B, n_dupl, mx_fdof, n_domains);
-    auto t = reshape(T, n_dupl, mx_fdof, n_domains);
+    auto b = reshape(B, 2, mx_fdof, n_domains);
+    auto t = reshape(T, 2, mx_fdof, n_domains);
 
     int n_lambda = 0;
     int k = 0;
@@ -343,7 +327,7 @@ static std::pair<int, int> lambda_dofs(auto &B, auto &T, const EnsembleSpace &ef
     {
         for (const int s : {0, 1})
         {
-            for (int o = 0; o < n_dupl; ++o)
+            for (int o = 0; o < 2; ++o)
             {
                 const int subspace = dof.subspaces[s];
                 const int face_index = dof.local_dof_indices[s];
@@ -363,7 +347,7 @@ static std::pair<int, int> lambda_dofs(auto &B, auto &T, const EnsembleSpace &ef
     cuddh_verify(n_lambda == 2 * n_shared,
                  printf("DDH error: lambda dof computation mismatch (%d != %d)\n", n_lambda, 2 * n_shared));
 
-    return {n_lambda, n_dupl};
+    return n_lambda;
 }
 
 // map a global dofs to the subdomain dofs
@@ -490,7 +474,7 @@ DDSubstructedProblem<scalar_t>::DDSubstructedProblem(double omega_, const double
     auto a = reshape(_a, mx_dof, n_domains);
     DD_gridfun(a.data(), h_a, &efem);
 
-    std::tie(n_lambda, n_dupl) = lambda_dofs(_B, _T, efem, omega, a);
+    n_lambda = lambda_dofs(_B, _T, efem, omega, a);
 
     _partition_of_unity = partition_of_unity<scalar_t>(fem, efem);
 
@@ -506,8 +490,8 @@ template <typename scalar_t>
 void DDSubstructedProblem<scalar_t>::action(const double *fem_in, double *fem_out, const scalar_t *lambda_in,
                                             scalar_t *lambda_out) const
 {
-    auto B = reshape(_B, n_dupl, mx_fdof, n_domains);
-    auto T = reshape(_T, n_dupl, mx_fdof, n_domains);
+    auto B = reshape(_B, 2, mx_fdof, n_domains);
+    auto T = reshape(_T, 2, mx_fdof, n_domains);
 
     auto d_S = S.to_device();
     auto ab = reshape(alpha_beta, DDH_BLOCK_SIZE * DDH_BLOCK_SIZE, n_domains);

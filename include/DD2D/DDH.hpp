@@ -85,7 +85,6 @@ namespace cuddh
         int n_basis;
         int n_domains;
         int n_lambda;
-        int n_dupl;
         int mx_dof;
         int mx_fdof;
         int mx_elem_per_dom;
