@@ -1,5 +1,4 @@
-#ifndef CUDDH_ENSEMBLE_SPACE_HPP
-#define CUDDH_ENSEMBLE_SPACE_HPP
+#pragma once
 
 #include <algorithm>
 #include <array>
@@ -14,7 +13,7 @@ namespace cuddh
     {
         int subspaces[2];
         int local_dof_indices[2];
-        float face_mass;
+        double face_mass;
     };
 
     class EnsembleSpace
@@ -118,11 +117,8 @@ namespace cuddh
         host_device_ivec sI;
         host_device_ivec fI;
         host_device_ivec s_fdof;
-        // host_device_ivec cmap;
         HostDeviceArray<LambdaDof> cmap;
     };
 
     EnsembleSpace partition_uniform_rect(const H1Space2D &fem, int nx, int ny, int max_dof_1d = 16);
 } // namespace cuddh
-
-#endif

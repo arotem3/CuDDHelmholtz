@@ -1,10 +1,10 @@
-#ifndef CUDDH_DDH_HPP
-#define CUDDH_DDH_HPP
+#pragma once
 
 #include <assert.h>
 #include <cuda_runtime.h>
 
 #include <functional>
+#include <type_traits>
 #include <unordered_set>
 
 #include "DDFaceMassMatrix.hpp"
@@ -13,7 +13,6 @@
 #include "EnsembleSpace.hpp"
 #include "HostDeviceArray.hpp"
 #include "LinearSolvers/gcro.hpp"
-#include "LinearSolvers/gmres.hpp"
 #include "Operator.hpp"
 #include "Operators2D/MassMatrix.hpp"
 #include "cuddh_config.hpp"
@@ -23,14 +22,27 @@
 
 namespace cuddh
 {
+    /// @brief Alias to CUDA built-in float2 or double2 depending on T.
+    template <typename T>
+    using scalar2 = std::conditional_t<std::is_same_v<T, float>, float2, double2>;
+
     struct bdr_data
     {
         int lambda_index = -1;
         float mass = 0.0f;
     };
 
-    class DDSubstructedProblem : public Operator<float>
+    /**
+     * @brief Operator for Helmholtz domain decomposition substructured problem.
+     * The scalar type scalar_t is either float or double and is the scalar type in which the the substructured problem
+     * is solved. The original finite element problem is always in double precision.
+     */
+    template <typename scalar_t>
+    class DDSubstructedProblem : public Operator<scalar_t>
     {
+        static_assert(std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
+                      "scalar_t must be float or double");
+
     public:
         /// @brief initialize domain decomposition Helmholtz approximate solver.
         /// @param omega the Helmholtz frequency
@@ -47,17 +59,17 @@ namespace cuddh
         // Compute the right hand side `b` of the substructured problem from the
         // forcing `f` of the Helmholtz problem (i.e. the right hand side of the
         // finite element problem).
-        void rhs(const double *f, float *b) const;
+        void rhs(const double *f, scalar_t *b) const;
 
         // extract the finite element solution `u` from the solution of the
         // substructured problem `lambda` and the Helmholtz forcing `f`.
-        void postprocess(const float *lambda, const double *f, double *u) const;
+        void postprocess(const scalar_t *lambda, const double *f, double *u) const;
 
         /// @brief y <- A * x where A is the approximate inverse of the
         /// Helmholtz equation estimated the domain decomposition method.
-        void action(const float *x, float *y) const override;
+        void action(const scalar_t *x, scalar_t *y) const override;
 
-        void action(float c, const float *x, float *y) const override
+        void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
         {
             cuddh_verify(false, printf("DDSubstructedProblem::action(c, x, y) not implemented\n"));
         }
@@ -65,7 +77,7 @@ namespace cuddh
         void residual(const double *u, const double *f, double *res) const;
 
     private:
-        void action(const double *fem_in, double *fem_out, const float *lambda_in, float *lambda_out) const;
+        void action(const double *fem_in, double *fem_out, const scalar_t *lambda_in, scalar_t *lambda_out) const;
 
     private:
         int g_ndof;
@@ -84,59 +96,62 @@ namespace cuddh
         const EnsembleSpace &efem;
 
         thrust::universal_vector<int2> _B;
-        thrust::universal_vector<float> _T;
+        thrust::universal_vector<scalar_t> _T;
 
-        DDStiffnessMatrix S;
-        thrust::universal_vector<float2> alpha_beta; // (alpha, beta) time stepping coefficients
+        DDStiffnessMatrix<scalar_t> S;
+        thrust::universal_vector<scalar2<scalar_t>> alpha_beta; // (alpha, beta) time stepping coefficients
 
-        thrust::universal_vector<float> _partition_of_unity;
+        thrust::universal_vector<scalar_t> _partition_of_unity;
     };
 
-    class DDH : public Operator<double>
+    extern template class DDSubstructedProblem<float>;
+    extern template class DDSubstructedProblem<double>;
+
+    /**
+     * @brief Domain decomposition Helmholtz solver.
+     * The scalar type scalar_t is either float or double and is the scalar type in which the the substructured problem
+     * is solved. The original finite element problem is always in double precision.
+     */
+    template <typename scalar_t>
+    class DDH
     {
     public:
         DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem, int kdim = 20,
-            int edim = 10, SolverParams opts = {.maxit = 30, .rtol = 1e-6})
+            int edim = 10)
             : ndof{fem.size()},
-              opts{opts},
               F(omega, h_a, fem, efem),
-              solver(F.size(), F, nullptr, kdim),
-              //   solver(F.size(), F, nullptr, kdim, edim),
+              solver(F.size(), F, nullptr, kdim, edim),
               lambda(F.size()),
               Y(F.size())
         {}
 
         int n_lambda() const { return F.size(); }
 
-        void action(const double *x, double *y) const override
+        SolverResults solve(double *x, const double *b, const SolverParams &opts = {}) const
         {
-            thrust::fill(lambda.begin(), lambda.end(), 0.0f);
-            thrust::fill(Y.begin(), Y.end(), 0.0f);
+            thrust::fill(lambda.begin(), lambda.end(), scalar_t(0));
+            thrust::fill(Y.begin(), Y.end(), scalar_t(0));
 
-            float *d_L = thrust::raw_pointer_cast(lambda.data());
-            float *d_Y = thrust::raw_pointer_cast(Y.data());
+            scalar_t *d_L = thrust::raw_pointer_cast(lambda.data());
+            scalar_t *d_Y = thrust::raw_pointer_cast(Y.data());
 
-            F.rhs(x, d_Y);
-            solver.solve(d_L, d_Y, opts);
+            F.rhs(b, d_Y);
+            SolverResults out = solver.solve(d_L, d_Y, opts);
 
-            dla::zeros(2 * ndof, y);
-            F.postprocess(d_L, x, y);
-        }
+            dla::zeros(2 * ndof, x);
+            F.postprocess(d_L, b, x);
 
-        void action(double c, const double *x, double *y) const override
-        {
-            cuddh_verify(false, printf("DDH::action(c, x, y) not implemented\n"));
+            return out;
         }
 
     private:
         const int ndof;
-        const SolverParams opts;
-        DDSubstructedProblem F;
-        // GCRO<float> solver;
-        GMRES<float> solver;
-        mutable thrust::device_vector<float> lambda;
-        mutable thrust::device_vector<float> Y;
+        DDSubstructedProblem<scalar_t> F;
+        GCRO<scalar_t> solver;
+        mutable thrust::device_vector<scalar_t> lambda;
+        mutable thrust::device_vector<scalar_t> Y;
     };
-} // namespace cuddh
 
-#endif
+    extern template class DDH<float>;
+    extern template class DDH<double>;
+} // namespace cuddh

@@ -2,16 +2,18 @@
 
 using namespace cuddh;
 
-static void make_diffmat(float *h_D, const Basis &basis)
+template <typename scalar_t>
+static void make_diffmat(scalar_t *h_D, const Basis &basis)
 {
     const int n_basis = basis.size();
     dmat D(n_basis, n_basis);
     basis.deriv(n_basis, basis.quadrature().x(), D);
     for (int i = 0; i < n_basis * n_basis; ++i)
-        h_D[i] = D[i];
+        h_D[i] = scalar_t(D[i]);
 }
 
-static void geom_factors(float3 *d_G, const H1Space2D &fem, const EnsembleSpace &efem)
+template <typename scalar_t>
+static void geom_factors(SmallMatrix<scalar_t, 2, 2> *d_G, const H1Space2D &fem, const EnsembleSpace &efem)
 {
     const Mesh2D &mesh = fem.mesh();
     const Basis &basis = fem.basis();
@@ -35,8 +37,7 @@ static void geom_factors(float3 *d_G, const H1Space2D &fem, const EnsembleSpace 
 
     auto G = reshape(d_G, n_basis, n_basis, mx_elem, n_domains);
 
-    forall_3d(n_basis, n_basis, mx_elem, n_domains, [=] __device__ (int subsp) mutable -> void
-    {
+    forall_3d(n_basis, n_basis, mx_elem, n_domains, [=] __device__(int subsp) mutable -> void {
         const int n_elem = n_elems[subsp];
 
         const int i = threadIdx.x;
@@ -51,27 +52,34 @@ static void geom_factors(float3 *d_G, const H1Space2D &fem, const EnsembleSpace 
         const double W = w(i) * w(j);
         const double Y_eta = J(1, 1, i, j, g_el);
         const double X_eta = J(0, 1, i, j, g_el);
-        const double Y_xi  = J(1, 0, i, j, g_el);
-        const double X_xi  = J(0, 0, i, j, g_el);
+        const double Y_xi = J(1, 0, i, j, g_el);
+        const double X_xi = J(0, 0, i, j, g_el);
 
         const double detJ = X_xi * Y_eta - X_eta * Y_xi;
-        
-        float3 gij;
-        gij.x =  W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
-        gij.y = -W * (Y_xi  * Y_eta + X_xi  * X_eta) / detJ;
-        gij.z =  W * (Y_xi  * Y_xi  + X_xi  * X_xi)  / detJ;
+
+        SmallMatrix<scalar_t, 2, 2> gij;
+        gij(0, 0) = static_cast<scalar_t>(W * (Y_eta * Y_eta + X_eta * X_eta) / detJ);
+        gij(1, 0) = static_cast<scalar_t>(-W * (Y_xi * Y_eta + X_xi * X_eta) / detJ);
+        gij(1, 1) = static_cast<scalar_t>(W * (Y_xi * Y_xi + X_xi * X_xi) / detJ);
 
         G(i, j, el, subsp) = gij;
     });
 }
 
-DDStiffnessMatrix::DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
+template <typename scalar_t>
+DDStiffnessMatrix<scalar_t>::DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
     : n_basis(fem.basis().size()),
       mx_elem(efem.max_n_elem()),
       n_domains(efem.size()),
       d(n_basis * n_basis),
       g(n_basis * n_basis * mx_elem * n_domains)
 {
-    make_diffmat(d.host_write(), fem.basis());
-    geom_factors(g.device_write(), fem, efem);
+    make_diffmat<scalar_t>(d.host_write(), fem.basis());
+    geom_factors<scalar_t>(g.device_write(), fem, efem);
 }
+
+namespace cuddh
+{
+    template class DDStiffnessMatrix<float>;
+    template class DDStiffnessMatrix<double>;
+} // namespace cuddh

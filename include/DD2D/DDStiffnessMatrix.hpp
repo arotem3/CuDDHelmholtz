@@ -1,22 +1,29 @@
-#ifndef CUDDH_DD_STIFFNESS_MATRIX_HPP
-#define CUDDH_DD_STIFFNESS_MATRIX_HPP
+#pragma once
 
+#include <type_traits>
+
+#include "EnsembleSpace.hpp"
+#include "HostDeviceArray.hpp"
+#include "SmallMatrix.hpp"
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
-#include "EnsembleSpace.hpp"
-
-#include "HostDeviceArray.hpp"
 #include "forall.hpp"
 
 namespace cuddh
 {
+    template <typename scalar_t>
     class DDStiffnessMatrix
     {
+        static_assert(std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
+                      "scalar_t must be float or double");
+
     public:
+        using sym2x2 = SmallMatrix<scalar_t, 2, 2>;
+
         struct DeviceDDStiffnessMatrix
         {
-            MatrixWrapper<const float> D;
-            MatrixWrapper<const float3> G;
+            MatrixWrapper<const scalar_t> D;
+            MatrixWrapper<const sym2x2> G;
         };
 
         DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem);
@@ -32,9 +39,10 @@ namespace cuddh
         int n_basis;
         int mx_elem;
         int n_domains;
-        HostDeviceArray<float> d;
-        HostDeviceArray<float3> g;
+        HostDeviceArray<scalar_t> d;
+        HostDeviceArray<sym2x2> g;
     };
-} // namespace cuddh
 
-#endif
+    extern template class DDStiffnessMatrix<float>;
+    extern template class DDStiffnessMatrix<double>;
+} // namespace cuddh

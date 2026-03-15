@@ -2,7 +2,8 @@
 
 using namespace cuddh;
 
-DDFaceMassMatrix::DDFaceMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
+template <typename scalar_t>
+DDFaceMassMatrix<scalar_t>::DDFaceMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
     : mx_fdof(efem.max_fsize()), n_domains(efem.size()), m(mx_fdof * n_domains)
 {
     const Mesh2D &mesh = fem.mesh();
@@ -31,8 +32,14 @@ DDFaceMassMatrix::DDFaceMassMatrix(const H1Space2D &fem, const EnsembleSpace &ef
                 const double ds = edge->measure(xi);
 
                 const int l = f_inds(i, f, subsp);
-                H(l, subsp) += ds * q.w(i);
+                H(l, subsp) += static_cast<scalar_t>(ds * q.w(i));
             }
         }
     }
 }
+
+namespace cuddh
+{
+    template class DDFaceMassMatrix<float>;
+    template class DDFaceMassMatrix<double>;
+} // namespace cuddh

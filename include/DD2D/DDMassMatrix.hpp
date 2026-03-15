@@ -1,30 +1,30 @@
-#ifndef DDH_DD_MASS_MATRIX_HPP
-#define DDH_DD_MASS_MATRIX_HPP
+#pragma once
 
+#include "EnsembleSpace.hpp"
+#include "HostDeviceArray.hpp"
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
-#include "EnsembleSpace.hpp"
-
-#include "HostDeviceArray.hpp"
 #include "forall.hpp"
 
 namespace cuddh
 {
+    template <typename scalar_t>
     class DDMassMatrix
     {
+        static_assert(std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
+                      "scalar_t must be float or double");
+
     public:
         DDMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem);
 
-        auto to_device() const
-        {
-            return reshape(m.device_read(), mx_dofs, n_domains);
-        }
+        auto to_device() const { return reshape(m.device_read(), mx_dofs, n_domains); }
 
     private:
         int mx_dofs;
         int n_domains;
-        HostDeviceArray<float> m;
+        HostDeviceArray<scalar_t> m;
     };
-} // namespace cuddh
 
-#endif
+    extern template class DDMassMatrix<float>;
+    extern template class DDMassMatrix<double>;
+} // namespace cuddh

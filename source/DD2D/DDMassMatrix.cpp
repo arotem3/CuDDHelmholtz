@@ -2,7 +2,8 @@
 
 using namespace cuddh;
 
-static void mass(float *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
+template <typename scalar_t>
+static void mass(scalar_t *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
 {
     const Mesh2D &mesh = fem.mesh();
     const Basis &basis = fem.basis();
@@ -28,10 +29,9 @@ static void mass(float *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
 
     auto M = reshape(d_m, mx_dofs, n_domains);
 
-    forall_3d(n_basis, n_basis, mx_elem_per_dom, n_domains, [=] __device__ (int subsp) mutable
-    {
+    forall_3d(n_basis, n_basis, mx_elem_per_dom, n_domains, [=] __device__(int subsp) mutable {
         const int s_nel = d_n_elems(subsp);
-        
+
         const int i = threadIdx.x;
         const int j = threadIdx.y;
         const int el = threadIdx.z;
@@ -40,16 +40,21 @@ static void mass(float *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
         {
             const int g_el = d_elems(el, subsp);
             int l = sI(i, j, el, subsp);
-            float val = w(i) * w(j) * detJ(i, j, g_el);
+            scalar_t val = static_cast<scalar_t>(w(i) * w(j) * detJ(i, j, g_el));
             atomicAdd(&M(l, subsp), val);
         }
     });
 }
 
-DDMassMatrix::DDMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
-    : mx_dofs(efem.max_size()),
-      n_domains(efem.size()),
-      m(mx_dofs * n_domains)
+template <typename scalar_t>
+DDMassMatrix<scalar_t>::DDMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
+    : mx_dofs(efem.max_size()), n_domains(efem.size()), m(mx_dofs * n_domains)
 {
-    mass(m.device_write(), fem, efem);
+    mass<scalar_t>(m.device_write(), fem, efem);
 }
+
+namespace cuddh
+{
+    template class DDMassMatrix<float>;
+    template class DDMassMatrix<double>;
+} // namespace cuddh
