@@ -43,7 +43,6 @@
 
 #include <format>
 
-#include "Helmholtz.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
 

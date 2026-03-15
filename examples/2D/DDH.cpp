@@ -51,7 +51,7 @@
  *      # visualize the modulus of U
  *      matplotlib.pyplot.tricontourf(x, y, np.abs(U))
  */
-#include "Helmholtz.hpp"
+
 #include "cuddh.hpp"
 #include "examples.hpp"
 
