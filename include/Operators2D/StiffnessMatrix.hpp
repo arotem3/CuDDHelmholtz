@@ -1,8 +1,12 @@
 #ifndef CUDDH_STIFFNESS_MATRIX_HPP
 #define CUDDH_STIFFNESS_MATRIX_HPP
 
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+
 #include "H1Space2D.hpp"
 #include "Operator.hpp"
+#include "SmallMatrix.hpp"
 #include "linalg.hpp"
 
 namespace cuddh
@@ -11,8 +15,7 @@ namespace cuddh
     class StiffnessMatrix : public Operator<double>
     {
     public:
-        StiffnessMatrix(const H1Space2D &fem);
-        StiffnessMatrix(const H1Space2D &fem, const QuadratureRule &quad);
+        explicit StiffnessMatrix(const H1Space2D &fem);
 
         ~StiffnessMatrix() = default;
 
@@ -30,12 +33,9 @@ namespace cuddh
         const int ndof;
         const int n_elem;
         const int n_basis;
-        const int n_quad;
 
-        host_device_dvec _P;
         host_device_dvec _D;
-
-        host_device_dvec _G;
+        HostDeviceArray<dsym2x2> _G;
     };
 } // namespace cuddh
 

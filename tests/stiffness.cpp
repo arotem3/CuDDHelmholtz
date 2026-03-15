@@ -1,4 +1,5 @@
 #include <cmath>
+#include <random>
 
 #include "test_common.hpp"
 
@@ -22,8 +23,7 @@ __device__ static double L(const double X[2])
     return -6.0 * y * (x5 - 5 * x) - 20.0 * x3 * (y3 - 3.0 * y);
 }
 
-static void run_stiffness_case(TestLogger &summary, const Mesh2D &mesh, const Basis &basis, const QuadratureRule &quad,
-                               const std::string &test_name)
+static void accuracy_test(TestLogger &summary, const Mesh2D &mesh, Basis basis, const std::string &test_name)
 {
     constexpr double tol = 1e-6;
 
@@ -31,24 +31,17 @@ static void run_stiffness_case(TestLogger &summary, const Mesh2D &mesh, const Ba
     const int ndof = fem.size();
 
     host_device_dvec _Af(ndof);
-    host_device_dvec _f(ndof);
     host_device_dvec _Lf(ndof);
 
     double *Af = _Af.device_write();
-    double *f = _f.device_write();
     double *Lf = _Lf.device_write();
 
-    auto x = fem.physical_coordinates(MemorySpace::DEVICE);
+    auto _f = gridfunc(fem, [=] __device__(const double X[2]) { return func(X); });
+    double *f = thrust::raw_pointer_cast(_f.data());
 
-    forall(ndof, [=] __device__(int i) -> void {
-        const double xi[] = {x(0, i), x(1, i)};
-        f[i] = func(xi);
-    });
+    l2_project(Lf, MassMatrix(fem), [=] __device__(const double X[2]) { return L(X); });
 
-    LinearFunctional l(fem, quad);
-    l.action([=] __device__(const double X[2]) -> double { return L(X); }, Lf);
-
-    StiffnessMatrix A(fem, quad);
+    StiffnessMatrix A(fem);
     A.action(f, Af);
 
     const double err = dla::dist(ndof, Af, Lf) / dla::norm(ndof, Lf);
@@ -59,6 +52,48 @@ static void run_stiffness_case(TestLogger &summary, const Mesh2D &mesh, const Ba
                      std::format("relative error {} exceeds tolerance {}", err, tol));
 }
 
+static void symmetry_test(TestLogger &summary, const Mesh2D &mesh, Basis basis, std::string test_name)
+{
+    constexpr double tol = 1e-10;
+
+    H1Space2D fem(mesh, basis);
+    const int ndof = fem.size();
+
+    StiffnessMatrix A(fem);
+
+    host_device_dvec _x(ndof), _y(ndof), _Ax(ndof), _Ay(ndof);
+
+    double *h_x = _x.host_write();
+    double *h_y = _y.host_write();
+
+    std::mt19937 gen(42);
+    std::uniform_int_distribution<> distr(0, 1);
+
+    for (int i = 0; i < ndof; ++i)
+    {
+        h_x[i] = distr(gen);
+        h_y[i] = distr(gen);
+    }
+
+    const double *d_x = _x.device_read();
+    const double *d_y = _y.device_read();
+    double *d_Ax = _Ax.device_write();
+    double *d_Ay = _Ay.device_write();
+
+    A.action(d_x, d_Ax);
+    A.action(d_y, d_Ay);
+
+    double yAx = dla::dot(ndof, d_y, d_Ax);
+    double xAy = dla::dot(ndof, d_x, d_Ay);
+
+    double err = std::abs(yAx - xAy) / std::max(std::abs(yAx), std::abs(xAy));
+    if (err < tol)
+        summary.pass(std::format("stiffness {} symmetry test", test_name));
+    else
+        summary.fail(std::format("stiffness {} symmetry test", test_name),
+                     std::format("relative error in x'Ay - y'Ax = {} exceeds tolerance {}", err, tol));
+}
+
 static void run_stiffness_tests(TestLogger &summary)
 {
     {
@@ -67,8 +102,9 @@ static void run_stiffness_tests(TestLogger &summary)
         for (int p : {6, 7, 8})
         {
             Basis basis(p);
-            QuadratureRule q(p + 2, QuadratureRule::GaussLegendre);
-            run_stiffness_case(summary, mesh, basis, q, std::format("structured mesh p={}", p));
+            std::string name = std::format("structured mesh p={}", p);
+            accuracy_test(summary, mesh, basis, name);
+            symmetry_test(summary, mesh, basis, name);
         }
     }
 
@@ -77,8 +113,9 @@ static void run_stiffness_tests(TestLogger &summary)
         for (int p : {6, 7, 8})
         {
             Basis basis(p);
-            QuadratureRule q(p + 2, QuadratureRule::GaussLegendre);
-            run_stiffness_case(summary, mesh, basis, q, std::format("unstructured mesh p={}", p));
+            std::string name = std::format("unstructured mesh p={}", p);
+            accuracy_test(summary, mesh, basis, name);
+            symmetry_test(summary, mesh, basis, name);
         }
     }
 }

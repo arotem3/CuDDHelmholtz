@@ -2,22 +2,25 @@
 
 namespace cuddh
 {
-    static void setup_geometric_factors(int n_elem, const cuddh::QuadratureRule &quad, const double *_J, double *_G)
+    static HostDeviceArray<dsym2x2> setup_geometric_factors(const Mesh2D &mesh, const QuadratureRule &quad)
     {
-        const int n_quad = quad.size();
+        const int n_elem = mesh.n_elem();
+        const int n = quad.size();
 
-        host_device_dvec _w(n_quad);
-        double *h_w = _w.host_write();
-        for (int i = 0; i < n_quad; ++i)
+        thrust::host_vector<double> h_w(n);
+        for (int i = 0; i < n; ++i)
             h_w[i] = quad.w(i);
-        auto w = reshape(_w.device_read(), n_quad);
+        thrust::device_vector<double> d_w = h_w;
+        auto w = reshape(thrust::raw_pointer_cast(d_w.data()), n);
 
-        auto J = reshape(_J, 2, 2, n_quad, n_quad, n_elem);
-        auto G = reshape(_G, 3, n_quad, n_quad, n_elem);
+        const double *_J = mesh.element_metrics(quad).jacobians(MemorySpace::DEVICE);
+        auto J = reshape(_J, 2, 2, n, n, n_elem);
 
-        forall_2d(n_quad, n_quad, n_elem, [=] __device__(int el) mutable -> void {
-            const int i = threadIdx.x;
-            const int j = threadIdx.y;
+        HostDeviceArray<dsym2x2> g(n * n * n_elem);
+        auto G = reshape(g.device_write(), n, n, n_elem);
+
+        forall_2d(n, n, n_elem, [=] __device__(int el) mutable -> void {
+            const auto [i, j, _] = threadIdx;
 
             const double W = w(i) * w(j);
             const double Y_eta = J(1, 1, i, j, el);
@@ -27,166 +30,92 @@ namespace cuddh
 
             const double detJ = X_xi * Y_eta - X_eta * Y_xi;
 
-            G(0, i, j, el) = W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
-            G(1, i, j, el) = -W * (Y_xi * Y_eta + X_xi * X_eta) / detJ;
-            G(2, i, j, el) = W * (Y_xi * Y_xi + X_xi * X_xi) / detJ;
+            dsym2x2 g_el;
+            g_el(0, 0) = W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
+            g_el(1, 0) = -W * (Y_xi * Y_eta + X_xi * X_eta) / detJ;
+            g_el(1, 1) = W * (Y_xi * Y_xi + X_xi * X_xi) / detJ;
+
+            G(i, j, el) = g_el;
         });
+
+        return g;
     }
 
     StiffnessMatrix::StiffnessMatrix(const H1Space2D &fem_)
-        : fem{fem_},
-          ndof{fem.size()},
-          n_elem{fem.mesh().n_elem()},
-          n_basis{fem.basis().size()},
-          n_quad{fem.mesh().max_element_order() + n_basis},
-          _P(n_quad * n_basis),
-          _D(n_quad * n_basis),
-          _G(3 * n_quad * n_quad * n_elem)
+        : fem{fem_}, ndof{fem.size()}, n_elem{fem.mesh().n_elem()}, n_basis{fem.basis().size()}, _D(n_basis * n_basis)
     {
-        QuadratureRule quad(n_quad, QuadratureRule::GaussLegendre);
-        fem.basis().eval(n_quad, quad.x(), _P.host_write());
-        fem.basis().deriv(n_quad, quad.x(), _D.host_write());
+        const auto &basis = fem.basis();
+        const auto &quad = basis.quadrature();
+        basis.deriv(n_basis, quad.x(), _D.host_write());
 
-        auto &metrics = fem.mesh().element_metrics(quad);
-        const double *J = metrics.jacobians(MemorySpace::DEVICE);
-
-        double *G = _G.device_write();
-
-        setup_geometric_factors(n_elem, quad, J, G);
+        _G = setup_geometric_factors(fem.mesh(), quad);
     }
 
-    StiffnessMatrix::StiffnessMatrix(const H1Space2D &fem_, const QuadratureRule &quad)
-        : fem{fem_},
-          ndof{fem.size()},
-          n_elem{fem.mesh().n_elem()},
-          n_basis{fem.basis().size()},
-          n_quad{quad.size()},
-          _P(n_quad * n_basis),
-          _D(n_quad * n_basis),
-          _G(3 * n_quad * n_quad * n_elem)
+    template <int NB>
+    static void stiffness_action(int n_elem, int n_basis, MatrixWrapper<const double> D,
+                                 TensorWrapper<3, const dsym2x2> G, TensorWrapper<3, const int> I, double c,
+                                 const double *d_u, double *d_out)
     {
-        fem.basis().eval(n_quad, quad.x(), _P.host_write());
-        fem.basis().deriv(n_quad, quad.x(), _D.host_write());
+        cuddh_verify(NB >= n_basis,
+                     printf("stiffness error: stiffness kernel called with NB = %d < n_basis = %d\n", NB, n_basis));
 
-        auto &metrics = fem.mesh().element_metrics(quad);
-        const double *J = metrics.jacobians(MemorySpace::DEVICE);
+        forall_2d(n_basis, n_basis, n_elem, [=] __device__(int el) {
+            __shared__ double s_u[NB][NB];
+            __shared__ double2 s_grad[NB][NB];
+            __shared__ double s_D[NB][NB];
 
-        double *G = _G.device_write();
+            const auto [k, l, _] = threadIdx;
 
-        setup_geometric_factors(n_elem, quad, J, G);
-    }
-
-    template <int NQ>
-    static void stiffness_action(int n_elem, int n_quad, int n_basis, const double *d_P, const double *d_D,
-                                 const double *d_G, const int *d_I, double c, const double *d_u, double *d_out)
-    {
-        auto _P = reshape(d_P, n_quad, n_basis);
-        auto _D = reshape(d_D, n_quad, n_basis);
-
-        auto I = reshape(d_I, n_basis, n_basis, n_elem);
-
-        auto G = reshape(d_G, 3, n_quad, n_quad, n_elem);
-
-        forall_2d(n_quad, n_quad, n_elem, [=] __device__(int el) -> void {
-            __shared__ double u[NQ][NQ];
-            __shared__ double Pu[NQ][NQ];
-            __shared__ double Du[NQ][NQ];
-            __shared__ double F[NQ][NQ][2];
-            __shared__ double P[NQ][NQ];
-            __shared__ double D[NQ][NQ];
-
-            const int tx = threadIdx.x;
-            const int ty = threadIdx.y;
-
-            int idx;
-
-            // copy P and D
-            if (ty < n_basis)
-            {
-                P[tx][ty] = _P(tx, ty);
-                D[tx][ty] = _D(tx, ty);
-            }
-
-            // copy global dofs to element
-            if (tx < n_basis && ty < n_basis)
-            {
-                idx = I(tx, ty, el);
-                u[tx][ty] = d_u[idx];
-            }
+            int idx = I(k, l, el);
+            s_u[k][l] = d_u[idx];
+            s_D[k][l] = D(k, l);
             __syncthreads();
 
-            // evaluate & differentiate on quadrature points
-            if (ty < n_basis)
-            {
-                double pxu = 0.0, dxu = 0.0;
-                for (int k = 0; k < n_basis; ++k)
-                {
-                    const double uk = u[k][ty];
-                    pxu += P[tx][k] * uk;
-                    dxu += D[tx][k] * uk;
-                }
-                Pu[tx][ty] = pxu;
-                Du[tx][ty] = dxu;
-            }
+            double2 tgrad{0.0, 0.0};
+
+#pragma unroll NB
+            for (int i = 0; i < n_basis; ++i)
+                tgrad.x += s_D[k][i] * s_u[i][l];
+
+#pragma unroll NB
+            for (int i = 0; i < n_basis; ++i)
+                tgrad.y += s_D[l][i] * s_u[k][i];
+
+            s_grad[k][l] = G(k, l, el) * tgrad;
             __syncthreads();
 
-            const double A = G(0, tx, ty, el);
-            const double B = G(1, tx, ty, el);
-            const double C = G(2, tx, ty, el);
+            double Au = 0.0;
 
-            double Dx = 0.0, Dy = 0.0;
-            for (int l = 0; l < n_basis; ++l)
-            {
-                Dx += P[ty][l] * Du[tx][l];
-                Dy += D[ty][l] * Pu[tx][l];
-            }
-            F[tx][ty][0] = A * Dx + B * Dy;
-            F[tx][ty][1] = B * Dx + C * Dy;
-            __syncthreads();
+#pragma unroll NB
+            for (int i = 0; i < n_basis; ++i)
+                Au += s_D[i][k] * s_grad[i][l].x;
 
-            // integrate
-            if (tx < n_basis)
-            {
-                double df = 0.0, pg = 0.0;
-                for (int i = 0; i < n_quad; ++i)
-                {
-                    df += D[i][tx] * F[i][ty][0];
-                    pg += P[i][tx] * F[i][ty][1];
-                }
-                Du[tx][ty] = df;
-                Pu[tx][ty] = pg;
-            }
-            __syncthreads();
+#pragma unroll NB
+            for (int i = 0; i < n_basis; ++i)
+                Au += s_D[i][l] * s_grad[k][i].y;
 
-            if (tx < n_basis && ty < n_basis)
-            {
-                double Su = 0.0;
-                for (int j = 0; j < n_quad; ++j)
-                    Su += P[j][ty] * Du[tx][j] + D[j][ty] * Pu[tx][j];
-                Su *= c;
+            Au *= c;
 
-                atomicAdd(d_out + idx, Su);
-            }
+            atomicAdd(d_out + idx, Au);
         });
     }
 
     void StiffnessMatrix::action(double c, const double *x, double *y) const
     {
-        const double *d_P = _P.device_read();
-        const double *d_D = _D.device_read();
-        const double *d_G = _G.device_read();
-        const int *d_I = fem.global_indices(MemorySpace::DEVICE);
+        auto D = reshape(_D.device_read(), n_basis, n_basis);
+        auto G = reshape(_G.device_read(), n_basis, n_basis, n_elem);
+        auto I = reshape(fem.global_indices(MemorySpace::DEVICE), n_basis, n_basis, n_elem);
 
-        if (n_quad <= 4)
-            stiffness_action<4>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
-        else if (n_quad <= 8)
-            stiffness_action<8>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
-        else if (n_quad <= 12)
-            stiffness_action<12>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
-        else if (n_quad <= 16)
-            stiffness_action<16>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
-        else if (n_quad <= 24)
-            stiffness_action<24>(n_elem, n_quad, n_basis, d_P, d_D, d_G, d_I, c, x, y);
+        if (n_basis <= 4)
+            stiffness_action<4>(n_elem, n_basis, D, G, I, c, x, y);
+        else if (n_basis <= 8)
+            stiffness_action<8>(n_elem, n_basis, D, G, I, c, x, y);
+        else if (n_basis <= 12)
+            stiffness_action<12>(n_elem, n_basis, D, G, I, c, x, y);
+        else if (n_basis <= 16)
+            stiffness_action<16>(n_elem, n_basis, D, G, I, c, x, y);
+        else if (n_basis <= 24)
+            stiffness_action<24>(n_elem, n_basis, D, G, I, c, x, y);
         else
             cuddh_verify(false,
                          printf("StiffnessMatrix::action does not support quadrature rules with more than 24 points."));
