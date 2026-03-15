@@ -20,8 +20,7 @@ static void setup_geometric_factors(int n_elem, const QuadratureRule &quad, cons
 
     auto G = reshape(d_G, nx, nx, nx, n_elem);
 
-    forall_3d(nx, nx, nx, n_elem, [=] __device__(int el) mutable -> void
-    {
+    forall_3d(nx, nx, nx, n_elem, [=] __device__(int el) mutable -> void {
         const int &i = threadIdx.x;
         const int &j = threadIdx.y;
         const int &k = threadIdx.z;
@@ -62,8 +61,7 @@ static void setup_geometric_factors(int n_elem, const QuadratureRule &quad, cons
     });
 }
 
-StiffnessMatrix3D::StiffnessMatrix3D(const H1Space3D &fem)
-    : fem{fem}
+StiffnessMatrix3D::StiffnessMatrix3D(const H1Space3D &fem) : fem{fem}
 {
     const int n_elem = fem.mesh().n_elem();
     const int n_basis = fem.basis().size();
@@ -80,14 +78,14 @@ StiffnessMatrix3D::StiffnessMatrix3D(const H1Space3D &fem)
 }
 
 template <int NX>
-static void stiffness_action(int n_elem, const double *d_D, const double3x3 *d_G, const int *d_I, double c, const double *d_u, double *d_out)
+static void stiffness_action(int n_elem, const double *d_D, const double3x3 *d_G, const int *d_I, double c,
+                             const double *d_u, double *d_out)
 {
     auto D = reshape(d_D, NX, NX);
     auto I = reshape(d_I, NX, NX, NX, n_elem);
     auto G = reshape(d_G, NX, NX, NX, n_elem);
 
-    forall_3d(NX, NX, NX, n_elem, [=] __device__(int el) -> void
-    {
+    forall_3d(NX, NX, NX, n_elem, [=] __device__(int el) -> void {
         __shared__ double s_u[NX][NX][NX];
         __shared__ double3 s_F[NX][NX][NX];
         __shared__ double s_D[NX][NX];
@@ -120,9 +118,7 @@ static void stiffness_action(int n_elem, const double *d_D, const double3x3 *d_G
         double Su = 0.0;
         for (int l = 0; l < NX; ++l)
         {
-            Su += s_D[l][i] * s_F[l][j][k].x
-                + s_D[l][j] * s_F[i][l][k].y
-                + s_D[l][k] * s_F[i][j][l].z;
+            Su += s_D[l][i] * s_F[l][j][k].x + s_D[l][j] * s_F[i][l][k].y + s_D[l][k] * s_F[i][j][l].z;
         }
         Su *= c;
 
@@ -141,35 +137,35 @@ void StiffnessMatrix3D::action(double c, const double *x, double *y) const
 
     switch (n_basis)
     {
-    case 2:
-        stiffness_action<2>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
-    case 3:
-        stiffness_action<3>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
-    case 4:
-        stiffness_action<4>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
-    case 5:
-        stiffness_action<5>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
-    case 6:
-        stiffness_action<6>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
-    case 7:
-        stiffness_action<7>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
-    case 8:
-        stiffness_action<8>(n_elem, d_D, d_G, d_I, c, x, y);
-        break;
-    default:
-        cuddh_verify(false, printf("StiffnessMatrix3D::action does not support basis functions of order > 12.\n"));
-        break;
+        case 2:
+            stiffness_action<2>(n_elem, d_D, d_G, d_I, c, x, y);
+            break;
+        case 3:
+            stiffness_action<3>(n_elem, d_D, d_G, d_I, c, x, y);
+            break;
+        case 4:
+            stiffness_action<4>(n_elem, d_D, d_G, d_I, c, x, y);
+            break;
+        case 5:
+            stiffness_action<5>(n_elem, d_D, d_G, d_I, c, x, y);
+            break;
+        case 6:
+            stiffness_action<6>(n_elem, d_D, d_G, d_I, c, x, y);
+            break;
+        case 7:
+            stiffness_action<7>(n_elem, d_D, d_G, d_I, c, x, y);
+            break;
+        case 8:
+            stiffness_action<8>(n_elem, d_D, d_G, d_I, c, x, y);
+            break;
+        default:
+            cuddh_verify(false, printf("StiffnessMatrix3D::action does not support basis functions of order > 12.\n"));
+            break;
     }
 }
 
 void StiffnessMatrix3D::action(const double *x, double *y) const
 {
-    zeros(fem.size(), y);
+    dla::zeros(fem.size(), y);
     action(1.0, x, y);
 }

@@ -2,9 +2,8 @@
 #define CUDDH_MASS_MATRIX_3D_HPP
 
 #include "H1Space3D.hpp"
-#include "Operator.hpp"
-
 #include "HostDeviceArray.hpp"
+#include "Operator.hpp"
 #include "forall.hpp"
 #include "linalg.hpp"
 
@@ -15,7 +14,7 @@ namespace cuddh
     /**
      * @brief spectral element mass matrix (a(x) * u, v) or (u, v) in 3D.
      */
-    class MassMatrix3D : public Operator
+    class MassMatrix3D : public Operator<double>
     {
     public:
         /**
@@ -44,7 +43,7 @@ namespace cuddh
 
     private:
         friend class InvMassMatrix3D;
-        
+
         template <typename Func>
         friend void l2_project(const MassMatrix3D &M, const Func &f, double *F);
 
@@ -61,7 +60,7 @@ namespace cuddh
     /**
      * @brief inverse of mass matrix in 3D
      */
-    class InvMassMatrix3D : public Operator
+    class InvMassMatrix3D : public Operator<double>
     {
     public:
         InvMassMatrix3D(const H1Space3D &fem);
@@ -97,15 +96,17 @@ namespace cuddh
         auto x = M.fem.physical_coordinates(MemorySpace::DEVICE);
         auto m = M._m.read(MemorySpace::DEVICE);
 
-        forall(ndof, [=] __device__(int i)
-        {
+        forall(ndof, [=] __device__(int i) {
             double3 xi = x[i];
             F[i] = f(xi) * m[i];
         });
     }
 
     double l2_dot(const MassMatrix3D &M, const double *x, const double *y);
-    inline double l2_norm(const MassMatrix3D &M, const double *x) { return std::sqrt(l2_dot(M, x, x)); }
+    inline double l2_norm(const MassMatrix3D &M, const double *x)
+    {
+        return std::sqrt(l2_dot(M, x, x));
+    }
     double l2_dist(const MassMatrix3D &M, const double *x, const double *y);
 
     inline const_dvec_wrapper diagonal_mass(const MassMatrix3D &M, MemorySpace ms)

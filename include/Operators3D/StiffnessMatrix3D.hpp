@@ -1,13 +1,14 @@
 #ifndef CUDDH_STIFFNESS_MATRIX_3D_HPP
 #define CUDDH_STIFFNESS_MATRIX_3D_HPP
 
-#include "Operator.hpp"
 #include "H1Space3D.hpp"
+#include "Operator.hpp"
+#include "SmallMatrix.hpp"
 #include "linalg.hpp"
 
 namespace cuddh
 {
-    class StiffnessMatrix3D : public Operator
+    class StiffnessMatrix3D : public Operator<double>
     {
     public:
         StiffnessMatrix3D(const H1Space3D &fem);
