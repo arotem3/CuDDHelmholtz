@@ -18,7 +18,7 @@ namespace cuddh
                       "scalar_t must be float or double");
 
     public:
-        using sym2x2 = SmallMatrix<scalar_t, 2, 2>;
+        using sym2x2 = SmallSymmetricMatrix<scalar_t, 2>;
 
         struct DeviceDDStiffnessMatrix
         {

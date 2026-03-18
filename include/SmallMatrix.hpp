@@ -1,10 +1,12 @@
 #ifndef CUDDH_SMALL_MATRIX_HPP
 #define CUDDH_SMALL_MATRIX_HPP
 
+#include <cuda_runtime.h>
+
+#include <cstddef>
+
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
-#include <cuda_runtime.h>
-#include <cstddef>
 
 namespace cuddh
 {
@@ -24,14 +26,16 @@ namespace cuddh
         constexpr SmallMatrix &operator=(const SmallMatrix &other) = default;
         constexpr SmallMatrix &operator=(SmallMatrix &&other) = default;
 
-        inline __host__ __device__ SmallMatrix(const SmallSymmetricMatrix<T, Rows> &other) requires(Rows == Cols)
+        inline __host__ __device__ SmallMatrix(const SmallSymmetricMatrix<T, Rows> &other)
+            requires(Rows == Cols)
         {
             for (size_t i = 0; i < Rows; i++)
                 for (size_t j = 0; j < Rows; j++)
                     data[i][j] = other(i, j);
         }
 
-        inline __host__ __device__ SmallMatrix &operator=(const SmallSymmetricMatrix<T, Rows> &other) requires(Rows == Cols)
+        inline __host__ __device__ SmallMatrix &operator=(const SmallSymmetricMatrix<T, Rows> &other)
+            requires(Rows == Cols)
         {
             for (size_t i = 0; i < Rows; i++)
                 for (size_t j = 0; j < Rows; j++)
@@ -44,13 +48,17 @@ namespace cuddh
 
         __host__ __device__ inline T &operator()(size_t i, size_t j)
         {
-            cuddh_assert(i < Rows && j < Cols, printf("SmallMatrix::operator() error: index out of range. i=%zu, j=%zu, Rows=%zu, Cols=%zu\n", i, j, Rows, Cols));
+            cuddh_assert(i < Rows && j < Cols,
+                         printf("SmallMatrix::operator() error: index out of range. i=%zu, j=%zu, Rows=%zu, Cols=%zu\n",
+                                i, j, Rows, Cols));
             return data[i][j];
         }
 
         __host__ __device__ inline const T &operator()(size_t i, size_t j) const
         {
-            cuddh_assert(i < Rows && j < Cols, printf("SmallMatrix::operator() error: index out of range. i=%zu, j=%zu, Rows=%zu, Cols=%zu\n", i, j, Rows, Cols));
+            cuddh_assert(i < Rows && j < Cols,
+                         printf("SmallMatrix::operator() error: index out of range. i=%zu, j=%zu, Rows=%zu, Cols=%zu\n",
+                                i, j, Rows, Cols));
             return data[i][j];
         }
 
@@ -82,7 +90,7 @@ namespace cuddh
                     data[index(i, j)] = other(i, j);
         }
 
-        constexpr SmallSymmetricMatrix& operator=(const SmallMatrix<T, Rows, Rows> &other)
+        constexpr SmallSymmetricMatrix &operator=(const SmallMatrix<T, Rows, Rows> &other)
         {
             for (size_t i = 0; i < Rows; i++)
                 for (size_t j = 0; j <= i; j++)
@@ -93,15 +101,9 @@ namespace cuddh
         __host__ __device__ static size_t n_rows() { return Rows; }
         __host__ __device__ static size_t n_cols() { return Rows; }
 
-        __host__ __device__ inline T &operator()(size_t i, size_t j)
-        {
-            return data[index(i, j)];
-        }
+        __host__ __device__ inline T &operator()(size_t i, size_t j) { return data[index(i, j)]; }
 
-        __host__ __device__ inline const T &operator()(size_t i, size_t j) const
-        {
-            return data[index(i, j)];
-        }
+        __host__ __device__ inline const T &operator()(size_t i, size_t j) const { return data[index(i, j)]; }
 
         __host__ __device__ inline void zeros()
         {
@@ -114,15 +116,17 @@ namespace cuddh
 
         __host__ __device__ static inline size_t index(size_t i, size_t j)
         {
-            cuddh_assert(i < Rows && j < Rows, printf("SmallSymmetricMatrix::index() error: index out of range. i=%zu, j=%zu, Rows=%zu\n", i, j, Rows));
-            
+            cuddh_assert(i < Rows && j < Rows,
+                         printf("SmallSymmetricMatrix::index() error: index out of range. i=%zu, j=%zu, Rows=%zu\n", i,
+                                j, Rows));
+
             if (i < j)
                 return j * (j + 1) / 2 + i;
             else
                 return i * (i + 1) / 2 + j;
         }
     };
-    
+
     using double2x2 = SmallMatrix<double, 2, 2>;
     using double3x3 = SmallMatrix<double, 3, 3>;
 
@@ -137,6 +141,12 @@ namespace cuddh
 
     using double3x2 = SmallMatrix<double, 3, 2>;
     using float3x2 = SmallMatrix<float, 3, 2>;
+
+    template <typename T>
+    using scalar2 = std::conditional_t<std::is_same_v<T, float>, float2, double2>;
+
+    template <typename T>
+    using scalar3 = std::conditional_t<std::is_same_v<T, float>, float3, double3>;
 
     __host__ __device__ inline double2 operator*(const double2x2 &A, const double2 &x)
     {
@@ -213,8 +223,7 @@ namespace cuddh
 
     __host__ __device__ inline double det(const double3x3 &A)
     {
-        return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1)) -
-               A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(2, 0)) +
+        return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(2, 0)) +
                A(0, 2) * (A(1, 0) * A(2, 1) - A(1, 1) * A(2, 0));
     }
 
@@ -225,8 +234,7 @@ namespace cuddh
 
     __host__ __device__ inline double det(const dsym3x3 &A)
     {
-        return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(1, 2)) -
-               A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(0, 2)) +
+        return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(1, 2)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(0, 2)) +
                A(0, 2) * (A(1, 0) * A(1, 1) - A(0, 1) * A(0, 2));
     }
 
@@ -237,8 +245,7 @@ namespace cuddh
 
     __host__ __device__ inline float det(const float3x3 &A)
     {
-        return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1)) -
-               A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(2, 0)) +
+        return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(2, 0)) +
                A(0, 2) * (A(1, 0) * A(2, 1) - A(1, 1) * A(2, 0));
     }
 
@@ -249,8 +256,7 @@ namespace cuddh
 
     __host__ __device__ inline float det(const fsym3x3 &A)
     {
-        return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(1, 2)) -
-               A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(0, 2)) +
+        return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(1, 2)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(0, 2)) +
                A(0, 2) * (A(1, 0) * A(1, 1) - A(0, 1) * A(0, 2));
     }
 

@@ -133,6 +133,7 @@ static auto compute_subdomain_boundary_faces(const Mesh2D &mesh, int n_spaces, c
     std::vector<std::vector<std::pair<int, int>>> F(n_spaces); // faces in each subspace
     std::vector<std::array<int, 4>> shared_faces; // {subdomain0, subdomain1, subdomain face index0, ..face..1}
     const int g_faces = mesh.n_edges();           // global number of faces
+
     for (int face_index = 0; face_index < g_faces; ++face_index)
     {
         // loop over faces and check if an edge is on the boundary of a
@@ -299,7 +300,6 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
 int ::EnsembleSpaceBuilder::set_subdomain_num_elements(ivec_wrapper &h_s_elems) const
 {
     int mx = 0;
-    int mn = 1;
 
     int n_spaces = E.size();
     for (int p = 0; p < n_spaces; ++p)
@@ -307,10 +307,9 @@ int ::EnsembleSpaceBuilder::set_subdomain_num_elements(ivec_wrapper &h_s_elems) 
         const int n = E.at(p).size();
         h_s_elems(p) = n;
         mx = std::max(mx, n);
-        mn = std::min(mn, n);
-    }
 
-    cuddh_verify(mn >= 1, printf("EnsembleSpace error: atleast one space is empty."));
+        cuddh_verify(n >= 1, printf("EnsembleSpace error: Subspace %d is empty.\n", p));
+    }
 
     return mx;
 }
@@ -382,6 +381,8 @@ int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &c
         cuddh_verify(F.at(domain0).at(local_face_index0).first == F.at(domain1).at(local_face_index1).first,
                      printf("EnsembleSpace error: shared face indices do not match up."));
 
+        const Edge *edge = mesh.edge(F.at(domain0).at(local_face_index0).first);
+
         // key is same for (domain0, domain1) and (domain1, domain0) symmetric pairs
         const int key = std::min(domain0, domain1) + n_spaces * std::max(domain0, domain1);
 
@@ -406,7 +407,6 @@ int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &c
                 dofs[lkey] = dof;
             }
 
-            const Edge *edge = mesh.edge(F.at(domain0).at(local_face_index0).first);
             dofs.at(lkey).face_mass += q.w(i) * edge->measure(q.x(i));
         }
     }
@@ -508,6 +508,8 @@ void ::EnsembleSpaceBuilder::compute_dof_indices(TensorWrapper<4, int> &h_sI) co
     const int n_spaces = E.size();
     const int n_basis = fem.basis().size();
 
+    auto g_inds = fem.global_indices(MemorySpace::HOST); // global element indices
+
     for (int p = 0; p < n_spaces; ++p)
     {
         std::unordered_map<int, int> inv_indices; // global index to subspace index
@@ -517,8 +519,6 @@ void ::EnsembleSpaceBuilder::compute_dof_indices(TensorWrapper<4, int> &h_sI) co
 
         const int n_elem = subdomain_elements.size();
         const int ndof = dof_indices.size();
-
-        auto g_inds = fem.global_indices(MemorySpace::HOST); // global element indices
 
         for (int i = 0; i < ndof; ++i)
             inv_indices[dof_indices.at(i)] = i;

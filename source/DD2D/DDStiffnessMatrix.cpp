@@ -13,7 +13,7 @@ static void make_diffmat(scalar_t *h_D, const Basis &basis)
 }
 
 template <typename scalar_t>
-static void geom_factors(SmallMatrix<scalar_t, 2, 2> *d_G, const H1Space2D &fem, const EnsembleSpace &efem)
+static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D &fem, const EnsembleSpace &efem)
 {
     const Mesh2D &mesh = fem.mesh();
     const Basis &basis = fem.basis();
@@ -57,7 +57,7 @@ static void geom_factors(SmallMatrix<scalar_t, 2, 2> *d_G, const H1Space2D &fem,
 
         const double detJ = X_xi * Y_eta - X_eta * Y_xi;
 
-        SmallMatrix<scalar_t, 2, 2> gij;
+        SmallSymmetricMatrix<scalar_t, 2> gij;
         gij(0, 0) = static_cast<scalar_t>(W * (Y_eta * Y_eta + X_eta * X_eta) / detJ);
         gij(1, 0) = static_cast<scalar_t>(-W * (Y_xi * Y_eta + X_xi * X_eta) / detJ);
         gij(1, 1) = static_cast<scalar_t>(W * (Y_xi * Y_xi + X_xi * X_xi) / detJ);

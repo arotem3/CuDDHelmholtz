@@ -22,16 +22,6 @@
 
 namespace cuddh
 {
-    /// @brief Alias to CUDA built-in float2 or double2 depending on T.
-    template <typename T>
-    using scalar2 = std::conditional_t<std::is_same_v<T, float>, float2, double2>;
-
-    struct bdr_data
-    {
-        int lambda_index = -1;
-        float mass = 0.0f;
-    };
-
     /**
      * @brief Operator for Helmholtz domain decomposition substructured problem.
      * The scalar type scalar_t is either float or double and is the scalar type in which the the substructured problem

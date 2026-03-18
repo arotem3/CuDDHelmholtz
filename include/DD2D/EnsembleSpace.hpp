@@ -5,17 +5,11 @@
 #include <utility>
 
 #include "H1Space2D.hpp"
+#include "LambdaDof.hpp"
 #include "Tensor.hpp"
 
 namespace cuddh
 {
-    struct LambdaDof
-    {
-        int subspaces[2];
-        int local_dof_indices[2];
-        double face_mass;
-    };
-
     class EnsembleSpace
     {
     public:
