@@ -1,5 +1,7 @@
 #include "Operators3D/WaveHoltz3D.hpp"
 
+#include <thrust/extrema.h>
+
 using namespace cuddh;
 
 static void init_face_mass(const TraceSpace3D &tr, const double *d_a, double *d_m)
@@ -46,7 +48,7 @@ static void init_face_mass(const TraceSpace3D &tr, const double *d_a, double *d_
     });
 }
 
-WaveHoltz3D::WaveHoltz3D(double omega, double maxvel, const double *a2x, const double *ax, const H1Space3D &fem_,
+WaveHoltz3D::WaveHoltz3D(double omega, const double *a2x, const double *ax, const H1Space3D &fem_,
                          const TraceSpace3D &fs_)
     : omega(omega),
       ndof(fem_.size()),
@@ -60,12 +62,17 @@ WaveHoltz3D::WaveHoltz3D(double omega, double maxvel, const double *a2x, const d
 {
     init_face_mass(fs, ax, H.device_write());
 
+    const double maxvel = [&]() -> double {
+        auto iter = thrust::device_pointer_cast(a2x);
+        double amin = *thrust::min_element(iter, iter + ndof);
+        return 1.0 / std::sqrt(amin);
+    }();
+
     double T = 2.0 * M_PI / omega;
     double p = fem.basis().size();
     double dt = 2.0 * fem.mesh().h() / (p * p * maxvel); // CFL condition
 
     nt = std::max(std::ceil(T / dt), 5.0);
-    dt = T / nt;
 
     double tan = std::tan(M_PI / nt);
     shift = 0.25 - 0.25 * tan * tan;

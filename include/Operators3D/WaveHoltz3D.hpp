@@ -12,8 +12,7 @@ namespace cuddh
     class WaveHoltz3D : public Operator<double>
     {
     public:
-        WaveHoltz3D(double omega, double maximum_velocity, const double *a2x, const double *ax, const H1Space3D &fem_,
-                    const TraceSpace3D &fs_);
+        WaveHoltz3D(double omega, const double *a2x, const double *ax, const H1Space3D &fem_, const TraceSpace3D &fs_);
 
         /// @brief y <- y + c * S * x
         inline void S(double c, const double *x, double *y) const

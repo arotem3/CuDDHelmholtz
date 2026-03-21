@@ -45,8 +45,6 @@ __device__ static double alpha(double3 x)
     return (r < 0.0625) ? 0.2 : 1.0;
 }
 
-constexpr double maxvel = 5.0; // maximum reciprocal of alpha
-
 int main()
 {
     const int deg = 2;                       // polynomial degree
@@ -106,7 +104,7 @@ int main()
     trace(fs, [=] __device__(double3 x) -> double { return alpha(x); }, d_a);
 
     // Initialize the WaveHoltz operator
-    WaveHoltz3D W(omega, maxvel, d_a2, d_a, fem, fs);
+    WaveHoltz3D W(omega, d_a2, d_a, fem, fs);
 
     W.G(d_b, d_Gb); // apply G to the right-hand side vector
 
