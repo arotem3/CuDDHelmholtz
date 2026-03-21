@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
+#include <string>
 
 #include "H1Space3D.hpp"
+#include "LambdaDof.hpp"
 #include "Tensor.hpp"
 
 namespace cuddh
@@ -51,6 +53,11 @@ namespace cuddh
             return reshape(sp_dof.read(m), n_spaces);
         }
 
+        const_ivec_wrapper fsizes(MemorySpace m) const
+        {
+            return reshape(fp_dof.read(m), n_spaces);
+        }
+
         /**
          * @brief returns the maximum size of any subspace. That is, the maximum of sizes.
          */
@@ -59,7 +66,7 @@ namespace cuddh
             return mx_ndof;
         }
 
-        int max_fdof() const
+        int max_fsize() const
         {
             return mx_fdof;
         }
@@ -140,23 +147,15 @@ namespace cuddh
         }
 
         /**
-         * @brief returns the number of trace space degrees of freedom in each subspace.
-         */
-        const_ivec_wrapper n_fdofs(MemorySpace m) const
-        {
-            return reshape(fp_dof.read(m), n_spaces);
-        }
-
-        /**
          * @brief returns the connectivity map between the shared degrees of freedom.
-         * 
-         * The connectivity map is a 4xN matrix, where N is the number of shared degrees of freedom.
-         * The first two rows are the element and face indices of the shared degrees of freedom.
-         * The third and fourth rows are the local indices of the shared degrees of freedom on the element and face.
+         *
+         * Each element is a LambdaDof, which stores the two subspace indices, the
+         * two local face-DOF indices (one per subspace), and the geometric face
+         * mass weight at that quadrature node.
          */
-        const_imat_wrapper connectivity_map(MemorySpace m) const
+        auto connectivity_map(MemorySpace m) const
         {
-            return reshape(cmap.read(m), 4, n_shared_dofs);
+            return reshape(cmap.read(m), n_shared_dofs);
         }
 
     private:
@@ -177,8 +176,10 @@ namespace cuddh
         host_device_ivec sp_indices; // (n_basis, n_basis, n_basis, mx_elems, n_spaces) indices of the element space degrees of freedom
         host_device_ivec fp_indices; // (n_basis, n_basis, mx_faces, n_spaces) indices of the face space degrees of freedom
         host_device_ivec fp_dof; // (n_spaces,) number of trace space degrees of freedom in each subspace
-        host_device_ivec cmap; // (4, n_shared_dofs) connectivity map
+        HostDeviceArray<LambdaDof> cmap; // (n_shared_dofs,) connectivity map
     };
+
+    EnsembleSpace3D partition_uniform_cube(const H1Space3D &fem, dim3 mesh_dims, dim3 block_dims = {4, 4, 2});
 } // namespace cuddh
 
 #endif

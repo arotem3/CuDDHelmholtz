@@ -2,16 +2,19 @@
 
 using namespace cuddh;
 
-static void make_diffmat(float *h_D, const Basis &basis)
+static thrust::universal_vector<float> make_diffmat(const Basis &basis)
 {
     const int n_basis = basis.size();
-    dmat D(n_basis, n_basis);
+
+    thrust::universal_vector<double> u_D(n_basis * n_basis);
+    auto D = reshape(u_D, n_basis, n_basis);
+
     basis.deriv(n_basis, basis.quadrature().x(), D);
-    for (int i = 0; i < n_basis * n_basis; ++i)
-        h_D[i] = D[i];
+
+    return u_D; // auto-conversion to float
 }
 
-static void geom_factors(fsym3x3 *d_G, const H1Space3D &fem, const EnsembleSpace3D &efem)
+static thrust::universal_vector<fsym3x3> geom_factors(const H1Space3D &fem, const EnsembleSpace3D &efem)
 {
     const DeviceMesh3D &mesh = fem.mesh().to_device();
     const Basis &basis = fem.basis();
@@ -21,32 +24,26 @@ static void geom_factors(fsym3x3 *d_G, const H1Space3D &fem, const EnsembleSpace
     const int n_domains = efem.size();
     const int mx_elem = efem.max_n_elem();
 
-    host_device_dvec _w(n_basis);
-    double *h_w = _w.host_write();
+    thrust::universal_vector<double> u_w(n_basis);
     for (int i = 0; i < n_basis; ++i)
-        h_w[i] = q.w(i);
-    auto w = reshape(_w.device_read(), n_basis);
+        u_w[i] = q.w(i);
+    auto w = reshape(u_w, n_basis);
 
-    host_device_dvec _x(n_basis);
-    double *h_x = _x.host_write();
+    thrust::universal_vector<double> u_x(n_basis);
     for (int i = 0; i < n_basis; ++i)
-        h_x[i] = q.x(i);
-    auto x = reshape(_x.device_read(), n_basis);
+        u_x[i] = q.x(i);
+    auto x = reshape(u_x, n_basis);
 
     auto n_elems = efem.n_elems(MemorySpace::DEVICE);
     auto elems = efem.elements(MemorySpace::DEVICE);
 
-    auto G = reshape(d_G, n_basis, n_basis, n_basis, mx_elem, n_domains);
+    thrust::universal_vector<fsym3x3> u_G(n_basis * n_basis * n_basis * mx_elem * n_domains);
+    auto G = reshape(u_G, n_basis, n_basis, n_basis, mx_elem, n_domains);
 
-    forall_3d(n_basis, n_basis, mx_elem, n_domains, [=] __device__ (int subsp) mutable -> void
-    {
-        const int n_elem = n_elems[subsp];
+    forall_3d(n_basis, n_basis, mx_elem, n_domains, [=] __device__(int subsp) mutable -> void {
+        const auto [i, j, el] = threadIdx;
 
-        const int i = threadIdx.x;
-        const int j = threadIdx.y;
-        const int el = threadIdx.z;
-
-        if (el >= n_elem)
+        if (el >= n_elems(subsp))
             return;
 
         const int g_el = elems(el, subsp);
@@ -57,7 +54,7 @@ static void geom_factors(fsym3x3 *d_G, const H1Space3D &fem, const EnsembleSpace
         for (int k = 0; k < n_basis; ++k)
         {
             xi.z = x(k);
-            
+
             double3x3 J = element.jacobian(xi);
             const double s = w(i) * w(j) * w(k) / det(J);
 
@@ -65,36 +62,27 @@ static void geom_factors(fsym3x3 *d_G, const H1Space3D &fem, const EnsembleSpace
 
             fsym3x3 g;
 
-            #pragma unroll
             for (int m = 0; m < 3; ++m)
             {
-                #pragma unroll
-                for (int n = 0; n < m; ++n)
+                for (int n = 0; n <= m; ++n)
                 {
                     double gmn = 0.0;
                     for (int l = 0; l < 3; ++l)
                         gmn += J(m, l) * J(n, l);
                     g(m, n) = s * gmn;
                 }
-
-                double gmm = 0.0;
-                for (int l = 0; l < 3; ++l)
-                    gmm += J(m, l) * J(m, l);
-                g(m, m) = s * gmm;
             }
 
             G(i, j, k, el, subsp) = g;
         }
     });
+
+    return u_G;
 }
 
 DDStiffnessMatrix3D::DDStiffnessMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem)
-    : n_basis(fem.basis().size()),
-      mx_elem(efem.max_n_elem()),
-      n_domains(efem.size()),
-      d(n_basis * n_basis),
-      g(n_basis * n_basis * mx_elem * n_domains)
+    : n_basis(fem.basis().size()), mx_elem(efem.max_n_elem()), n_domains(efem.size())
 {
-    make_diffmat(d.host_write(), fem.basis());
-    geom_factors(g.device_write(), fem, efem);
+    d = make_diffmat(fem.basis());
+    g = geom_factors(fem, efem);
 }

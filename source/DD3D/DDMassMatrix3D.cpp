@@ -2,7 +2,7 @@
 
 using namespace cuddh;
 
-static void mass(float *d_m, const H1Space3D &fem, const EnsembleSpace3D &efem)
+static thrust::universal_vector<float> mass(const H1Space3D &fem, const EnsembleSpace3D &efem)
 {
     const DeviceMesh3D &mesh = fem.mesh().to_device();
     const Basis &basis = fem.basis();
@@ -13,23 +13,22 @@ static void mass(float *d_m, const H1Space3D &fem, const EnsembleSpace3D &efem)
     const int n_domains = efem.size();
     const int mx_dofs = efem.max_size();
 
-    host_device_dvec _w(n_basis);
-    double *h_w = _w.host_write();
+    thrust::universal_vector<float> u_w(n_basis);
     for (int i = 0; i < n_basis; ++i)
-        h_w[i] = q.w(i);
-    auto w = reshape(_w.device_read(), n_basis);
+        u_w[i] = q.w(i);
+    auto w = reshape(u_w, n_basis);
 
-    host_device_dvec _x(n_basis);
-    double *h_x = _x.host_write();
+    thrust::universal_vector<float> u_x(n_basis);
     for (int i = 0; i < n_basis; ++i)
-        h_x[i] = q.x(i);
-    auto x = reshape(_x.device_read(), n_basis);
+        u_x[i] = q.x(i);
+    auto x = reshape(u_x, n_basis);
 
     auto d_n_elems = efem.n_elems(MemorySpace::DEVICE);
     auto d_elems = efem.elements(MemorySpace::DEVICE);
     auto sI = efem.subspace_indices(MemorySpace::DEVICE);
 
-    auto M = reshape(d_m, mx_dofs, n_domains);
+    thrust::universal_vector<float> u_m(mx_dofs * n_domains, 0.0f);
+    auto M = reshape(u_m, mx_dofs, n_domains);
 
     forall_3d(n_basis, n_basis, mx_elem_per_dom, n_domains, [=] __device__ (int subsp) mutable
     {
@@ -56,12 +55,13 @@ static void mass(float *d_m, const H1Space3D &fem, const EnsembleSpace3D &efem)
             }
         }
     });
+
+    return u_m;
 }
 
 DDMassMatrix3D::DDMassMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem)
     : mx_dofs(efem.max_size()),
-      n_domains(efem.size()),
-      m(mx_dofs * n_domains)
+      n_domains(efem.size())
 {
-    mass(m.device_write(), fem, efem);
+    m = mass(fem, efem);
 }

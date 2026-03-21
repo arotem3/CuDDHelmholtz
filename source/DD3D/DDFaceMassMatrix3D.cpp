@@ -2,27 +2,29 @@
 
 using namespace cuddh;
 
-static void init_face_mass(const TraceSpace3D &tr, const EnsembleSpace3D &efem, MatrixWrapper<float> H)
+static thrust::universal_vector<float> init_face_mass(const H1Space3D &fem, const EnsembleSpace3D &efem)
 {
-    const Basis &basis = tr.h1_space().basis();
+    const Basis &basis = fem.basis();
     const auto &quad = basis.quadrature();
-    const auto &mesh = tr.h1_space().mesh().to_device();
+    const auto &mesh = fem.mesh().to_device();
 
     const int n_basis = basis.size();
     const int mx_n_faces = efem.max_n_faces();
+    const int mx_fdofs = efem.max_fsize();
     const int n_domains = efem.size();
 
-    host_device_dvec _w(n_basis);
-    double * h_w = _w.host_write();
-    for (int i = 0; i < n_basis; ++i)
-        h_w[i] = quad.w(i);
-    auto w = reshape(_w.device_read(), n_basis);
+    thrust::universal_vector<float> m(mx_fdofs * n_domains, 0.0f);
+    auto H = reshape(m, mx_fdofs, n_domains);
 
-    host_device_dvec _x(n_basis);
-    double * h_x = _x.host_write();
+    thrust::universal_vector<float> u_w(n_basis);
     for (int i = 0; i < n_basis; ++i)
-        h_x[i] = quad.x(i);
-    auto x = reshape(_x.device_read(), n_basis);
+        u_w[i] = quad.w(i);
+    auto w = reshape(u_w, n_basis);
+
+    thrust::universal_vector<float> u_x(n_basis);
+    for (int i = 0; i < n_basis; ++i)
+        u_x[i] = quad.x(i);
+    auto x = reshape(u_x, n_basis);
 
     auto n_faces = efem.n_faces(MemorySpace::DEVICE);
     auto faces = efem.faces(MemorySpace::DEVICE);
@@ -52,12 +54,13 @@ static void init_face_mass(const TraceSpace3D &tr, const EnsembleSpace3D &efem, 
         value *= face.measure(r);
         atomicAdd(&H(idx, p), static_cast<float>(value));
     });
+
+    return m;
 }
 
-DDFaceMassMatrix3D::DDFaceMassMatrix3D(const TraceSpace3D &tr, const EnsembleSpace3D &efem)
-    : mx_fdofs(efem.max_fdof()),
-      n_domains(efem.size()),
-      m(mx_fdofs * n_domains)
+DDFaceMassMatrix3D::DDFaceMassMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem)
+    : mx_fdofs(efem.max_fsize()),
+      n_domains(efem.size())
 {
-    init_face_mass(tr, efem, reshape(m.device_write(), mx_fdofs, n_domains));
+    m = init_face_mass(fem, efem);
 }

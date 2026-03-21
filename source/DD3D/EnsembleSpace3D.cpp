@@ -13,7 +13,7 @@ namespace
         void set_subdomain_elements(imat_wrapper &h_elems) const;
         int set_subdomain_num_boundary_faces(ivec_wrapper &h_s_faces) const;
         void set_subdomain_face_indices(imat_wrapper &h_faces) const;
-        int compute_shared_dof_map(HostDeviceArray<int> &cmap, const TensorWrapper<4, int> &h_fI) const;
+        int compute_shared_dof_map(HostDeviceArray<LambdaDof> &cmap, const TensorWrapper<4, int> &h_fI) const;
         void compute_fdof_indices(TensorWrapper<4, int> &h_fI, const TensorWrapper<5, int> &h_sI) const;
         int set_subdomain_num_dofs(ivec_wrapper &h_s_dof) const;
         int set_subdomain_num_fdofs(ivec_wrapper &h_s_fdof) const;
@@ -28,7 +28,7 @@ namespace
         std::vector<std::vector<int>> s2g;               // subspace index to global index
         std::vector<std::vector<int>> f2s;               // face index to subspace index
     };
-}
+} // namespace
 
 EnsembleSpace3D::EnsembleSpace3D(const H1Space3D &fem, int n_spaces, const int *element_labels)
     : n_spaces{n_spaces},
@@ -83,10 +83,36 @@ EnsembleSpace3D::EnsembleSpace3D(const H1Space3D &fem, int n_spaces, const int *
     n_shared_dofs = ESbuilder.compute_shared_dof_map(cmap, h_fI);
 }
 
-template <typename Map, typename Key>
-static inline bool contains(const Map &map, const Key &key)
+EnsembleSpace3D cuddh::partition_uniform_cube(const H1Space3D &fem, dim3 mesh_dims, dim3 block_dims)
 {
-    return map.find(key) != map.end();
+    const int n_basis = fem.basis().size();
+    const auto [nx, ny, nz] = mesh_dims;
+    const auto [bx, by, bz] = block_dims;
+
+    const int dx = (nx + bx - 1) / bx;
+    const int dy = (ny + by - 1) / by;
+    const int dz = (nz + bz - 1) / bz;
+
+    int nd = dx * dy * dz;
+
+    icube element_labels(nx, ny, nz);
+    std::fill(element_labels.begin(), element_labels.end(), -1);
+
+    for (int k = 0; k < nz; ++k)
+    {
+        for (int j = 0; j < ny; ++j)
+        {
+            for (int i = 0; i < nx; ++i)
+            {
+                int label_x = i / bx;
+                int label_y = j / by;
+                int label_z = k / bz;
+                element_labels(i, j, k) = label_x + dx * (label_y + dy * label_z);
+            }
+        }
+    }
+
+    return EnsembleSpace3D(fem, nd, element_labels);
 }
 
 static auto compute_subspace_elements(int nel, int n_spaces, const int *element_labels)
@@ -105,36 +131,36 @@ static auto compute_subspace_elements(int nel, int n_spaces, const int *element_
 static auto compute_subdomain_boundary_faces(const Mesh3D &mesh, int n_spaces, const int *element_labels)
 {
     std::vector<std::vector<std::pair<int, int>>> F(n_spaces); // faces in each subspace
-    std::vector<std::array<int, 4>> shared_faces;              // {subdomain0, subdomain1, subdomain face index0, ..face..1}
+    std::vector<std::array<int, 4>> shared_faces; // {subdomain0, subdomain1, subdomain face index0, ..face..1}
     const int n_global_faces = mesh.n_faces();
 
-    for (int f = 0; f < n_global_faces; ++f)
+    for (int face_index = 0; face_index < n_global_faces; ++face_index)
     {
         // loop over faces and check if a face is on the boundary of a
         // subdomain. Boundary faces are automatically on the boundary, and
         // interior faces are on the boundary only if the element[0] != element[1].
 
-        const FaceConnectivity connectivity = mesh.face_connectivity(f);
+        const FaceConnectivity connectivity = mesh.face_connectivity(face_index);
 
         const auto [el0, el1] = connectivity.elements;
-        const int S0 = element_labels[el0];
+        const int domain0 = element_labels[el0];
 
         if (el1 < 0) // boundary
         {
-            F.at(S0).push_back({f, 0});
+            F.at(domain0).push_back({face_index, 0});
         }
         else
         {
-            const int S1 = element_labels[el1];
+            const int domain1 = element_labels[el1];
 
-            if (S0 != S1)
+            if (domain0 != domain1)
             {
-                F.at(S0).push_back({f, 0});
-                F.at(S1).push_back({f, 1});
+                F.at(domain0).push_back({face_index, 0});
+                F.at(domain1).push_back({face_index, 1});
 
-                const int l0 = F.at(S0).size() - 1; // the index of face f in the subdomain face space
-                const int l1 = F.at(S1).size() - 1;
-                shared_faces.push_back({S0, S1, l0, l1});
+                const int local_face_index0 = F.at(domain0).size() - 1;
+                const int local_face_index1 = F.at(domain1).size() - 1;
+                shared_faces.push_back({domain0, domain1, local_face_index0, local_face_index1});
             }
         }
     }
@@ -178,7 +204,7 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
 
     for (int i = 0; i < ndof; ++i)
     {
-        if (contains(pp, i))
+        if (pp.contains(i))
             continue;
 
         perm.at(l) = i;
@@ -192,8 +218,7 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
     }
 }
 
-::EnsembleSpaceBuilder::EnsembleSpaceBuilder(const H1Space3D &fem, int n_spaces, const int *element_labels)
-    : fem(fem)
+::EnsembleSpaceBuilder::EnsembleSpaceBuilder(const H1Space3D &fem, int n_spaces, const int *element_labels) : fem(fem)
 {
     const Mesh3D &mesh = fem.mesh();
 
@@ -224,7 +249,7 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
                     for (int i = 0; i < n_basis; ++i)
                     {
                         const int g_idx = g_inds(i, j, k, g_el); // global index
-                        if (not contains(unique, g_idx))
+                        if (not unique.contains(g_idx))
                         {
                             unique[g_idx] = l;
                             dof_indices.push_back(g_idx);
@@ -245,20 +270,16 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
         {
             const auto [global_face, side] = subdomain_faces.at(f);
             const FaceConnectivity connectivity = mesh.face_connectivity(global_face);
-            
-            const int global_element = connectivity.elements[side];
-            const FaceConnectivity::Label label = connectivity.label[side];
-            const FaceConnectivity::Permutation permutation = connectivity.permutation;
 
             for (int j = 0; j < n_basis; ++j)
             {
                 for (int i = 0; i < n_basis; ++i)
                 {
-                    const auto [ip, jp] = permute(n_basis, i, j, permutation);
-                    const auto vol_idx = face2vol(n_basis, ip, jp, label);
-                    const int idx = unique.at(g_inds(vol_idx[0], vol_idx[1], vol_idx[2], global_element));
+                    const auto [ip, jp] = permute(n_basis, i, j, connectivity.permutation);
+                    const auto vol_idx = face2vol(n_basis, ip, jp, connectivity.label[side]);
+                    const int idx = unique.at(g_inds(vol_idx[0], vol_idx[1], vol_idx[2], connectivity.elements[side]));
 
-                    if (not contains(funique, idx))
+                    if (not funique.contains(idx))
                     {
                         funique[idx] = l;
                         fdof_indices.push_back(idx);
@@ -277,18 +298,15 @@ int ::EnsembleSpaceBuilder::set_subdomain_num_elements(ivec_wrapper &h_s_elems) 
     const int n_spaces = E.size();
 
     int mx = 0;
-    int mn = 1;
 
     for (int p = 0; p < n_spaces; ++p)
     {
         const int n = E.at(p).size();
         h_s_elems(p) = n;
         mx = std::max(mx, n);
-        mn = std::min(mn, n);
-    }
 
-    if (mn < 1)
-        cuddh_error("EnsembleSpace error: atleast one space is empty");
+        cuddh_verify(n >= 1, printf("EnsembleSpace3D error: Subspace %d is empty.\n", p));
+    }
 
     return mx;
 }
@@ -343,48 +361,71 @@ void ::EnsembleSpaceBuilder::set_subdomain_face_indices(imat_wrapper &h_faces) c
     }
 }
 
-int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<int> &cmap, const TensorWrapper<4, int> &h_fI) const
+int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &cmap,
+                                                   const TensorWrapper<4, int> &h_fI) const
 {
-    const int n_shared_faces = shared_faces.size();
+    const Mesh3D &mesh = fem.mesh();
+    auto &q = fem.basis().quadrature();
+
     const int n_basis = fem.basis().size();
     const int n_spaces = E.size();
 
-    std::vector<std::array<int,4>> shared_dofs; // list of all pairs of shared DOFs identifying the respective subspaces
-    std::unordered_map<int, std::unordered_set<int>> unique_shared; // maps pairs of subspaces to unique DOFs shared between them
+    std::unordered_map<int, std::unordered_map<int, LambdaDof>> shared_dofs;
 
-    for (auto [S0, S1, f0, f1] : shared_faces)
+    for (auto [domain0, domain1, local_face_index0, local_face_index1] : shared_faces)
     {
-        const int key = (S0 < S1) ? (S0 + n_spaces * S1) : (S1 + n_spaces * S0); // key is same for (S0, S1) and (S1, S0) symmetric pairs
+        // sanity check that the shared face indices agree
+        cuddh_verify(F.at(domain0).at(local_face_index0).first == F.at(domain1).at(local_face_index1).first,
+                     printf("EnsembleSpace3D error: shared face indices do not match up.\n"));
 
-        auto &unq = unique_shared[key]; // unique face dofs
+        const int global_face = F.at(domain0).at(local_face_index0).first;
+        const QuadFace face = mesh.face(global_face);
+
+        // key is the same for (domain0,domain1) and (domain1,domain0) symmetric pairs
+        const int key = std::min(domain0, domain1) + n_spaces * std::max(domain0, domain1);
+
+        auto &dofs = shared_dofs[key];
+
         for (int j = 0; j < n_basis; ++j)
         {
             for (int i = 0; i < n_basis; ++i)
             {
-                const int idx0 = h_fI(i, j, f0, S0);
-                const int idx1 = h_fI(i, j, f1, S1);
+                const int idx0 = h_fI(i, j, local_face_index0, domain0);
+                const int idx1 = h_fI(i, j, local_face_index1, domain1);
 
-                const int lkey = (S0 < S1) ? idx0 : idx1; // key is same for symmetric pairs
+                const int lkey = (domain0 < domain1) ? idx0 : idx1; // key is same for symmetric pairs
 
-                if (not contains(unq, lkey))
+                if (not dofs.contains(lkey))
                 {
-                    unq.insert(lkey);
-                    shared_dofs.push_back({S0, S1, idx0, idx1});
+                    LambdaDof dof;
+                    dof.subspaces[0] = domain0;
+                    dof.subspaces[1] = domain1;
+                    dof.local_dof_indices[0] = idx0;
+                    dof.local_dof_indices[1] = idx1;
+                    dof.face_mass = 0.0;
+                    dofs[lkey] = dof;
                 }
+
+                dofs.at(lkey).face_mass += q.w(i) * q.w(j) * face.measure({q.x(i), q.x(j)});
             }
         }
     }
 
-    int n_shared_dofs = shared_dofs.size();
-    cmap.resize(4 * n_shared_dofs);
-    auto h_cmap = reshape(cmap.host_write(), 4, n_shared_dofs);
-    for (int i = 0; i < n_shared_dofs; ++i)
+    int n_shared_dofs = 0;
+    for (const auto &[_, dofs] : shared_dofs)
+        n_shared_dofs += dofs.size();
+
+    cmap.resize(n_shared_dofs);
+
+    auto h_cmap = reshape(cmap.host_write(), n_shared_dofs);
+    int i = 0;
+    for (const auto &[_, dofs] : shared_dofs)
     {
-        const auto [p, q, j0, j1] = shared_dofs.at(i);
-        h_cmap(0, i) = p;
-        h_cmap(1, i) = q;
-        h_cmap(2, i) = j0;
-        h_cmap(3, i) = j1;
+        for (const auto &[__, dof] : dofs)
+        {
+            h_cmap(i) = dof;
+            i++;
+        }
     }
 
     return n_shared_dofs;
@@ -409,18 +450,16 @@ void ::EnsembleSpaceBuilder::compute_fdof_indices(TensorWrapper<4, int> &h_fI, c
         {
             const auto [global_face, side] = sf.at(f);
             const FaceConnectivity connectivity = mesh.face_connectivity(global_face);
-            
-            const int global_element = connectivity.elements[side];
-            const FaceConnectivity::Label label = connectivity.label[side];
-            const FaceConnectivity::Permutation permutation = connectivity.permutation;
+
+            const int subsp_element = el2s[connectivity.elements[side]];
 
             for (int j = 0; j < n_basis; ++j)
             {
                 for (int i = 0; i < n_basis; ++i)
                 {
-                    const auto [ip, jp] = permute(n_basis, i, j, permutation);
-                    const auto vol_idx = face2vol(n_basis, ip, jp, label);
-                    const int idx = h_sI(vol_idx[0], vol_idx[1], vol_idx[2], global_element, p);
+                    const auto [ip, jp] = permute(n_basis, i, j, connectivity.permutation);
+                    const auto [x, y, z] = face2vol(n_basis, ip, jp, connectivity.label[side]);
+                    const int idx = h_sI(x, y, z, subsp_element, p);
 
                     h_fI(i, j, f, p) = idx;
                 }
@@ -500,7 +539,7 @@ void ::EnsembleSpaceBuilder::compute_dof_indices(TensorWrapper<5, int> &h_sI) co
 void ::EnsembleSpaceBuilder::compute_global_indices(imat_wrapper &h_gI) const
 {
     const int n_spaces = E.size();
-    
+
     for (int p = 0; p < n_spaces; ++p)
     {
         auto &dof_indices = s2g.at(p);

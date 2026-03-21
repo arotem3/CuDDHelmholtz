@@ -6,7 +6,7 @@
 #include "EnsembleSpace3D.hpp"
 #include "SmallMatrix.hpp"
 
-#include "HostDeviceArray.hpp"
+#include <thrust/universal_vector.h>
 #include "forall.hpp"
 
 namespace cuddh
@@ -17,15 +17,15 @@ namespace cuddh
         struct DeviceDDStiffnessMatrix3D
         {
             MatrixWrapper<const float> D;
-            MatrixWrapper<const fsym3x3> G;
+            TensorWrapper<5, const fsym3x3> G;
         };
 
         DDStiffnessMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem);
 
         DeviceDDStiffnessMatrix3D to_device() const
         {
-            auto D = reshape(d.device_read(), n_basis, n_basis);
-            auto G = reshape(g.device_read(), n_basis * n_basis * n_basis * mx_elem, n_domains);
+            auto D = reshape(d, n_basis, n_basis);
+            auto G = reshape(g, n_basis, n_basis, n_basis, mx_elem, n_domains);
             return {D, G};
         }
 
@@ -33,8 +33,8 @@ namespace cuddh
         int n_basis;
         int mx_elem;
         int n_domains;
-        HostDeviceArray<float> d;
-        HostDeviceArray<fsym3x3> g;
+        thrust::universal_vector<float> d;
+        thrust::universal_vector<fsym3x3> g;
     };
 } // namespace cuddh
 

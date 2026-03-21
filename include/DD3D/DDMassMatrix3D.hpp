@@ -5,7 +5,7 @@
 #include "cuddh_error.hpp"
 #include "EnsembleSpace3D.hpp"
 
-#include "HostDeviceArray.hpp"
+#include <thrust/universal_vector.h>
 #include "forall.hpp"
 
 namespace cuddh
@@ -17,14 +17,14 @@ namespace cuddh
 
         auto to_device() const
         {
-            return reshape(m.device_read(), mx_dofs, n_domains);
+            return reshape(m, mx_dofs, n_domains);
         }
 
     private:
         int mx_dofs;
         int n_domains;
-        HostDeviceArray<float> m;
-    };    
+        thrust::universal_vector<float> m;
+    };
 } // namespace cuddh
 
 #endif
