@@ -40,9 +40,7 @@ static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D
     forall_3d(n_basis, n_basis, mx_elem, n_domains, [=] __device__(int subsp) mutable -> void {
         const int n_elem = n_elems[subsp];
 
-        const int i = threadIdx.x;
-        const int j = threadIdx.y;
-        const int el = threadIdx.z;
+        const auto [i, j, el] = threadIdx;
 
         if (el >= n_elem)
             return;
@@ -58,9 +56,9 @@ static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D
         const double detJ = X_xi * Y_eta - X_eta * Y_xi;
 
         SmallSymmetricMatrix<scalar_t, 2> gij;
-        gij(0, 0) = static_cast<scalar_t>(W * (Y_eta * Y_eta + X_eta * X_eta) / detJ);
-        gij(1, 0) = static_cast<scalar_t>(-W * (Y_xi * Y_eta + X_xi * X_eta) / detJ);
-        gij(1, 1) = static_cast<scalar_t>(W * (Y_xi * Y_xi + X_xi * X_xi) / detJ);
+        gij(0, 0) = W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
+        gij(1, 0) = -W * (Y_xi * Y_eta + X_xi * X_eta) / detJ;
+        gij(1, 1) = W * (Y_xi * Y_xi + X_xi * X_xi) / detJ;
 
         G(i, j, el, subsp) = gij;
     });

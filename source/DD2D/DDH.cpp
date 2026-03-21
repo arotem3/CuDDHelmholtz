@@ -45,12 +45,6 @@ namespace
     }
 } // namespace
 
-template <typename Map, typename Key>
-inline static bool contains(const Map &map, Key key)
-{
-    return map.find(key) != map.end();
-}
-
 // computes the complex multiplication (c + i*s) * (x + i*y) and stores the result in x and y.
 template <typename scalar_t>
 __device__ __forceinline__ static void cxmult(scalar_t &x, scalar_t &y, scalar_t c, scalar_t s)
@@ -60,43 +54,83 @@ __device__ __forceinline__ static void cxmult(scalar_t &x, scalar_t &y, scalar_t
     y = s * t + c * y;
 }
 
-template <int NB, typename scalar_t>
-__device__ __forceinline__ static void stiffness_matvec(scalar_t *const s_u, const SmallMatrix<scalar_t, 2, 2> &geom,
-                                                        const int (&Ix)[NB], const int (&Iy)[NB],
-                                                        const scalar_t (&s_D)[NB][NB],
-                                                        cuddh::scalar2<scalar_t> s_w[][NB][NB])
+template <typename scalar_t, int NB, int NEL>
+struct BlockStiffness
 {
-    const auto &[k, l, el] = threadIdx;
+    using vec_t = cuddh::scalar2<scalar_t>;
 
-    cuddh::scalar2<scalar_t> grad{scalar_t(0), scalar_t(0)};
+    struct SharedResources
+    {
+        scalar_t D[NB][NB];
+        scalar_t u[NB * NB * NEL * NEL];
+        vec_t grad[NEL * NEL][NB][NB];
+    };
+
+    SharedResources &smem;
+    SmallSymmetricMatrix<scalar_t, 2> geom;
+    int I[2][NB];
+
+    __device__ BlockStiffness(SharedResources &mem, int subsp,
+                              const typename DDStiffnessMatrix<scalar_t>::DeviceDDStiffnessMatrix &stiffness_matrix,
+                              const TensorWrapper<4, const int> &sI)
+        : smem{mem}
+    {
+        const auto [x, y, el] = threadIdx;
+        const int tid = x + NB * (y + NB * el);
+
+        if (el == 0)
+            smem.D[x][y] = stiffness_matrix.D(x, y);
+
+        for (int i = 0; i < NB; ++i)
+        {
+            I[0][i] = sI(i, y, el, subsp);
+            I[1][i] = sI(x, i, el, subsp);
+        }
+
+        geom = stiffness_matrix.G(tid, subsp);
+
+        __syncthreads();
+    }
+
+    __device__ scalar_t operator()(scalar_t in) const
+    {
+        const auto [x, y, el] = threadIdx;
+        const int tid = x + NB * (y + NB * el);
+
+        smem.u[tid] = in;
+        __syncthreads();
+
+        vec_t grad{0, 0};
 
 #pragma unroll NB
-    for (int i = 0; i < NB; ++i)
-        grad.x += s_D[k][i] * s_u[Ix[i]];
+        for (int i = 0; i < NB; ++i)
+            grad.x += smem.D[x][i] * smem.u[I[0][i]];
 
 #pragma unroll NB
-    for (int i = 0; i < NB; ++i)
-        grad.y += s_D[l][i] * s_u[Iy[i]];
-    __syncthreads();
+        for (int i = 0; i < NB; ++i)
+            grad.y += smem.D[y][i] * smem.u[I[1][i]];
+        __syncthreads();
 
-    s_w[el][l][k] = geom * grad;
+        smem.grad[el][y][x] = geom * grad;
+        smem.u[tid] = 0;
+        __syncthreads();
 
-    s_u[k + NB * (l + NB * el)] = scalar_t(0); // zero out output buffer
-    __syncthreads();
-
-    scalar_t Su = scalar_t(0);
-
-#pragma unroll NB
-    for (int i = 0; i < NB; ++i)
-        Su += s_D[i][k] * s_w[el][l][i].x;
+        scalar_t Su = 0;
 
 #pragma unroll NB
-    for (int i = 0; i < NB; ++i)
-        Su += s_D[i][l] * s_w[el][i][k].y;
+        for (int i = 0; i < NB; ++i)
+            Su += smem.D[i][x] * smem.grad[el][y][i].x;
 
-    atomicAdd(s_u + Ix[k], Su);
-    __syncthreads();
-}
+#pragma unroll NB
+        for (int i = 0; i < NB; ++i)
+            Su += smem.D[i][y] * smem.grad[el][i][x].y;
+
+        atomicAdd(smem.u + I[0][x], Su);
+        __syncthreads();
+
+        return smem.u[tid];
+    }
+};
 
 template <int NB, int NEL, typename scalar_t>
 static void ddh_action(
@@ -143,7 +177,7 @@ static void ddh_action(
     const scalar_t Ry = static_cast<scalar_t>(std::sin(0.5 * W.omega * W.dt));
 
     forall_3d(NB, NB, NEL * NEL, n_domains, [=] __device__(const int subsp) mutable -> void {
-        using BlockReduce = cub::BlockReduce<scalar_t, NB * NB * NEL * NEL>;
+        using BStiffness = BlockStiffness<scalar_t, NB, NEL>;
 
         const auto &[k, l, el] = threadIdx;     // convinient indicies
         const int tid = k + NB * (l + NB * el); // linearized thread id
@@ -156,27 +190,8 @@ static void ddh_action(
                      printf("DDH2D error: exceeded maximum number of subdomain DOFs per thread block (%d > %d)\n", ndof,
                             MX_NDOF););
 
-        // shared mem
-        __shared__ scalar_t s_p[MX_NDOF];
-        __shared__ cuddh::scalar2<scalar_t> s_work[NEL * NEL][NB][NB];
-        __shared__ scalar_t s_D[NB][NB];
-
-        // copy D
-        if (tid < NB * NB)
-            s_D[k][l] = stiffness_matrix.D(k, l);
-
-        int Ix[NB]; // indices for slice used d/dx computation
-        int Iy[NB]; // indices for slice used d/dy computation
-
-#pragma unroll NB
-        for (int i = 0; i < NB; ++i)
-            Ix[i] = sI(i, l, el, subsp);
-
-#pragma unroll NB
-        for (int i = 0; i < NB; ++i)
-            Iy[i] = sI(k, i, el, subsp);
-
-        cuddh_assert(Ix[k] == Iy[l], printf("DDH2D error: invalid mapping Ix[k] (%d) != Iy[l] (%d)\n", Ix[k], Iy[l]););
+        __shared__ typename BStiffness::SharedResources smem;
+        BStiffness A(smem, subsp, stiffness_matrix, sI);
 
         const scalar_t sigma = W.sigma; // modified time step in WaveHoltz iteration
         const auto [alpha, beta] = ab(tid, subsp);
@@ -207,18 +222,6 @@ static void ddh_action(
 
             return F;
         }();
-
-        cuddh::scalar2<scalar_t> u{scalar_t(0), scalar_t(0)}; // (u,v) are the approx solution of the Helmholtz eq.
-
-        const auto geom = stiffness_matrix.G(tid, subsp);
-
-        // returns A * x where A is the stiffness matrix
-        auto A = [&](scalar_t x) -> scalar_t {
-            s_p[tid] = x;
-            __syncthreads();
-            stiffness_matvec<NB, scalar_t>(s_p, geom, Ix, Iy, s_D, s_work);
-            return s_p[tid];
-        };
 
         auto evolve_project = [&](cuddh::scalar2<scalar_t> u) -> cuddh::scalar2<scalar_t> {
             scalar_t cs = scalar_t(1);
@@ -261,11 +264,12 @@ static void ddh_action(
         };
 
         // WaveHoltz iteration
+        cuddh::scalar2<scalar_t> u{0, 0}; // (u,v) are the approx solution of the Helmholtz eq.
         int it = 0;
         for (; it < wh_maxit; ++it)
         {
             u = evolve_project(u);
-        } // WaveHoltz
+        }
 
         // update global solution
         if (y && (tid < ndof))
