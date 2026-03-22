@@ -11,6 +11,106 @@
 
 namespace cuddh
 {
+    template <typename scalar_t, int NB, int NEL>
+    struct SubdomainStiffnessMatrix
+    {
+        using vec_t = cuddh::scalar2<scalar_t>;
+        using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
+
+        struct SharedResources
+        {
+            scalar_t D[NB][NB];
+            scalar_t u[NB * NB * NEL];
+            vec_t grad[NEL][NB][NB];
+        };
+
+        SharedResources &smem;
+        mat_t geom;
+        int I[2][NB];
+
+        __device__ SubdomainStiffnessMatrix(SharedResources &mem, int subsp, int nel,
+                                            const MatrixWrapper<const scalar_t> &D,
+                                            const TensorWrapper<4, const mat_t> &G,
+                                            const TensorWrapper<4, const int> &sI)
+            : smem{mem}
+        {
+            cuddh_assert(blockDim.x == NB * NB && blockDim.y == NEL && blockDim.z == 1,
+                         printf("SubsdomainStiffnessMatrix<NB=%d,NEL=%d> expects a thread block of dimensions (NB^2, "
+                                "NEL) = (%d, %d) but got (%d, %d, %d).\n",
+                                NB, NEL, NB * NB, NEL, blockDim.x, blockDim.y, blockDim.z));
+
+            const int x = threadIdx.x % NB;
+            const int y = threadIdx.x / NB;
+            const auto el = threadIdx.y;
+
+            if (el == 0)
+                smem.D[x][y] = D(x, y);
+
+            for (int i = 0; i < NB; ++i)
+            {
+                I[0][i] = (el < nel) ? sI(i, y, el, subsp) : -1;
+                I[1][i] = (el < nel) ? sI(x, i, el, subsp) : -1;
+            }
+
+            geom = (el < nel) ? G(x, y, el, subsp) : mat_t{};
+
+            __syncthreads();
+        }
+
+        __device__ scalar_t operator()(scalar_t in) const
+        {
+            const int x = threadIdx.x % NB;
+            const int y = threadIdx.x / NB;
+            const auto el = threadIdx.y;
+
+            smem.u[threadIdx.x + NB * NB * threadIdx.y] = in;
+            __syncthreads();
+
+            vec_t grad{0, 0};
+
+            if (I[0][0] >= 0) // el < nel
+            {
+                for (int i = 0; i < NB; ++i)
+                {
+                    grad.x += smem.D[x][i] * smem.u[I[0][i]];
+                    grad.y += smem.D[y][i] * smem.u[I[1][i]];
+                }
+            }
+            __syncthreads();
+
+            smem.grad[el][y][x] = geom * grad;
+            smem.u[threadIdx.x + NB * NB * threadIdx.y] = 0;
+            __syncthreads();
+
+            scalar_t Su = 0;
+            for (int i = 0; i < NB; ++i)
+            {
+                Su += smem.D[i][x] * smem.grad[el][y][i].x + smem.D[i][y] * smem.grad[el][i][x].y;
+            }
+            atomicAdd(smem.u + I[0][x], Su);
+            __syncthreads();
+
+            return smem.u[threadIdx.x + NB * NB * threadIdx.y];
+        }
+    };
+
+    template <typename scalar_t>
+    struct DeviceDDStiffnessMatrix
+    {
+        using sym2x2 = SmallSymmetricMatrix<scalar_t, 2>;
+
+        MatrixWrapper<const scalar_t> D;
+        TensorWrapper<4, const sym2x2> G;
+        TensorWrapper<4, const int> I;
+
+        template <int NB, int MX_NEL>
+        __device__ SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL> subspace_op(
+            int subsp, int nel, typename SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>::SharedResources &smem) const
+        {
+            return SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>(smem, subsp, nel, D, G, I);
+        }
+    };
+
     template <typename scalar_t>
     class DDStiffnessMatrix
     {
@@ -20,19 +120,13 @@ namespace cuddh
     public:
         using sym2x2 = SmallSymmetricMatrix<scalar_t, 2>;
 
-        struct DeviceDDStiffnessMatrix
-        {
-            MatrixWrapper<const scalar_t> D;
-            TensorWrapper<4, const sym2x2> G;
-        };
-
         DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem);
 
-        DeviceDDStiffnessMatrix to_device() const
+        DeviceDDStiffnessMatrix<scalar_t> to_device() const
         {
-            auto D = reshape(d.device_read(), n_basis, n_basis);
-            auto G = reshape(g.device_read(), n_basis, n_basis, mx_elem, n_domains);
-            return {D, G};
+            return {.D = reshape(d.device_read(), n_basis, n_basis),
+                    .G = reshape(g.device_read(), n_basis, n_basis, mx_elem, n_domains),
+                    .I = d_I};
         }
 
     private:
@@ -41,6 +135,7 @@ namespace cuddh
         int n_domains;
         HostDeviceArray<scalar_t> d;
         HostDeviceArray<sym2x2> g;
+        TensorWrapper<4, const int> d_I;
     };
 
     extern template class DDStiffnessMatrix<float>;

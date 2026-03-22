@@ -76,6 +76,7 @@ DDStiffnessMatrix<scalar_t>::DDStiffnessMatrix(const H1Space2D &fem, const Ensem
 {
     make_diffmat<scalar_t>(d.host_write(), fem.basis());
     geom_factors<scalar_t>(g.device_write(), fem, efem);
+    d_I = efem.subspace_indices(MemorySpace::DEVICE);
 }
 
 namespace cuddh

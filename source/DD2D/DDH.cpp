@@ -50,102 +50,20 @@ __device__ __forceinline__ static void cxmult(scalar_t &x, scalar_t &y, scalar_t
     y = s * t + c * y;
 }
 
-template <int NB>
-static constexpr int2 get_index2d(int i)
-{
-    return {i % NB, i / NB};
-}
-
-template <typename scalar_t, int NB, int NEL>
-struct BlockStiffness
-{
-    using vec_t = cuddh::scalar2<scalar_t>;
-    using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
-
-    struct SharedResources
-    {
-        scalar_t D[NB][NB];
-        scalar_t u[NB * NB * NEL];
-        vec_t grad[NEL][NB][NB];
-    };
-
-    SharedResources &smem;
-    mat_t geom;
-    int I[2][NB];
-
-    __device__ BlockStiffness(SharedResources &mem, int subsp, int nel,
-                              const typename DDStiffnessMatrix<scalar_t>::DeviceDDStiffnessMatrix &stiffness_matrix,
-                              const TensorWrapper<4, const int> &sI)
-        : smem{mem}
-    {
-        const auto [x, y] = get_index2d<NB>(threadIdx.x);
-        const auto el = threadIdx.y;
-
-        if (el == 0)
-            smem.D[x][y] = stiffness_matrix.D(x, y);
-
-        for (int i = 0; i < NB; ++i)
-        {
-            I[0][i] = (el < nel) ? sI(i, y, el, subsp) : -1;
-            I[1][i] = (el < nel) ? sI(x, i, el, subsp) : -1;
-        }
-
-        geom = (el < nel) ? stiffness_matrix.G(x, y, el, subsp) : mat_t{};
-
-        __syncthreads();
-    }
-
-    __device__ scalar_t operator()(scalar_t in) const
-    {
-        const auto [x, y] = get_index2d<NB>(threadIdx.x);
-        const auto el = threadIdx.y;
-
-        smem.u[threadIdx.x + NB * NB * threadIdx.y] = in;
-        __syncthreads();
-
-        vec_t grad{0, 0};
-
-        if (I[0][0] >= 0) // el < nel
-        {
-            for (int i = 0; i < NB; ++i)
-            {
-                grad.x += smem.D[x][i] * smem.u[I[0][i]];
-                grad.y += smem.D[y][i] * smem.u[I[1][i]];
-            }
-        }
-        __syncthreads();
-
-        smem.grad[el][y][x] = geom * grad;
-        smem.u[threadIdx.x + NB * NB * threadIdx.y] = 0;
-        __syncthreads();
-
-        scalar_t Su = 0;
-        for (int i = 0; i < NB; ++i)
-        {
-            Su += smem.D[i][x] * smem.grad[el][y][i].x + smem.D[i][y] * smem.grad[el][i][x].y;
-        }
-        atomicAdd(smem.u + I[0][x], Su);
-        __syncthreads();
-
-        return smem.u[threadIdx.x + NB * NB * threadIdx.y];
-    }
-};
-
 template <int NB, int NEL, typename scalar_t>
 static void ddh_action(
-    const EnsembleSpace *efem, const int g_ndof, /* global finite element degrees of freedom */
-    const int n_lambda,                          /* number of substructured DOFs (lambda) */
-    const TensorWrapper<3, const int2> B,        /* global lambda indices associated with boundary DOF */
-    const TensorWrapper<3, const scalar_t> T,    /* lambda trace operator */
-    const typename DDStiffnessMatrix<scalar_t>::DeviceDDStiffnessMatrix
-        stiffness_matrix,                                   /* stiffness_matvec matrix on device */
-    const MatrixWrapper<const cuddh::scalar2<scalar_t>> ab, /* alpha and beta coefficients for time stepping */
-    const MatrixWrapper<const scalar_t> punity,             /* partition of unity */
-    const waveholtz<scalar_t> W,                            /* WaveHoltz data */
-    const double *const __restrict__ x,                     /* input */
-    double *const __restrict__ y,                           /* output */
-    const scalar_t *const __restrict__ d_lambda,            /* substructured problem variables */
-    scalar_t *const __restrict__ d_update                   /* substructured problem variables */
+    const EnsembleSpace *efem, const int g_ndof,              /* global finite element degrees of freedom */
+    const int n_lambda,                                       /* number of substructured DOFs (lambda) */
+    const TensorWrapper<3, const int2> B,                     /* global lambda indices associated with boundary DOF */
+    const TensorWrapper<3, const scalar_t> T,                 /* lambda trace operator */
+    const DeviceDDStiffnessMatrix<scalar_t> stiffness_matrix, /* stiffness_matvec matrix on device */
+    const MatrixWrapper<const cuddh::scalar2<scalar_t>> ab,   /* alpha and beta coefficients for time stepping */
+    const MatrixWrapper<const scalar_t> punity,               /* partition of unity */
+    const waveholtz<scalar_t> W,                              /* WaveHoltz data */
+    const double *const __restrict__ x,                       /* input */
+    double *const __restrict__ y,                             /* output */
+    const scalar_t *const __restrict__ d_lambda,              /* substructured problem variables */
+    scalar_t *const __restrict__ d_update                     /* substructured problem variables */
 )
 {
     constexpr int wh_maxit = 20;
@@ -175,7 +93,7 @@ static void ddh_action(
     constexpr int EDOF = NB * NB;
 
     forall_2d(EDOF, NEL, n_domains, [=] __device__(const int subsp) mutable -> void {
-        using BStiffness = BlockStiffness<scalar_t, NB, NEL>;
+        using BStiffness = SubdomainStiffnessMatrix<scalar_t, NB, NEL>;
 
         const int tid = threadIdx.x + EDOF * threadIdx.y; // linearized thread id
 
@@ -190,7 +108,7 @@ static void ddh_action(
                      printf("DDH2D error: exceeded maximum number of elements per subdomain.\n"));
 
         __shared__ typename BStiffness::SharedResources smem;
-        BStiffness A(smem, subsp, s_elems(subsp), stiffness_matrix, sI);
+        auto A = stiffness_matrix.template subspace_op<NB, NEL>(subsp, s_elems(subsp), smem);
 
         const scalar_t sigma = W.sigma; // modified time step in WaveHoltz iteration
         const auto [alpha, beta] = ab(tid, subsp);
