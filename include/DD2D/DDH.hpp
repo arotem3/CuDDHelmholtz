@@ -64,8 +64,6 @@ namespace cuddh
             cuddh_verify(false, printf("DDSubstructedProblem::action(c, x, y) not implemented\n"));
         }
 
-        void residual(const double *u, const double *f, double *res) const;
-
     private:
         void action(const double *fem_in, double *fem_out, const scalar_t *lambda_in, scalar_t *lambda_out) const;
 
