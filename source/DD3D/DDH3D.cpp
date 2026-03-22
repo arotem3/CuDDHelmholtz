@@ -6,9 +6,6 @@
 
 using namespace cuddh;
 
-/* implements ddh_action where each thread is resposible for a single DOF within an element and `EL_PER_THR` elements
- * per thread. Taking `EL_PER_THR > 1` sacrifices some parallelism in exchange for larger subdomains.
- */
 template <typename scalar_t, int NB, int NEL>
 static void ddh_action_dof_per_thread(
     const EnsembleSpace3D &efem, const int g_ndof, /* global finite element degrees of freedom */
@@ -51,7 +48,7 @@ static void ddh_action_dof_per_thread(
     scalar_t *mu_update = (d_update) ? (d_update + n_lambda) : nullptr;
 
     forall_2d(EDOF, NEL, n_domains, [=] __device__(const int subsp) mutable -> void {
-        using BStiffness = SubdomainStiffnessMatrix<scalar_t, NB, NEL>;
+        using BStiffness = SubdomainStiffnessMatrix3D<scalar_t, NB, NEL>;
 
         const int tid = threadIdx.x + EDOF * threadIdx.y; // linearized thread index.
 
@@ -292,12 +289,6 @@ template <typename scalar_t>
 void DDSubstructedProblem3D<scalar_t>::postprocess(const scalar_t *lambda, const double *f, double *y) const
 {
     action(f, y, lambda, (scalar_t *)nullptr);
-}
-
-template <typename scalar_t>
-void DDSubstructedProblem3D<scalar_t>::residual(const double *u, const double *f, double *res) const
-{
-    cuddh_verify(false, printf("DDSubstructedProblem3D::residual not yet implemented\n"));
 }
 
 namespace cuddh

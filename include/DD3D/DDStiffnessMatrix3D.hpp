@@ -13,7 +13,7 @@
 namespace cuddh
 {
     template <typename scalar_t, int NB, int MX_NEL>
-    struct SubdomainStiffnessMatrix
+    struct SubdomainStiffnessMatrix3D
     {
         using vec_t = cuddh::scalar3<scalar_t>;
         using mat_t = SmallSymmetricMatrix<scalar_t, 3>;
@@ -39,10 +39,10 @@ namespace cuddh
             return idx;
         }
 
-        __device__ SubdomainStiffnessMatrix(SharedResources &mem, int subsp, int nel,
-                                            const MatrixWrapper<const scalar_t> &D,
-                                            const TensorWrapper<5, const mat_t> &G,
-                                            const TensorWrapper<5, const int> &sI)
+        __device__ SubdomainStiffnessMatrix3D(SharedResources &mem, int subsp, int nel,
+                                              const MatrixWrapper<const scalar_t> &D,
+                                              const TensorWrapper<5, const mat_t> &G,
+                                              const TensorWrapper<5, const int> &sI)
             : smem{mem}
         {
             const auto [x, y, z] = get_index3d(threadIdx.x);
@@ -111,14 +111,14 @@ namespace cuddh
         TensorWrapper<5, const int> I;
 
         template <int NB, int MX_NEL>
-        __device__ SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL> subspace_op(
-            int subsp, int nel, typename SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>::SharedResources &smem) const
+        __device__ SubdomainStiffnessMatrix3D<scalar_t, NB, MX_NEL> subspace_op(
+            int subsp, int nel, typename SubdomainStiffnessMatrix3D<scalar_t, NB, MX_NEL>::SharedResources &smem) const
         {
             cuddh_assert(blockDim.x == NB * NB * NB && blockDim.y == MX_NEL && blockDim.z == 1,
-                         printf("SubdomainStiffnessMatrix<NB = %d, MX_NEL = %d> expects a thread block of dimensions "
+                         printf("SubdomainStiffnessMatrix3D<NB = %d, MX_NEL = %d> expects a thread block of dimensions "
                                 "(NB^3, MX_NEL).\n",
                                 NB, MX_NEL));
-            return SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>(smem, subsp, nel, D, G, I);
+            return SubdomainStiffnessMatrix3D<scalar_t, NB, MX_NEL>(smem, subsp, nel, D, G, I);
         }
     };
 

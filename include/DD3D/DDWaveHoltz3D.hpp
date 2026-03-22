@@ -36,8 +36,8 @@ namespace cuddh
         const DeviceDDWaveHoltz3D<scalar_t> &wh;
         scalar_t alpha, beta;
 
-        template <typename SubdomainStiffnessMatrix>
-        __device__ scalar2<scalar_t> operator()(const SubdomainStiffnessMatrix &A, scalar2<scalar_t> u,
+        template <typename SubdomainStiffnessMatrix3D>
+        __device__ scalar2<scalar_t> operator()(const SubdomainStiffnessMatrix3D &A, scalar2<scalar_t> u,
                                                 const scalar2<scalar_t> &F) const
         {
             scalar_t cs = 1, sn = 0;
