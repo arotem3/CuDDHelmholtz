@@ -29,12 +29,12 @@ static void mass(scalar_t *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
 
     auto M = reshape(d_m, mx_dofs, n_domains);
 
-    forall_3d(n_basis, n_basis, mx_elem_per_dom, n_domains, [=] __device__(int subsp) mutable {
+    forall_2d(n_basis * n_basis, mx_elem_per_dom, n_domains, [=] __device__(int subsp) mutable {
         const int s_nel = d_n_elems(subsp);
 
-        const int i = threadIdx.x;
-        const int j = threadIdx.y;
-        const int el = threadIdx.z;
+        const int i = threadIdx.x % n_basis;
+        const int j = threadIdx.x / n_basis;
+        const int el = threadIdx.y;
 
         if (el < s_nel)
         {

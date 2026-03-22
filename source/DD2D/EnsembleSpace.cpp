@@ -85,33 +85,54 @@ EnsembleSpace::EnsembleSpace(const H1Space2D &fem, int n_spaces_, const int *ele
     n_shared_dofs = ESbuilder.compute_shared_dof_map(cmap, h_fI);
 }
 
-EnsembleSpace cuddh::partition_uniform_rect(const H1Space2D &fem, int nx, int ny, int max_dof_1d)
+static constexpr int2 get_block_dims(int2 block_dims, int n_basis)
+{
+    const int edof = n_basis * n_basis;
+
+    auto [bx, by] = block_dims;
+
+    if (bx > 0 && by > 0)
+        return {bx, by};
+
+    if (bx > 0)
+        by = std::max(1, CUDDH_DD2D_MX_DOF / (edof * bx));
+    else if (by > 0)
+        bx = std::max(1, CUDDH_DD2D_MX_DOF / (edof * by));
+    else // Heuristic selection
+    {
+        by = std::sqrt((double)CUDDH_DD2D_MX_DOF / edof);
+        bx = std::max(1, CUDDH_DD2D_MX_DOF / (edof * by));
+    }
+
+    return {bx, by};
+}
+
+EnsembleSpace cuddh::partition_uniform_rect(const H1Space2D &fem, int2 mesh_dims, int2 block_dims)
 {
     const int n_basis = fem.basis().size();
-    const int elems_per_domain_x = max_dof_1d / n_basis;
+    const auto [nx, ny] = mesh_dims;
+    const auto [bx, by] = get_block_dims(block_dims, n_basis);
 
-    cuddh_verify(nx % elems_per_domain_x == 0 && ny % elems_per_domain_x == 0,
-                 printf("Only nx x ny meshes with nx and ny multiples of %d allowed.", elems_per_domain_x));
+    const int dx = (nx + bx - 1) / bx;
+    const int dy = (ny + by - 1) / by;
 
-    const int num_domains_x = nx / elems_per_domain_x;
-    const int num_domains_y = ny / elems_per_domain_x;
-
-    int n_domains = num_domains_x * num_domains_y;
+    int nd = dx * dy;
 
     imat element_labels(nx, ny);
     std::fill(element_labels.begin(), element_labels.end(), -1);
 
-    for (int j = 0; j < ny; ++j)
+    for (int y = 0; y < ny; ++y)
     {
-        for (int i = 0; i < nx; ++i)
+        for (int x = 0; x < nx; ++x)
         {
-            int label_x = i / elems_per_domain_x;
-            int label_y = j / elems_per_domain_x;
-            element_labels(i, j) = label_x + num_domains_x * label_y;
+            int label_x = x / bx;
+            int label_y = y / by;
+
+            element_labels(x, y) = label_x + dx * label_y;
         }
     }
 
-    return EnsembleSpace(fem, n_domains, element_labels);
+    return EnsembleSpace(fem, nd, element_labels);
 }
 
 static auto compute_subspace_elements(int nel, int n_spaces, const int *element_labels)

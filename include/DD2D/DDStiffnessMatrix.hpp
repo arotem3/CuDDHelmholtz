@@ -23,7 +23,7 @@ namespace cuddh
         struct DeviceDDStiffnessMatrix
         {
             MatrixWrapper<const scalar_t> D;
-            MatrixWrapper<const sym2x2> G;
+            TensorWrapper<4, const sym2x2> G;
         };
 
         DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem);
@@ -31,7 +31,7 @@ namespace cuddh
         DeviceDDStiffnessMatrix to_device() const
         {
             auto D = reshape(d.device_read(), n_basis, n_basis);
-            auto G = reshape(g.device_read(), n_basis * n_basis * mx_elem, n_domains);
+            auto G = reshape(g.device_read(), n_basis, n_basis, mx_elem, n_domains);
             return {D, G};
         }
 

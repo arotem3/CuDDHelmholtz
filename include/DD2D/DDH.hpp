@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <unordered_set>
 
+#include "DD2D.hpp"
 #include "DDFaceMassMatrix.hpp"
 #include "DDMassMatrix.hpp"
 #include "DDStiffnessMatrix.hpp"

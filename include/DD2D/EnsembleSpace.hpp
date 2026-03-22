@@ -4,6 +4,7 @@
 #include <array>
 #include <utility>
 
+#include "DD2D.hpp"
 #include "H1Space2D.hpp"
 #include "LambdaDof.hpp"
 #include "Tensor.hpp"
@@ -114,5 +115,5 @@ namespace cuddh
         HostDeviceArray<LambdaDof> cmap;
     };
 
-    EnsembleSpace partition_uniform_rect(const H1Space2D &fem, int nx, int ny, int max_dof_1d = 16);
+    EnsembleSpace partition_uniform_rect(const H1Space2D &fem, int2 mesh_dims, int2 block_dims = {0, 0});
 } // namespace cuddh

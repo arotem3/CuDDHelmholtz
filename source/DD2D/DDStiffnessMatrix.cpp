@@ -37,10 +37,12 @@ static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D
 
     auto G = reshape(d_G, n_basis, n_basis, mx_elem, n_domains);
 
-    forall_3d(n_basis, n_basis, mx_elem, n_domains, [=] __device__(int subsp) mutable -> void {
+    forall_2d(n_basis * n_basis, mx_elem, n_domains, [=] __device__(int subsp) mutable -> void {
         const int n_elem = n_elems[subsp];
 
-        const auto [i, j, el] = threadIdx;
+        const int i = threadIdx.x % n_basis;
+        const int j = threadIdx.x / n_basis;
+        const int el = threadIdx.y;
 
         if (el >= n_elem)
             return;

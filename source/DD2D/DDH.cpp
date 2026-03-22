@@ -1,9 +1,5 @@
 #include "DD2D/DDH.hpp"
 
-// one dimensional size of each domain decomp block. Each block has
-// DDH_BLOCK_SIZE * DDH_BLOCK_SIZE degrees of freedom.
-#define DDH_BLOCK_SIZE 16
-
 using namespace cuddh;
 
 namespace
@@ -54,81 +50,84 @@ __device__ __forceinline__ static void cxmult(scalar_t &x, scalar_t &y, scalar_t
     y = s * t + c * y;
 }
 
+template <int NB>
+static constexpr int2 get_index2d(int i)
+{
+    return {i % NB, i / NB};
+}
+
 template <typename scalar_t, int NB, int NEL>
 struct BlockStiffness
 {
     using vec_t = cuddh::scalar2<scalar_t>;
+    using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
 
     struct SharedResources
     {
         scalar_t D[NB][NB];
-        scalar_t u[NB * NB * NEL * NEL];
-        vec_t grad[NEL * NEL][NB][NB];
+        scalar_t u[NB * NB * NEL];
+        vec_t grad[NEL][NB][NB];
     };
 
     SharedResources &smem;
-    SmallSymmetricMatrix<scalar_t, 2> geom;
+    mat_t geom;
     int I[2][NB];
 
-    __device__ BlockStiffness(SharedResources &mem, int subsp,
+    __device__ BlockStiffness(SharedResources &mem, int subsp, int nel,
                               const typename DDStiffnessMatrix<scalar_t>::DeviceDDStiffnessMatrix &stiffness_matrix,
                               const TensorWrapper<4, const int> &sI)
         : smem{mem}
     {
-        const auto [x, y, el] = threadIdx;
-        const int tid = x + NB * (y + NB * el);
+        const auto [x, y] = get_index2d<NB>(threadIdx.x);
+        const auto el = threadIdx.y;
 
         if (el == 0)
             smem.D[x][y] = stiffness_matrix.D(x, y);
 
         for (int i = 0; i < NB; ++i)
         {
-            I[0][i] = sI(i, y, el, subsp);
-            I[1][i] = sI(x, i, el, subsp);
+            I[0][i] = (el < nel) ? sI(i, y, el, subsp) : -1;
+            I[1][i] = (el < nel) ? sI(x, i, el, subsp) : -1;
         }
 
-        geom = stiffness_matrix.G(tid, subsp);
+        geom = (el < nel) ? stiffness_matrix.G(x, y, el, subsp) : mat_t{};
 
         __syncthreads();
     }
 
     __device__ scalar_t operator()(scalar_t in) const
     {
-        const auto [x, y, el] = threadIdx;
-        const int tid = x + NB * (y + NB * el);
+        const auto [x, y] = get_index2d<NB>(threadIdx.x);
+        const auto el = threadIdx.y;
 
-        smem.u[tid] = in;
+        smem.u[threadIdx.x + NB * NB * threadIdx.y] = in;
         __syncthreads();
 
         vec_t grad{0, 0};
 
-#pragma unroll NB
-        for (int i = 0; i < NB; ++i)
-            grad.x += smem.D[x][i] * smem.u[I[0][i]];
-
-#pragma unroll NB
-        for (int i = 0; i < NB; ++i)
-            grad.y += smem.D[y][i] * smem.u[I[1][i]];
+        if (I[0][0] >= 0) // el < nel
+        {
+            for (int i = 0; i < NB; ++i)
+            {
+                grad.x += smem.D[x][i] * smem.u[I[0][i]];
+                grad.y += smem.D[y][i] * smem.u[I[1][i]];
+            }
+        }
         __syncthreads();
 
         smem.grad[el][y][x] = geom * grad;
-        smem.u[tid] = 0;
+        smem.u[threadIdx.x + NB * NB * threadIdx.y] = 0;
         __syncthreads();
 
         scalar_t Su = 0;
-
-#pragma unroll NB
         for (int i = 0; i < NB; ++i)
-            Su += smem.D[i][x] * smem.grad[el][y][i].x;
-
-#pragma unroll NB
-        for (int i = 0; i < NB; ++i)
-            Su += smem.D[i][y] * smem.grad[el][i][x].y;
-
+        {
+            Su += smem.D[i][x] * smem.grad[el][y][i].x + smem.D[i][y] * smem.grad[el][i][x].y;
+        }
         atomicAdd(smem.u + I[0][x], Su);
         __syncthreads();
 
-        return smem.u[tid];
+        return smem.u[threadIdx.x + NB * NB * threadIdx.y];
     }
 };
 
@@ -157,8 +156,7 @@ static void ddh_action(
     auto sI = efem->subspace_indices(MemorySpace::DEVICE); // mapping from (i,j)-node on element to subspace DOF
     auto s_dof = efem->sizes(MemorySpace::DEVICE);         // number of subdomain degrees of freedom
     auto s_fdof = efem->fsizes(MemorySpace::DEVICE);       // number of face space degrees of freedom
-
-    const scalar_t rw = scalar_t(1) / W.omega;
+    auto s_elems = efem->n_elems(MemorySpace::DEVICE);     // number of elements in each subdomain
 
     if (y)
         dla::zeros(2 * g_ndof, y);
@@ -169,29 +167,30 @@ static void ddh_action(
     scalar_t *lambda_update = (d_update) ? d_update : nullptr;
     scalar_t *mu_update = (d_update) ? (d_update + n_lambda) : nullptr;
 
-    constexpr int MX_NDOF = NB * NB * NEL * NEL; // == DDH_BLOCK_SIZE^2
-
     // R = Rx + i Ry = exp(0.5 * i * omega * dt) used in the short term recurrence:
     // z(t + 0.5 * dt) = R * z(t) where z(t) = exp(i * omega * t).
     const scalar_t Rx = static_cast<scalar_t>(std::cos(0.5 * W.omega * W.dt));
     const scalar_t Ry = static_cast<scalar_t>(std::sin(0.5 * W.omega * W.dt));
 
-    forall_3d(NB, NB, NEL * NEL, n_domains, [=] __device__(const int subsp) mutable -> void {
+    constexpr int EDOF = NB * NB;
+
+    forall_2d(EDOF, NEL, n_domains, [=] __device__(const int subsp) mutable -> void {
         using BStiffness = BlockStiffness<scalar_t, NB, NEL>;
 
-        const auto &[k, l, el] = threadIdx;     // convinient indicies
-        const int tid = k + NB * (l + NB * el); // linearized thread id
+        const int tid = threadIdx.x + EDOF * threadIdx.y; // linearized thread id
 
         // get subspace dimensions
         const int fdof = s_fdof(subsp); // dimension of facespace
         const int ndof = s_dof(subsp);  // dimension of subspace
 
-        cuddh_assert(ndof <= MX_NDOF,
+        cuddh_assert(ndof <= CUDDH_DD2D_MX_DOF,
                      printf("DDH2D error: exceeded maximum number of subdomain DOFs per thread block (%d > %d)\n", ndof,
-                            MX_NDOF););
+                            CUDDH_DD2D_MX_DOF););
+        cuddh_assert(s_elems(subsp) <= NEL,
+                     printf("DDH2D error: exceeded maximum number of elements per subdomain.\n"));
 
         __shared__ typename BStiffness::SharedResources smem;
-        BStiffness A(smem, subsp, stiffness_matrix, sI);
+        BStiffness A(smem, subsp, s_elems(subsp), stiffness_matrix, sI);
 
         const scalar_t sigma = W.sigma; // modified time step in WaveHoltz iteration
         const auto [alpha, beta] = ab(tid, subsp);
@@ -258,7 +257,7 @@ static void ddh_action(
             } // time stepping
 
             // rescale v
-            u.y *= rw;
+            u.y /= W.omega;
 
             return u;
         };
@@ -422,7 +421,7 @@ static thrust::universal_vector<cuddh::scalar2<scalar_t>> make_alpha_beta(double
     auto s_dof = efem.sizes(MemorySpace::DEVICE);   // number of subdomain degrees of freedom
     auto s_fdof = efem.fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
 
-    constexpr int n = DDH_BLOCK_SIZE * DDH_BLOCK_SIZE; // number of threads per block
+    constexpr int n = CUDDH_DD2D_MX_DOF; // number of threads per block
     thrust::universal_vector<cuddh::scalar2<scalar_t>> ab(n * n_domains);
     auto alpha_beta = reshape(ab, n, n_domains);
 
@@ -465,7 +464,7 @@ DDSubstructedProblem<scalar_t>::DDSubstructedProblem(double omega_, const double
       efem{efem},
       S(fem, efem)
 {
-    cuddh_verify(n_basis == 4 || n_basis == 8, printf("DDH error: Only n_basis==4, and n_basis==8 supported.\n"););
+    cuddh_verify(n_basis <= 8, printf("DDH error: Only n_basis <= 8 supported.\n"););
 
     n_domains = efem.size();
 
@@ -494,28 +493,41 @@ template <typename scalar_t>
 void DDSubstructedProblem<scalar_t>::action(const double *fem_in, double *fem_out, const scalar_t *lambda_in,
                                             scalar_t *lambda_out) const
 {
+    cuddh_verify(n_basis <= 8, printf("DDH error: Only n_basis <= 8 supported.\n"););
+
     auto B = reshape(_B, 2, mx_fdof, n_domains);
     auto T = reshape(_T, 2, mx_fdof, n_domains);
 
-    auto d_S = S.to_device();
-    auto ab = reshape(alpha_beta, DDH_BLOCK_SIZE * DDH_BLOCK_SIZE, n_domains);
+    auto ab = reshape(alpha_beta, CUDDH_DD2D_MX_DOF, n_domains);
 
     auto punity = reshape(_partition_of_unity, mx_dof, n_domains);
 
-    auto actionf = [&]() {
-        using func_t = decltype(&::ddh_action<4, DDH_BLOCK_SIZE / 4, scalar_t>);
-
-        cuddh_verify(n_basis == 4 || n_basis == 8, printf("DDH error: Only n_basis==4, and n_basis==8 supported.\n"););
-
-        if (n_basis == 4)
-            return &::ddh_action<4, DDH_BLOCK_SIZE / 4, scalar_t>;
-        else if (n_basis == 8)
-            return &::ddh_action<8, DDH_BLOCK_SIZE / 8, scalar_t>;
-        return (func_t) nullptr;
+    using func_t = decltype(&::ddh_action<4, CUDDH_DD2D_MX_DOF / (4 * 4), scalar_t>);
+    auto actionf = [&]() -> func_t {
+        switch (n_basis)
+        {
+            case 2:
+                return ::ddh_action<2, CUDDH_DD2D_MX_DOF / (2 * 2), scalar_t>;
+            case 3:
+                return ::ddh_action<3, CUDDH_DD2D_MX_DOF / (3 * 3), scalar_t>;
+            case 4:
+                return ::ddh_action<4, CUDDH_DD2D_MX_DOF / (4 * 4), scalar_t>;
+            case 5:
+                return ::ddh_action<5, CUDDH_DD2D_MX_DOF / (5 * 5), scalar_t>;
+            case 6:
+                return ::ddh_action<6, CUDDH_DD2D_MX_DOF / (6 * 6), scalar_t>;
+            case 7:
+                return ::ddh_action<7, CUDDH_DD2D_MX_DOF / (7 * 7), scalar_t>;
+            case 8:
+                return ::ddh_action<8, CUDDH_DD2D_MX_DOF / (8 * 8), scalar_t>;
+            default:
+                return (func_t) nullptr;
+                break;
+        }
     }();
 
-    (*actionf)(&efem, g_ndof, n_lambda, B, T, d_S, ab, punity, make_waveholtz<scalar_t>(omega, dt), fem_in, fem_out,
-               lambda_in, lambda_out);
+    (*actionf)(&efem, g_ndof, n_lambda, B, T, S.to_device(), ab, punity, make_waveholtz<scalar_t>(omega, dt), fem_in,
+               fem_out, lambda_in, lambda_out);
 }
 
 template <typename scalar_t>
