@@ -6,54 +6,6 @@
 
 using namespace cuddh;
 
-namespace
-{
-    // Templated waveholtz used by host-side precomputation (make_alpha_beta).
-    template <typename scalar_t>
-    struct waveholtz_t
-    {
-        int nt;
-        scalar_t omega;
-        scalar_t dt;
-        scalar_t weight;
-        scalar_t shift;
-        scalar_t theta;
-        scalar_t sigma;
-
-        constexpr __host__ __device__ scalar_t filter(scalar_t cs) const { return weight * cs - shift; }
-    };
-
-    template <typename scalar_t>
-    static waveholtz_t<scalar_t> make_waveholtz_t(double omega, double dt)
-    {
-        waveholtz_t<scalar_t> W;
-        W.omega = omega;
-
-        double T = (2 * M_PI) / omega;
-        W.nt = std::ceil(T / dt);
-        dt = T / W.nt;
-        W.dt = dt;
-
-        double tan_omega_dt = std::tan(0.5 * omega * dt);
-        double a0 = 0.25 * (1 - tan_omega_dt * tan_omega_dt);
-
-        W.weight = 2.0 / W.nt;
-        W.shift = W.weight * a0;
-        W.theta = tan_omega_dt / omega;
-        W.sigma = std::sin(0.5 * omega * dt) / (0.5 * omega);
-
-        return W;
-    }
-} // namespace
-
-// computes the complex multiplication (c + i*s) * (x + i*y) and stores the result in x and y.
-__device__ __forceinline__ static void cxmult(float &x, float &y, float c, float s)
-{
-    float t = x;
-    x = c * t - s * y;
-    y = s * t + c * y;
-}
-
 /* implements ddh_action where each thread is resposible for a single DOF within an element and `EL_PER_THR` elements
  * per thread. Taking `EL_PER_THR > 1` sacrifices some parallelism in exchange for larger subdomains.
  */
@@ -63,14 +15,13 @@ static void ddh_action_dof_per_thread(
     const int n_lambda,                            /* number of substructured DOFs (lambda) */
     const TensorWrapper<3, const int2> B,          /* global lambda indices associated with boundary DOFs */
     const TensorWrapper<3, const scalar_t> T,      /* lambda trace operator */
-    const typename DDStiffnessMatrix3D<scalar_t>::DeviceDDStiffnessMatrix3D stiffness_matrix,
-    const MatrixWrapper<const cuddh::scalar2<scalar_t>> ab, /* alpha and beta coefficients for time-stepping */
-    const MatrixWrapper<const scalar_t> punity,             /* partition of unity */
-    const ::waveholtz_t<scalar_t> W,                        /* waveholtz data */
-    const double *const __restrict__ d_x,                   /* input */
-    double *const __restrict__ d_y,                         /* output */
-    const scalar_t *const __restrict__ d_lambda,            /* substructured problem input DOFs */
-    scalar_t *const __restrict__ d_update                   /* substructured problem output DOFs */
+    const DeviceDDStiffnessMatrix3D<scalar_t> stiffness_matrix,
+    const MatrixWrapper<const scalar_t> punity,    /* partition of unity */
+    const DeviceDDWaveHoltz3D<scalar_t> waveholtz, /* waveholtz */
+    const double *const __restrict__ d_x,          /* input */
+    double *const __restrict__ d_y,                /* output */
+    const scalar_t *const __restrict__ d_lambda,   /* substructured problem input DOFs */
+    scalar_t *const __restrict__ d_update          /* substructured problem output DOFs */
 )
 {
     using vec2 = cuddh::scalar2<scalar_t>;
@@ -90,8 +41,6 @@ static void ddh_action_dof_per_thread(
     auto subsp_sizes = efem.sizes(MemorySpace::DEVICE);   // number of subdomain degrees of freedom
     auto subsp_fsizes = efem.fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
 
-    const scalar_t rw = 1 / W.omega;
-
     if (d_y)
         dla::zeros(2 * g_ndof, d_y);
 
@@ -100,9 +49,6 @@ static void ddh_action_dof_per_thread(
 
     scalar_t *lambda_update = (d_update) ? d_update : nullptr;
     scalar_t *mu_update = (d_update) ? (d_update + n_lambda) : nullptr;
-
-    const scalar_t Rx = std::cos(0.5 * W.omega * W.dt);
-    const scalar_t Ry = std::sin(0.5 * W.omega * W.dt);
 
     forall_2d(EDOF, NEL, n_domains, [=] __device__(const int subsp) mutable -> void {
         using BStiffness = SubdomainStiffnessMatrix<scalar_t, NB, NEL>;
@@ -121,13 +67,7 @@ static void ddh_action_dof_per_thread(
 
         __shared__ typename BStiffness::SharedResources smem;
         auto A = stiffness_matrix.template subspace_op<NB, NEL>(subsp, subsp_elems(subsp), smem);
-
-        const auto [alpha, beta] = [&]() -> vec2 {
-            if (tid < ndof)
-                return ab(tid, subsp);
-            else
-                return vec2{0, 0};
-        }();
+        auto evolve_project = waveholtz.subspace_op(subsp, tid, ndof);
 
         const vec2 F = [&]() -> vec2 {
             vec2 F{0, 0};
@@ -157,46 +97,10 @@ static void ddh_action_dof_per_thread(
             return F;
         }();
 
-        auto evolve_project = [&](vec2 u) -> vec2 {
-            scalar_t cs = 1, sn = 0;
-            scalar_t K = W.filter(cs);
-
-            scalar_t p = u.x;
-
-            cxmult(cs, sn, Rx, Ry);
-
-            scalar_t q = (-sn * u.x + cs * u.y) * W.omega;
-
-            u.x = K * p;
-
-            K = W.filter(cs);
-            u.y = K * q;
-
-            for (int n = 1; n < W.nt; ++n)
-            {
-                cxmult(cs, sn, Rx, Ry);
-                K = W.filter(cs);
-
-                p += W.sigma * q;
-                u.x += K * p;
-
-                q = alpha * q + beta * (-A(p) + cs * F.x + sn * F.y);
-
-                cxmult(cs, sn, Rx, Ry);
-                K = W.filter(cs);
-
-                u.y += K * q;
-            }
-
-            u.y *= rw;
-
-            return u;
-        };
-
         vec2 u{0, 0};
         for (int it = 0; it < wh_maxit; ++it)
         {
-            u = evolve_project(u);
+            u = evolve_project(A, u, F);
         }
 
         if (d_y && (tid < ndof))
@@ -242,16 +146,17 @@ static void ddh_action_dof_per_thread(
 // Returns n_lambda = 2 * n_shared.
 template <typename scalar_t>
 static int lambda_dofs(thrust::universal_vector<int2> &h_B, thrust::universal_vector<scalar_t> &h_T,
-                       const EnsembleSpace3D &efem, double omega, const MatrixWrapper<scalar_t> a)
+                       const EnsembleSpace3D &efem, double omega, VectorWrapper<const double> a)
 {
     const int n_domains = efem.size();
     const int mx_fdof = efem.max_fsize();
 
     auto cmap = efem.connectivity_map(MemorySpace::HOST);
+    auto gI = efem.global_indices(MemorySpace::HOST);
     const int n_shared = cmap.shape(0);
     const int n_lambda = 2 * n_shared;
 
-    // leading dim 3: at most 3 coordinate-aligned faces can share a DOF in 3D
+    // leading dim 3: at most 3 boundary faces can share a DOF in 3D
     h_B.resize(3 * mx_fdof * n_domains);
     h_T.resize(3 * mx_fdof * n_domains);
     thrust::fill(h_B.begin(), h_B.end(), int2{-1, -1});
@@ -276,7 +181,7 @@ static int lambda_dofs(thrust::universal_vector<int2> &h_B, thrust::universal_ve
                 {
                     b(o, face_index, subspace) = {(s == 0) ? k : n_shared + k, (s == 0) ? n_shared + k : k};
                     t(o, face_index, subspace) =
-                        static_cast<scalar_t>(2.0 * omega * a(face_index, subspace) * dof.face_mass);
+                        static_cast<scalar_t>(2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass);
                     break;
                 }
             }
@@ -284,26 +189,6 @@ static int lambda_dofs(thrust::universal_vector<int2> &h_B, thrust::universal_ve
     }
 
     return n_lambda;
-}
-
-// Map global FEM function values to DD subspace arrays.
-template <typename T1, typename T2>
-static void DD_gridfun(T1 *h_u_dd, const T2 *h_u_mesh, const EnsembleSpace3D &efem)
-{
-    const int n_domains = efem.size();
-    const int mx_dof = efem.max_size();
-
-    auto sizes = efem.sizes(MemorySpace::HOST);
-    auto gI = efem.global_indices(MemorySpace::HOST);
-
-    auto dd = reshape(h_u_dd, mx_dof, n_domains);
-
-    for (int subsp = 0; subsp < n_domains; ++subsp)
-    {
-        const int ndof = sizes(subsp);
-        for (int i = 0; i < ndof; ++i)
-            dd(i, subsp) = h_u_mesh[gI(i, subsp)];
-    }
 }
 
 template <typename scalar_t>
@@ -337,66 +222,14 @@ static thrust::universal_vector<scalar_t> partition_of_unity(const H1Space3D &fe
 }
 
 template <typename scalar_t>
-static thrust::universal_vector<cuddh::scalar2<scalar_t>> make_alpha_beta(double omega, double dt,
-                                                                          const MatrixWrapper<scalar_t> a,
-                                                                          const H1Space3D &fem,
-                                                                          const EnsembleSpace3D &efem)
-{
-    DDMassMatrix3D M(fem, efem);
-    DDFaceMassMatrix3D H(fem, efem);
-
-    auto m = M.to_device();
-    auto h = H.to_device();
-
-    const int n_domains = efem.size();
-    const int mx_dof = efem.max_size();
-
-    auto s_dof = efem.sizes(MemorySpace::DEVICE);
-    auto s_fdof = efem.fsizes(MemorySpace::DEVICE);
-
-    waveholtz_t<scalar_t> W = make_waveholtz_t<scalar_t>(omega, dt);
-
-    thrust::universal_vector<cuddh::scalar2<scalar_t>> ab(mx_dof * n_domains);
-    auto alpha_beta = reshape(ab, mx_dof, n_domains);
-
-    forall_1d(mx_dof, n_domains, [=] __device__(int subsp) mutable -> void {
-        const int i = threadIdx.x;
-        const int ndof = s_dof(subsp);
-        const int fdof = s_fdof(subsp);
-
-        cuddh::scalar2<scalar_t> ab_i{0, 0};
-
-        if (i < ndof)
-        {
-            scalar_t ai = a(i, subsp);
-            scalar_t Mi = m(i, subsp);
-            scalar_t Hi = (i < fdof) ? h(i, subsp) : scalar_t(0);
-
-            Hi *= ai;
-            Mi *= ai * ai;
-
-            const scalar_t inv = 1 / (Mi + W.theta * Hi);
-            ab_i.x = (Mi - W.theta * Hi) * inv;
-            ab_i.y = W.sigma * inv;
-        }
-
-        alpha_beta(i, subsp) = ab_i;
-    });
-
-    CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
-
-    return ab;
-}
-
-template <typename scalar_t>
 DDSubstructedProblem3D<scalar_t>::DDSubstructedProblem3D(double omega_, const double *h_a, const H1Space3D &fem,
                                                          const EnsembleSpace3D &efem_)
     : g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
       n_basis{fem.basis().size()},
-      omega{omega_},
       efem{efem_},
-      S(fem, efem_)
+      S(fem, efem_),
+      W(omega_, h_a, fem, efem_)
 {
     cuddh_verify(n_basis >= 2 && n_basis <= 4, printf("DDH3D error: Only n_basis in [2,3,4] supported.\n"););
     cuddh_verify(efem.max_size() <= DD3D_MX_DOF, printf("DDH3D error: subdomains too big.\n"));
@@ -406,20 +239,9 @@ DDSubstructedProblem3D<scalar_t>::DDSubstructedProblem3D(double omega_, const do
     mx_fdof = efem.max_fsize();
     mx_elem_per_dom = efem.max_n_elem();
 
-    thrust::universal_vector<scalar_t> _a(mx_dof * n_domains);
-    auto a = reshape(_a, mx_dof, n_domains);
-    DD_gridfun(a.data(), h_a, efem);
-
-    n_lambda = lambda_dofs(_B, _T, efem, omega, a);
+    n_lambda = lambda_dofs(_B, _T, efem, omega_, reshape(h_a, fem.size()));
 
     _partition_of_unity = partition_of_unity<scalar_t>(fem, efem);
-
-    // time step determined by CFL condition: dt = C * h / (n_basis * n_basis * max_vel)
-    const double h = fem.mesh().h();
-    const double reciprocal_max_vel = *std::min_element(h_a, h_a + g_ndof);
-    dt = 2.0 * reciprocal_max_vel * h / (n_basis * n_basis);
-
-    alpha_beta = make_alpha_beta<scalar_t>(omega, dt, a, fem, efem);
 }
 
 template <typename scalar_t>
@@ -446,12 +268,9 @@ void DDSubstructedProblem3D<scalar_t>::action(const double *fem_in, double *fem_
 
     auto B = reshape(_B, 3, mx_fdof, n_domains);
     auto T = reshape(_T, 3, mx_fdof, n_domains);
-    auto d_S = S.to_device();
-    auto ab = reshape(alpha_beta, mx_dof, n_domains);
     auto punity = reshape(_partition_of_unity, mx_dof, n_domains);
 
-    (*func)(efem, g_ndof, n_lambda, B, T, d_S, ab, punity, ::make_waveholtz_t<scalar_t>(omega, dt), fem_in, fem_out,
-            lambda_in, lambda_out);
+    (*func)(efem, g_ndof, n_lambda, B, T, S.to_device(), punity, W.to_device(), fem_in, fem_out, lambda_in, lambda_out);
 }
 
 template <typename scalar_t>

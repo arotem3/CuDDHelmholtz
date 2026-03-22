@@ -1,6 +1,7 @@
 #ifndef DDH_DD_STIFFNESS_MATRIX_3D_HPP
 #define DDH_DD_STIFFNESS_MATRIX_3D_HPP
 
+#include <thrust/device_vector.h>
 #include <thrust/universal_vector.h>
 
 #include "EnsembleSpace3D.hpp"
@@ -103,39 +104,44 @@ namespace cuddh
     };
 
     template <typename scalar_t>
+    struct DeviceDDStiffnessMatrix3D
+    {
+        MatrixWrapper<const scalar_t> D;
+        TensorWrapper<5, const SmallSymmetricMatrix<scalar_t, 3>> G;
+        TensorWrapper<5, const int> I;
+
+        template <int NB, int MX_NEL>
+        __device__ SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL> subspace_op(
+            int subsp, int nel, typename SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>::SharedResources &smem) const
+        {
+            cuddh_assert(blockDim.x == NB * NB * NB && blockDim.y == MX_NEL && blockDim.z == 1,
+                         printf("SubdomainStiffnessMatrix<NB = %d, MX_NEL = %d> expects a thread block of dimensions "
+                                "(NB^3, MX_NEL).\n",
+                                NB, MX_NEL));
+            return SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>(smem, subsp, nel, D, G, I);
+        }
+    };
+
+    template <typename scalar_t>
     class DDStiffnessMatrix3D
     {
     public:
-        struct DeviceDDStiffnessMatrix3D
-        {
-            MatrixWrapper<const scalar_t> D;
-            TensorWrapper<5, const SmallSymmetricMatrix<scalar_t, 3>> G;
-            TensorWrapper<5, const int> I;
-
-            template <int NB, int MX_NEL>
-            __device__ SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL> subspace_op(
-                int subsp, int nel,
-                typename SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>::SharedResources &smem) const
-            {
-                return SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>(smem, subsp, nel, D, G, I);
-            }
-        };
-
         DDStiffnessMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem);
 
-        DeviceDDStiffnessMatrix3D to_device() const
+        DeviceDDStiffnessMatrix3D<scalar_t> to_device() const
         {
-            auto D = reshape(d, n_basis, n_basis);
-            auto G = reshape(g, n_basis, n_basis, n_basis, mx_elem, n_domains);
-            return {D, G, d_I};
+            return DeviceDDStiffnessMatrix3D<scalar_t>{
+                .D = reshape(thrust::raw_pointer_cast(d.data()), n_basis, n_basis),
+                .G = reshape(thrust::raw_pointer_cast(g.data()), n_basis, n_basis, n_basis, mx_elem, n_domains),
+                .I = d_I};
         }
 
     private:
         int n_basis;
         int mx_elem;
         int n_domains;
-        thrust::universal_vector<scalar_t> d;
-        thrust::universal_vector<SmallSymmetricMatrix<scalar_t, 3>> g;
+        thrust::device_vector<scalar_t> d;
+        thrust::device_vector<SmallSymmetricMatrix<scalar_t, 3>> g;
         TensorWrapper<5, const int> d_I;
     };
 

@@ -3,7 +3,7 @@
 using namespace cuddh;
 
 template <typename scalar_t>
-static thrust::universal_vector<scalar_t> make_diffmat(const Basis &basis)
+static thrust::device_vector<scalar_t> make_diffmat(const Basis &basis)
 {
     const int n_basis = basis.size();
 
@@ -16,8 +16,8 @@ static thrust::universal_vector<scalar_t> make_diffmat(const Basis &basis)
 }
 
 template <typename scalar_t>
-static thrust::universal_vector<SmallSymmetricMatrix<scalar_t, 3>> geom_factors(const H1Space3D &fem,
-                                                                                const EnsembleSpace3D &efem)
+static thrust::device_vector<SmallSymmetricMatrix<scalar_t, 3>> geom_factors(const H1Space3D &fem,
+                                                                             const EnsembleSpace3D &efem)
 {
     using mat_t = SmallSymmetricMatrix<scalar_t, 3>;
 
@@ -42,8 +42,8 @@ static thrust::universal_vector<SmallSymmetricMatrix<scalar_t, 3>> geom_factors(
     auto n_elems = efem.n_elems(MemorySpace::DEVICE);
     auto elems = efem.elements(MemorySpace::DEVICE);
 
-    thrust::universal_vector<mat_t> u_G(n_basis * n_basis * n_basis * mx_elem * n_domains);
-    auto G = reshape(u_G, n_basis, n_basis, n_basis, mx_elem, n_domains);
+    thrust::device_vector<mat_t> d_G(n_basis * n_basis * n_basis * mx_elem * n_domains);
+    auto G = reshape(thrust::raw_pointer_cast(d_G.data()), n_basis, n_basis, n_basis, mx_elem, n_domains);
 
     forall_3d(n_basis, n_basis, mx_elem, n_domains, [=] __device__(int subsp) mutable -> void {
         const auto [i, j, el] = threadIdx;
@@ -82,7 +82,7 @@ static thrust::universal_vector<SmallSymmetricMatrix<scalar_t, 3>> geom_factors(
         }
     });
 
-    return u_G;
+    return d_G;
 }
 
 template <typename scalar_t>

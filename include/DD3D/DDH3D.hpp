@@ -10,9 +10,10 @@
 #include "DDFaceMassMatrix3D.hpp"
 #include "DDMassMatrix3D.hpp"
 #include "DDStiffnessMatrix3D.hpp"
+#include "DDWaveHoltz3D.hpp"
 #include "EnsembleSpace3D.hpp"
 #include "HostDeviceArray.hpp"
-#include "LinearSolvers/gcro.hpp"
+#include "LinearSolvers/gmres.hpp"
 #include "Operator.hpp"
 #include "Operators3D/MassMatrix3D.hpp"
 #include "cuddh_config.hpp"
@@ -64,8 +65,6 @@ namespace cuddh
             cuddh_verify(false, printf("DDSubstructedProblem3D::action(c, x, y) not implemented\n"));
         }
 
-        void residual(const double *u, const double *f, double *res) const;
-
     private:
         void action(const double *fem_in, double *fem_out, const scalar_t *lambda_in, scalar_t *lambda_out) const;
 
@@ -79,9 +78,6 @@ namespace cuddh
         int mx_fdof;
         int mx_elem_per_dom;
 
-        double omega;
-        double dt;
-
         const EnsembleSpace3D &efem;
 
         // B(o, i, p) = [lambda_index, dual_lambda_index] for face DOF i of subspace p.
@@ -91,7 +87,7 @@ namespace cuddh
         thrust::universal_vector<scalar_t> _T;
 
         DDStiffnessMatrix3D<scalar_t> S;
-        thrust::universal_vector<scalar2<scalar_t>> alpha_beta; // (alpha, beta) time stepping coefficients
+        DDWaveHoltz3D<scalar_t> W;
 
         thrust::universal_vector<scalar_t> _partition_of_unity;
     };
@@ -107,11 +103,10 @@ namespace cuddh
     class DDH3D
     {
     public:
-        DDH3D(double omega, const double *h_a, const H1Space3D &fem, const EnsembleSpace3D &efem, int kdim = 20,
-              int edim = 10)
+        DDH3D(double omega, const double *h_a, const H1Space3D &fem, const EnsembleSpace3D &efem, int kdim = 20)
             : ndof{fem.size()},
               F(omega, h_a, fem, efem),
-              solver(F.size(), F, nullptr, kdim, edim),
+              solver(F.size(), F, nullptr, kdim),
               lambda(F.size()),
               Y(F.size())
         {}
@@ -138,7 +133,7 @@ namespace cuddh
     private:
         const int ndof;
         DDSubstructedProblem3D<scalar_t> F;
-        GCRO<scalar_t> solver;
+        GMRES<scalar_t> solver;
         mutable thrust::device_vector<scalar_t> lambda;
         mutable thrust::device_vector<scalar_t> Y;
     };
