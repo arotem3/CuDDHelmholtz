@@ -87,7 +87,7 @@ namespace cuddh
         thrust::universal_vector<scalar_t> _T;
 
         DDStiffnessMatrix3D<scalar_t> S;
-        DDWaveHoltz3D<scalar_t> W;
+        DDWaveHoltz<scalar_t> W;
 
         thrust::universal_vector<scalar_t> _partition_of_unity;
     };

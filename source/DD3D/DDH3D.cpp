@@ -13,17 +13,15 @@ static void ddh_action_dof_per_thread(
     const TensorWrapper<3, const int2> B,          /* global lambda indices associated with boundary DOFs */
     const TensorWrapper<3, const scalar_t> T,      /* lambda trace operator */
     const DeviceDDStiffnessMatrix3D<scalar_t> stiffness_matrix,
-    const MatrixWrapper<const scalar_t> punity,    /* partition of unity */
-    const DeviceDDWaveHoltz3D<scalar_t> waveholtz, /* waveholtz */
-    const double *const __restrict__ d_x,          /* input */
-    double *const __restrict__ d_y,                /* output */
-    const scalar_t *const __restrict__ d_lambda,   /* substructured problem input DOFs */
-    scalar_t *const __restrict__ d_update          /* substructured problem output DOFs */
+    const MatrixWrapper<const scalar_t> punity,  /* partition of unity */
+    const DeviceDDWaveHoltz<scalar_t> waveholtz, /* waveholtz */
+    const double *const __restrict__ d_x,        /* input */
+    double *const __restrict__ d_y,              /* output */
+    const scalar_t *const __restrict__ d_lambda, /* substructured problem input DOFs */
+    scalar_t *const __restrict__ d_update        /* substructured problem output DOFs */
 )
 {
     using vec2 = cuddh::scalar2<scalar_t>;
-    using vec3 = cuddh::scalar3<scalar_t>;
-    using sym3x3 = SmallSymmetricMatrix<scalar_t, 3>;
 
     constexpr int wh_maxit = 20;
 
@@ -63,8 +61,8 @@ static void ddh_action_dof_per_thread(
                      printf("DDH3D error: subdomain larger than block thread dimension can accomodate.\n"));
 
         __shared__ typename BStiffness::SharedResources smem;
-        auto A = stiffness_matrix.template subspace_op<NB, NEL>(subsp, subsp_elems(subsp), smem);
-        auto evolve_project = waveholtz.subspace_op(subsp, tid, ndof);
+        const auto A = stiffness_matrix.template subspace_op<NB, NEL>(subsp, subsp_elems(subsp), smem);
+        const auto evolve_project = waveholtz.subspace_op(subsp, tid, ndof);
 
         const vec2 F = [&]() -> vec2 {
             vec2 F{0, 0};
@@ -226,7 +224,7 @@ DDSubstructedProblem3D<scalar_t>::DDSubstructedProblem3D(double omega_, const do
       n_basis{fem.basis().size()},
       efem{efem_},
       S(fem, efem_),
-      W(omega_, h_a, fem, efem_)
+      W{make_DDWaveHoltz_3d<scalar_t>(omega_, h_a, fem, efem_)}
 {
     cuddh_verify(n_basis >= 2 && n_basis <= 4, printf("DDH3D error: Only n_basis in [2,3,4] supported.\n"););
     cuddh_verify(efem.max_size() <= DD3D_MX_DOF, printf("DDH3D error: subdomains too big.\n"));

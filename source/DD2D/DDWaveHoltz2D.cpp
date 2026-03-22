@@ -1,14 +1,14 @@
-#include "DD3D/DDWaveHoltz3D.hpp"
+#include "DD2D/DDWaveHoltz2D.hpp"
 
 using namespace cuddh;
 
 template <typename scalar_t>
 static HostDeviceArray<cuddh::scalar2<scalar_t>> make_alpha_beta(double theta, double sigma,
-                                                                 const VectorWrapper<const double> a,
-                                                                 const H1Space3D &fem, const EnsembleSpace3D &efem)
+                                                                 VectorWrapper<const double> a, const H1Space2D &fem,
+                                                                 const EnsembleSpace &efem)
 {
-    DDMassMatrix3D M(fem, efem);
-    DDFaceMassMatrix3D H(fem, efem);
+    DDMassMatrix<scalar_t> M(fem, efem);
+    DDFaceMassMatrix<scalar_t> H(fem, efem);
 
     auto m = M.to_device();
     auto h = H.to_device();
@@ -16,43 +16,41 @@ static HostDeviceArray<cuddh::scalar2<scalar_t>> make_alpha_beta(double theta, d
     const int n_domains = efem.size();
     const int mx_dof = efem.max_size();
 
-    auto s_dof = efem.sizes(MemorySpace::DEVICE);
-    auto s_fdof = efem.fsizes(MemorySpace::DEVICE);
+    auto s_dof = efem.sizes(MemorySpace::DEVICE);   // number of subdomain degrees of freedom
+    auto s_fdof = efem.fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
     auto gI = efem.global_indices(MemorySpace::DEVICE);
 
     HostDeviceArray<cuddh::scalar2<scalar_t>> ab(mx_dof * n_domains);
     auto alpha_beta = reshape(ab.device_write(), mx_dof, n_domains);
 
     forall_1d(mx_dof, n_domains, [=] __device__(int subsp) mutable -> void {
-        const int i = threadIdx.x;
-        const int ndof = s_dof(subsp);
-        const int fdof = s_fdof(subsp);
-
-        cuddh::scalar2<scalar_t> ab_i{0, 0};
+        const auto i = threadIdx.x;
+        const int ndof = s_dof(subsp);  // dimension of subspace
+        const int fdof = s_fdof(subsp); // dimension of facespace
 
         if (i < ndof)
         {
             scalar_t ai = a(gI(i, subsp));
             scalar_t Mi = m(i, subsp);
-            scalar_t Hi = (i < fdof) ? h(i, subsp) : scalar_t(0);
+            scalar_t Hi = (i < fdof) ? h(i, subsp) : 0;
 
             Hi *= ai;
             Mi *= ai * ai;
 
-            const scalar_t inv = 1 / (Mi + theta * Hi);
-            ab_i.x = (Mi - theta * Hi) * inv;
-            ab_i.y = sigma * inv;
-        }
+            scalar_t inv = 1 / (Mi + theta * Hi);
+            scalar_t alpha = (Mi - theta * Hi) * inv;
+            scalar_t beta = sigma * inv;
 
-        alpha_beta(i, subsp) = ab_i;
+            alpha_beta(i, subsp) = {alpha, beta};
+        }
     });
 
     return ab;
 }
 
 template <typename scalar_t>
-DDWaveHoltz<scalar_t> cuddh::make_DDWaveHoltz_3d(scalar_t omega, const double *a, const H1Space3D &fem,
-                                                 const EnsembleSpace3D &efem)
+DDWaveHoltz<scalar_t> cuddh::make_DDWaveHoltz_2d(scalar_t omega, const double *a, const H1Space2D &fem,
+                                                 const EnsembleSpace &efem)
 {
     DDWaveHoltz<scalar_t> W;
     W.n_domains = efem.size();
@@ -61,7 +59,7 @@ DDWaveHoltz<scalar_t> cuddh::make_DDWaveHoltz_3d(scalar_t omega, const double *a
 
     double dt = [&]() {
         const int n_basis = fem.basis().size();
-        const double h = fem.mesh().h();
+        const double h = fem.mesh().min_h();
         auto begin = thrust::device_pointer_cast(a);
         const double reciprocal_max_vel = *std::min_element(begin, begin + fem.size());
         return dt = 2.0 * reciprocal_max_vel * h / (n_basis * n_basis);
@@ -90,8 +88,8 @@ DDWaveHoltz<scalar_t> cuddh::make_DDWaveHoltz_3d(scalar_t omega, const double *a
 
 namespace cuddh
 {
-    template DDWaveHoltz<float> make_DDWaveHoltz_3d<float>(float omega, const double *a, const H1Space3D &fem,
-                                                           const EnsembleSpace3D &efem);
-    template DDWaveHoltz<double> make_DDWaveHoltz_3d<double>(double omega, const double *a, const H1Space3D &fem,
-                                                             const EnsembleSpace3D &efem);
+    template DDWaveHoltz<float> make_DDWaveHoltz_2d<float>(float omega, const double *a, const H1Space2D &fem,
+                                                           const EnsembleSpace &efem);
+    template DDWaveHoltz<double> make_DDWaveHoltz_2d<double>(double omega, const double *a, const H1Space2D &fem,
+                                                             const EnsembleSpace &efem);
 } // namespace cuddh

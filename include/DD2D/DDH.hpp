@@ -11,6 +11,7 @@
 #include "DDFaceMassMatrix.hpp"
 #include "DDMassMatrix.hpp"
 #include "DDStiffnessMatrix.hpp"
+#include "DDWaveHoltz2D.hpp"
 #include "EnsembleSpace.hpp"
 #include "HostDeviceArray.hpp"
 #include "LinearSolvers/gcro.hpp"
@@ -78,16 +79,13 @@ namespace cuddh
         int mx_fdof;
         int mx_elem_per_dom;
 
-        double omega;
-        double dt;
-
         const EnsembleSpace &efem;
 
         thrust::universal_vector<int2> _B;
         thrust::universal_vector<scalar_t> _T;
 
         DDStiffnessMatrix<scalar_t> S;
-        thrust::universal_vector<scalar2<scalar_t>> alpha_beta; // (alpha, beta) time stepping coefficients
+        DDWaveHoltz<scalar_t> W;
 
         thrust::universal_vector<scalar_t> _partition_of_unity;
     };
