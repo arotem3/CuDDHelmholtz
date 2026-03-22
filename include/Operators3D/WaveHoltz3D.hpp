@@ -43,12 +43,8 @@ namespace cuddh
         int nt;
         double shift;
 
-        const H1Space3D &fem;
-        const TraceSpace3D &fs;
-
         StiffnessMatrix3D stiffness;
-        MassMatrix3D M;
-        HostDeviceArray<double> H; // face mass matrix
+        HostDeviceArray<double2> ab; // time stepping
 
         mutable HostDeviceArray<double> acc;
         mutable HostDeviceArray<double> w;
