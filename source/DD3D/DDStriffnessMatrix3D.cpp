@@ -2,7 +2,8 @@
 
 using namespace cuddh;
 
-static thrust::universal_vector<float> make_diffmat(const Basis &basis)
+template <typename scalar_t>
+static thrust::universal_vector<scalar_t> make_diffmat(const Basis &basis)
 {
     const int n_basis = basis.size();
 
@@ -11,11 +12,15 @@ static thrust::universal_vector<float> make_diffmat(const Basis &basis)
 
     basis.deriv(n_basis, basis.quadrature().x(), D);
 
-    return u_D; // auto-conversion to float
+    return u_D;
 }
 
-static thrust::universal_vector<fsym3x3> geom_factors(const H1Space3D &fem, const EnsembleSpace3D &efem)
+template <typename scalar_t>
+static thrust::universal_vector<SmallSymmetricMatrix<scalar_t, 3>> geom_factors(const H1Space3D &fem,
+                                                                                const EnsembleSpace3D &efem)
 {
+    using mat_t = SmallSymmetricMatrix<scalar_t, 3>;
+
     const DeviceMesh3D &mesh = fem.mesh().to_device();
     const Basis &basis = fem.basis();
     const QuadratureRule &q = basis.quadrature();
@@ -37,7 +42,7 @@ static thrust::universal_vector<fsym3x3> geom_factors(const H1Space3D &fem, cons
     auto n_elems = efem.n_elems(MemorySpace::DEVICE);
     auto elems = efem.elements(MemorySpace::DEVICE);
 
-    thrust::universal_vector<fsym3x3> u_G(n_basis * n_basis * n_basis * mx_elem * n_domains);
+    thrust::universal_vector<mat_t> u_G(n_basis * n_basis * n_basis * mx_elem * n_domains);
     auto G = reshape(u_G, n_basis, n_basis, n_basis, mx_elem, n_domains);
 
     forall_3d(n_basis, n_basis, mx_elem, n_domains, [=] __device__(int subsp) mutable -> void {
@@ -60,7 +65,7 @@ static thrust::universal_vector<fsym3x3> geom_factors(const H1Space3D &fem, cons
 
             J = adjugate(J);
 
-            fsym3x3 g;
+            mat_t g;
 
             for (int m = 0; m < 3; ++m)
             {
@@ -80,9 +85,14 @@ static thrust::universal_vector<fsym3x3> geom_factors(const H1Space3D &fem, cons
     return u_G;
 }
 
-DDStiffnessMatrix3D::DDStiffnessMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem)
+template <typename scalar_t>
+DDStiffnessMatrix3D<scalar_t>::DDStiffnessMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem)
     : n_basis(fem.basis().size()), mx_elem(efem.max_n_elem()), n_domains(efem.size())
 {
-    d = make_diffmat(fem.basis());
-    g = geom_factors(fem, efem);
+    d = make_diffmat<scalar_t>(fem.basis());
+    g = geom_factors<scalar_t>(fem, efem);
+    d_I = efem.subspace_indices(MemorySpace::DEVICE);
 }
+
+template class DDStiffnessMatrix3D<float>;
+template class DDStiffnessMatrix3D<double>;

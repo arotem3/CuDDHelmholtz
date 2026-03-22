@@ -90,7 +90,7 @@ namespace cuddh
         // T(o, i, p) = trace operator coefficient for face DOF i of subspace p.
         thrust::universal_vector<scalar_t> _T;
 
-        DDStiffnessMatrix3D S;
+        DDStiffnessMatrix3D<scalar_t> S;
         thrust::universal_vector<scalar2<scalar_t>> alpha_beta; // (alpha, beta) time stepping coefficients
 
         thrust::universal_vector<scalar_t> _partition_of_unity;
