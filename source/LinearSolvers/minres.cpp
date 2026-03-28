@@ -3,19 +3,23 @@
 using namespace cuddh;
 
 template <typename real_t>
-static SolverResults t_minres(int n, real_t *x, const Operator<real_t> &A, const real_t *b, SolverParams opts)
+SolverResults MINRES<real_t>::solve(real_t *x, const real_t *b, SolverParams opts) const
 {
     validate_params(opts);
 
     SolverLogger logger(opts.verbose, opts.maxit);
 
-    thrust::device_vector<real_t> _r(n), _v(n), _w(n, 0.0), _wp(n, 0.0), _vp(n, 0.0), _wpp(n, 0.0);
     real_t *r = thrust::raw_pointer_cast(_r.data());
     real_t *v = thrust::raw_pointer_cast(_v.data());
     real_t *w = thrust::raw_pointer_cast(_w.data());
     real_t *wp = thrust::raw_pointer_cast(_wp.data());
     real_t *vp = thrust::raw_pointer_cast(_vp.data());
     real_t *wpp = thrust::raw_pointer_cast(_wpp.data());
+
+    dla::zeros(n, w);
+    dla::zeros(n, wp);
+    dla::zeros(n, vp);
+    dla::zeros(n, wpp);
 
     const real_t bnrm = dla::norm(n, b);
     const real_t tol = std::max(opts.rtol * bnrm, opts.atol);
@@ -88,12 +92,8 @@ static SolverResults t_minres(int n, real_t *x, const Operator<real_t> &A, const
     return logger.log_summary(rnrm / bnrm, rnrm <= tol);
 }
 
-SolverResults cuddh::minres(int n, double *x, const Operator<double> &A, const double *b, SolverParams opts)
+namespace cuddh
 {
-    return t_minres<double>(n, x, A, b, opts);
-}
-
-SolverResults cuddh::minres(int n, float *x, const Operator<float> &A, const float *b, SolverParams opts)
-{
-    return t_minres<float>(n, x, A, b, opts);
-}
+    template class MINRES<float>;
+    template class MINRES<double>;
+} // namespace cuddh
