@@ -2,6 +2,33 @@
 
 using namespace cuddh;
 
+// Applies R = 0.5*[1-i, 1+i; 1+i, 1-i] which symmetrizes the DDH operator.
+// If x is provided, y <- R * (x - y), otherwise y <- R * y.
+template <typename scalar_t>
+static void symmetrize(int n, const scalar_t *x, scalar_t *y)
+{
+    constexpr scalar_t half(0.5);
+    const int m = n / 2;
+
+    forall(m, [=] __device__(const int i) mutable -> void {
+        const int inds[] = {i, i + m, n + i, n + m + i};
+
+        scalar_t Y[4];
+        for (int j = 0; j < 4; ++j)
+        {
+            Y[j] = y[inds[j]];
+            if (x)
+                Y[j] = x[inds[j]] - Y[j];
+        }
+
+        scalar_t RY[] = {half * (Y[0] + Y[1] + Y[2] - Y[3]), half * (Y[0] + Y[1] - Y[2] + Y[3]),
+                         -half * (-Y[0] + Y[1] + Y[2] + Y[3]), -half * (Y[0] - Y[1] + Y[2] + Y[3])};
+
+        for (int j = 0; j < 4; ++j)
+            y[inds[j]] = RY[j];
+    });
+}
+
 template <int NB, int NEL, typename scalar_t>
 static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global finite element degrees of freedom */
                        const int n_lambda,                          /* number of substructured DOFs (lambda) */
@@ -27,6 +54,8 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
 
     if (y)
         dla::zeros(2 * g_ndof, y);
+    if (d_update)
+        dla::zeros(2 * n_lambda, d_update);
 
     const scalar_t *g_lambda = (d_lambda) ? d_lambda : nullptr;
     const scalar_t *g_mu = (d_lambda) ? (d_lambda + n_lambda) : nullptr;
@@ -56,26 +85,29 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
         const auto evolve_project = waveholtz.subspace_op(subsp, tid, ndof);
 
         const cuddh::scalar2<scalar_t> F = [&]() -> cuddh::scalar2<scalar_t> {
-            cuddh::scalar2<scalar_t> F{scalar_t(0), scalar_t(0)};
+            cuddh::scalar2<scalar_t> F{0, 0};
             if (x && tid < ndof)
             {
                 const int g_idx = gI(tid, subsp);
                 const scalar_t weight = punity(tid, subsp);
 
-                F.x = weight * scalar_t(x[g_idx]);
-                F.y = weight * scalar_t(x[g_ndof + g_idx]);
+                F.x += weight * scalar_t(x[g_idx]);
+                F.y += weight * scalar_t(x[g_ndof + g_idx]);
             }
 
             if (d_lambda && tid < fdof)
             {
                 for (int o = 0; o < 2; ++o)
                 {
-                    int idx = B(o, tid, subsp).x;
-                    if (idx >= 0)
-                    {
-                        F.x += g_lambda[idx];
-                        F.y += g_mu[idx];
-                    }
+                    const auto [i, j] = B(o, tid, subsp);
+                    if (i < 0)
+                        break;
+
+                    const scalar_t lambda1 = g_lambda[i], lambda2 = g_lambda[j], mu1 = g_mu[i], mu2 = g_mu[j];
+                    const scalar_t t = T(o, tid, subsp);
+
+                    F.x += scalar_t(0.5) * t * (lambda1 + lambda2 - mu1 + mu2);
+                    F.y += scalar_t(0.5) * t * (lambda1 - lambda2 + mu1 + mu2);
                 }
             }
 
@@ -108,22 +140,22 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
             for (int o = 0; o < 2; ++o)
             {
                 const auto [i, j] = B(o, tid, subsp);
+                if (i < 0)
+                    break;
 
                 scalar_t lambda = scalar_t(0);
                 scalar_t mu = scalar_t(0);
 
-                if (d_lambda && i >= 0)
+                if (d_lambda)
                 {
                     lambda = g_lambda[i];
                     mu = g_mu[i];
                 }
 
-                if (j >= 0)
-                {
-                    const scalar_t t = T(o, tid, subsp);
-                    lambda_update[j] = -lambda + t * u.y;
-                    mu_update[j] = -mu - t * u.x;
-                }
+                const scalar_t t = T(o, tid, subsp);
+
+                lambda_update[j] = -lambda + t * u.y;
+                mu_update[j] = -mu - t * u.x;
             }
     });
 }
@@ -151,16 +183,16 @@ static int lambda_dofs(auto &B, auto &T, const EnsembleSpace &efem, double omega
     {
         for (const int s : {0, 1})
         {
+            const int subspace = dof.subspaces[s];
+            const int face_index = dof.local_dof_indices[s];
+
             for (int o = 0; o < 2; ++o)
             {
-                const int subspace = dof.subspaces[s];
-                const int face_index = dof.local_dof_indices[s];
-
                 if (b(o, face_index, subspace).x < 0)
                 {
                     n_lambda++;
                     b(o, face_index, subspace) = {(s == 0) ? k : n_shared + k, (s == 0) ? n_shared + k : k};
-                    t(o, face_index, subspace) = 2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass;
+                    t(o, face_index, subspace) = std::sqrt(2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass);
                     break;
                 }
             }
@@ -214,12 +246,15 @@ DDSubstructedProblem<scalar_t>::DDSubstructedProblem(double omega, const double 
       S(fem, efem),
       W{make_DDWaveHoltz_2d<scalar_t>(omega, h_a, fem, efem)}
 {
-    cuddh_verify(n_basis <= 8, printf("DDH error: Only n_basis <= 8 supported.\n"););
+    cuddh_verify(n_basis <= 8, printf("DDH error: Only n_basis(=%d) <= 8 supported.\n", n_basis););
 
     n_domains = efem.size();
 
     // determine max subspace dimensions
     mx_dof = efem.max_size();
+    cuddh_verify(mx_dof <= CUDDH_DD2D_MX_DOF,
+                 printf("DDH error: Subdomain with %d DOFs exceeds maximum DOF (=%d)\n", mx_dof, CUDDH_DD2D_MX_DOF));
+
     mx_fdof = efem.max_fsize();
     mx_elem_per_dom = efem.max_n_elem();
 
@@ -270,16 +305,15 @@ void DDSubstructedProblem<scalar_t>::action(const double *fem_in, double *fem_ou
 template <typename scalar_t>
 void DDSubstructedProblem<scalar_t>::action(const scalar_t *x, scalar_t *y) const
 {
-    dla::zeros(2 * n_lambda, y);
     action((const double *)nullptr, (double *)nullptr, x, y);
-    dla::axpby(2 * n_lambda, scalar_t(1), x, scalar_t(-1), y);
+    symmetrize(n_lambda, x, y);
 }
 
 template <typename scalar_t>
 void DDSubstructedProblem<scalar_t>::rhs(const double *f, scalar_t *b) const
 {
-    dla::zeros(2 * n_lambda, b);
     action(f, (double *)nullptr, (const scalar_t *)nullptr, b);
+    symmetrize<scalar_t>(n_lambda, nullptr, b);
 }
 
 template <typename scalar_t>

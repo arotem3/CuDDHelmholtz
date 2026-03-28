@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 
 #include <functional>
+#include <random>
 #include <type_traits>
 #include <unordered_set>
 
@@ -14,7 +15,7 @@
 #include "DDWaveHoltz2D.hpp"
 #include "EnsembleSpace.hpp"
 #include "HostDeviceArray.hpp"
-#include "LinearSolvers/gcro.hpp"
+#include "LinearSolvers/minres.hpp"
 #include "Operator.hpp"
 #include "Operators2D/MassMatrix.hpp"
 #include "cuddh_config.hpp"
@@ -102,14 +103,11 @@ namespace cuddh
     class DDH
     {
     public:
-        DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem, int kdim = 20,
-            int edim = 10)
-            : ndof{fem.size()},
-              F(omega, h_a, fem, efem),
-              solver(F.size(), F, nullptr, kdim, edim),
-              lambda(F.size()),
-              Y(F.size())
-        {}
+        DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem)
+            : ndof{fem.size()}, F(omega, h_a, fem, efem), solver(F.size(), F), lambda(F.size()), Y(F.size())
+        {
+            cuddh_assert(dla::is_symmetric(F.size(), F), printf("DDH error: Substructured Operator not symmetric!\n"));
+        }
 
         int n_lambda() const { return F.size(); }
 
@@ -133,7 +131,8 @@ namespace cuddh
     private:
         const int ndof;
         DDSubstructedProblem<scalar_t> F;
-        GCRO<scalar_t> solver;
+        MINRES<scalar_t> solver;
+
         mutable thrust::device_vector<scalar_t> lambda;
         mutable thrust::device_vector<scalar_t> Y;
     };
