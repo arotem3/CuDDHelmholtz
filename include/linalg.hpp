@@ -10,6 +10,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/fill.h>
 #include <thrust/functional.h>
+#include <thrust/host_vector.h>
 #include <thrust/inner_product.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/transform.h>
@@ -17,8 +18,10 @@
 
 #include <cmath>
 #include <cub/cub.cuh>
+#include <random>
 
 #include "HostDeviceArray.hpp"
+#include "Operator.hpp"
 #include "cuddh_config.hpp"
 #include "forall.hpp"
 
@@ -90,6 +93,9 @@ namespace cuddh
         {
             cudaMemset(x, 1, n * sizeof(int));
         }
+
+        bool is_symmetric(int n, const Operator<float> &A, float tol = 1e-6f);
+        bool is_symmetric(int n, const Operator<double> &A, double tol = 1e-12);
 
         /**
          * @brief Performs matrix-matrix multiplication on the device: C = alpha * op(A) * op(B) + beta * C

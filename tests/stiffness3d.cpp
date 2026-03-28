@@ -47,6 +47,12 @@ static void run_stiffness3d_case(TestLogger &summary, const Mesh3D &mesh, const 
     l2_project(M, [=] __device__(const double3 r) -> double { return L(r); }, Lf);
 
     StiffnessMatrix3D A(fem);
+
+    if (dla::is_symmetric(ndof, A, 1e-10))
+        summary.pass(std::format("stiffness3d {} is symmetric.", test_name));
+    else
+        summary.fail(std::format("stiffness3d {} is not symmetric.", test_name), "|x'Ay - y'Ax| > 1e-10.");
+
     A.action(f, Af);
 
     const double err = dla::dist(ndof, Af, Lf) / dla::norm(ndof, Lf);

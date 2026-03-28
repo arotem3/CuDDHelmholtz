@@ -19,6 +19,38 @@ struct axpby_op
     __host__ __device__ real_t operator()(real_t x, real_t y) const { return a * x + b * y; }
 };
 
+template <typename real_t>
+static bool _is_symmetric(int n, const cuddh::Operator<real_t> &A, real_t tol)
+{
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<real_t> dist(0., 1.);
+
+    thrust::host_vector<real_t> h_x(n);
+    for (auto &x : h_x)
+        x = dist(gen);
+
+    thrust::host_vector<real_t> h_y(n);
+    for (auto &y : h_y)
+        y = dist(gen);
+
+    thrust::device_vector<real_t> d_x = h_x, d_y = h_y, d_Ax(n), d_Ay(n);
+
+    auto x = thrust::raw_pointer_cast(d_x.data());
+    auto y = thrust::raw_pointer_cast(d_y.data());
+    auto Ax = thrust::raw_pointer_cast(d_Ax.data());
+    auto Ay = thrust::raw_pointer_cast(d_Ay.data());
+
+    A.action(x, Ax);
+    A.action(y, Ay);
+
+    auto xAy = cuddh::dla::dot(n, x, Ay);
+    auto yAx = cuddh::dla::dot(n, y, Ax);
+
+    real_t err = std::abs(xAy - yAx) / std::max(std::abs(xAy), std::abs(yAx));
+    return std::isfinite(xAy) && std::isfinite(yAx) && err < tol;
+}
+
 namespace cuddh::dla
 {
     void axpby(int n, double a, const double *x, double b, double *y)
@@ -122,5 +154,15 @@ namespace cuddh::dla
     {
         auto px = thrust::device_pointer_cast(x);
         thrust::fill(px, px + n, a);
+    }
+
+    bool is_symmetric(int n, const Operator<float> &A, float tol)
+    {
+        return _is_symmetric(n, A, tol);
+    }
+
+    bool is_symmetric(int n, const Operator<double> &A, double tol)
+    {
+        return _is_symmetric(n, A, tol);
     }
 } // namespace cuddh::dla

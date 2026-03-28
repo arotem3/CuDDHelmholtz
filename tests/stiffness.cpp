@@ -61,37 +61,11 @@ static void symmetry_test(TestLogger &summary, const Mesh2D &mesh, Basis basis, 
 
     StiffnessMatrix A(fem);
 
-    host_device_dvec _x(ndof), _y(ndof), _Ax(ndof), _Ay(ndof);
-
-    double *h_x = _x.host_write();
-    double *h_y = _y.host_write();
-
-    std::mt19937 gen(42);
-    std::uniform_int_distribution<> distr(0, 1);
-
-    for (int i = 0; i < ndof; ++i)
-    {
-        h_x[i] = distr(gen);
-        h_y[i] = distr(gen);
-    }
-
-    const double *d_x = _x.device_read();
-    const double *d_y = _y.device_read();
-    double *d_Ax = _Ax.device_write();
-    double *d_Ay = _Ay.device_write();
-
-    A.action(d_x, d_Ax);
-    A.action(d_y, d_Ay);
-
-    double yAx = dla::dot(ndof, d_y, d_Ax);
-    double xAy = dla::dot(ndof, d_x, d_Ay);
-
-    double err = std::abs(yAx - xAy) / std::max(std::abs(yAx), std::abs(xAy));
-    if (err < tol)
+    if (dla::is_symmetric(fem.size(), A, tol))
         summary.pass(std::format("stiffness {} symmetry test", test_name));
     else
         summary.fail(std::format("stiffness {} symmetry test", test_name),
-                     std::format("relative error in x'Ay - y'Ax = {} exceeds tolerance {}", err, tol));
+                     std::format("|x'Ay - y'Ax| = exceeds tolerance {}", tol));
 }
 
 static void run_stiffness_tests(TestLogger &summary)
