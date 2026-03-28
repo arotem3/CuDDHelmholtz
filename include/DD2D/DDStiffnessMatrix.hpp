@@ -27,6 +27,7 @@ namespace cuddh
         SharedResources &smem;
         mat_t geom;
         int I[2][NB];
+        int tx, ty;
 
         __device__ SubdomainStiffnessMatrix(SharedResources &mem, int subsp, int nel,
                                             const MatrixWrapper<const scalar_t> &D,
@@ -39,28 +40,26 @@ namespace cuddh
                                 "NEL) = (%d, %d) but got (%d, %d, %d).\n",
                                 NB, NEL, NB * NB, NEL, blockDim.x, blockDim.y, blockDim.z));
 
-            const int x = threadIdx.x % NB;
-            const int y = threadIdx.x / NB;
+            tx = threadIdx.x % NB;
+            ty = threadIdx.x / NB;
             const auto el = threadIdx.y;
 
             if (el == 0)
-                smem.D[x][y] = D(x, y);
+                smem.D[tx][ty] = D(tx, ty);
 
             for (int i = 0; i < NB; ++i)
             {
-                I[0][i] = (el < nel) ? sI(i, y, el, subsp) : -1;
-                I[1][i] = (el < nel) ? sI(x, i, el, subsp) : -1;
+                I[0][i] = (el < nel) ? sI(i, ty, el, subsp) : -1;
+                I[1][i] = (el < nel) ? sI(tx, i, el, subsp) : -1;
             }
 
-            geom = (el < nel) ? G(x, y, el, subsp) : mat_t{};
+            geom = (el < nel) ? G(tx, ty, el, subsp) : mat_t{};
 
             __syncthreads();
         }
 
         __device__ scalar_t operator()(scalar_t in) const
         {
-            const int x = threadIdx.x % NB;
-            const int y = threadIdx.x / NB;
             const auto el = threadIdx.y;
 
             smem.u[threadIdx.x + NB * NB * threadIdx.y] = in;
@@ -72,22 +71,22 @@ namespace cuddh
             {
                 for (int i = 0; i < NB; ++i)
                 {
-                    grad.x += smem.D[x][i] * smem.u[I[0][i]];
-                    grad.y += smem.D[y][i] * smem.u[I[1][i]];
+                    grad.x += smem.D[tx][i] * smem.u[I[0][i]];
+                    grad.y += smem.D[ty][i] * smem.u[I[1][i]];
                 }
             }
             __syncthreads();
 
-            smem.grad[el][y][x] = geom * grad;
+            smem.grad[el][ty][tx] = geom * grad;
             smem.u[threadIdx.x + NB * NB * threadIdx.y] = 0;
             __syncthreads();
 
             scalar_t Su = 0;
             for (int i = 0; i < NB; ++i)
             {
-                Su += smem.D[i][x] * smem.grad[el][y][i].x + smem.D[i][y] * smem.grad[el][i][x].y;
+                Su += smem.D[i][tx] * smem.grad[el][ty][i].x + smem.D[i][ty] * smem.grad[el][i][tx].y;
             }
-            atomicAdd(smem.u + I[0][x], Su);
+            atomicAdd(smem.u + I[0][tx], Su);
             __syncthreads();
 
             return smem.u[threadIdx.x + NB * NB * threadIdx.y];

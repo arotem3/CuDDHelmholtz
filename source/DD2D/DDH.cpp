@@ -43,7 +43,8 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
                        scalar_t *const __restrict__ d_update                     /* substructured problem variables */
 )
 {
-    constexpr int wh_maxit = 20;
+    constexpr int wh_maxit = 100;
+    constexpr scalar_t wh_tol = std::is_same_v<scalar_t, float> ? 1e-6 : 1e-12;
 
     const int n_domains = efem->size();
 
@@ -66,7 +67,9 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
     constexpr int EDOF = NB * NB;
 
     forall_2d(EDOF, NEL, n_domains, [=] __device__(const int subsp) mutable -> void {
+        using vec = cuddh::scalar2<scalar_t>;
         using BStiffness = SubdomainStiffnessMatrix<scalar_t, NB, NEL>;
+        using BlockReduce = cub::BlockReduce<scalar_t, EDOF, cub::BLOCK_REDUCE_WARP_REDUCTIONS, NEL>;
 
         const int tid = threadIdx.x + EDOF * threadIdx.y; // linearized thread id
 
@@ -81,11 +84,25 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
                      printf("DDH2D error: exceeded maximum number of elements per subdomain.\n"));
 
         __shared__ typename BStiffness::SharedResources smem;
+        __shared__ typename BlockReduce::TempStorage reduce_work;
+        __shared__ scalar_t reduce_result;
+
+        auto dist = [&](vec a, vec b) -> scalar_t {
+            scalar_t dx = a.x - b.x;
+            scalar_t dy = a.y - b.y;
+            scalar_t dr = dx * dx + dy * dy;
+            dr = BlockReduce(reduce_work).Sum(dr);
+            if (tid == 0)
+                reduce_result = sqrt(dr);
+            __syncthreads();
+            return reduce_result;
+        };
+
         const auto A = stiffness_matrix.template subspace_op<NB, NEL>(subsp, s_elems(subsp), smem);
         const auto evolve_project = waveholtz.subspace_op(subsp, tid, ndof);
 
-        const cuddh::scalar2<scalar_t> F = [&]() -> cuddh::scalar2<scalar_t> {
-            cuddh::scalar2<scalar_t> F{0, 0};
+        const vec F = [&]() -> vec {
+            vec F{0, 0};
             if (x && tid < ndof)
             {
                 const int g_idx = gI(tid, subsp);
@@ -115,11 +132,17 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
         }();
 
         // WaveHoltz iteration
-        cuddh::scalar2<scalar_t> u{0, 0}; // (u,v) are the approx solution of the Helmholtz eq.
-        int it = 0;
-        for (; it < wh_maxit; ++it)
+        vec u = {0, 0};
+        vec u1 = evolve_project(A, u, F); // (u,v) are the approx solution of the Helmholtz eq.
+        scalar_t r = dist(u1, u);
+        u = u1;
+
+        scalar_t tol = max(wh_tol * r, wh_tol);
+        for (int it = 0; it < wh_maxit && r > tol; ++it)
         {
-            u = evolve_project(A, u, F);
+            u1 = evolve_project(A, u, F);
+            r = dist(u1, u);
+            u = u1;
         }
 
         // update global solution
