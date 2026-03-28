@@ -4,37 +4,35 @@
 #include <cuda_runtime.h>
 
 #ifndef CUDDH_FORALL_BLOCK_SIZE
-#define CUDDH_FORALL_BLOCK_SIZE 1024
+#define CUDDH_FORALL_BLOCK_SIZE 512
 #endif
 
 #ifndef NDEBUG
-#define CUDDH_CUDA_CHECK(call)                                          \
-    do                                                            \
-    {                                                             \
-        cudaError_t err = (call);                                 \
-        if (err != cudaSuccess)                                   \
-        {                                                         \
-            fprintf(stderr,                                       \
-                    "CUDA error %s:%d: %s\n",                     \
-                    __FILE__, __LINE__, cudaGetErrorString(err)); \
-            std::abort();                                         \
-        }                                                         \
+#define CUDDH_CUDA_CHECK(call)                                                                      \
+    do                                                                                              \
+    {                                                                                               \
+        cudaError_t err = (call);                                                                   \
+        if (err != cudaSuccess)                                                                     \
+        {                                                                                           \
+            fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__, cudaGetErrorString(err)); \
+            std::abort();                                                                           \
+        }                                                                                           \
     } while (0)
 #else
 #define CUDDH_CUDA_CHECK(call) (call)
 #endif
 
 #ifndef NDEBUG
-#define CUDDH_CHECK_KERNEL()                  \
-    do                                       \
-    {                                        \
+#define CUDDH_CHECK_KERNEL()                       \
+    do                                             \
+    {                                              \
         CUDDH_CUDA_CHECK(cudaGetLastError());      \
         CUDDH_CUDA_CHECK(cudaDeviceSynchronize()); \
     } while (0)
 #else
 #define CUDDH_CHECK_KERNEL() \
-    do                      \
-    {                       \
+    do                       \
+    {                        \
     } while (0)
 #endif
 
