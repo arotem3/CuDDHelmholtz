@@ -77,9 +77,9 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
         const int fdof = s_fdof(subsp); // dimension of facespace
         const int ndof = s_dof(subsp);  // dimension of subspace
 
-        cuddh_assert(ndof <= CUDDH_DD2D_MX_DOF,
+        cuddh_assert(ndof <= EDOF * NEL,
                      printf("DDH2D error: exceeded maximum number of subdomain DOFs per thread block (%d > %d)\n", ndof,
-                            CUDDH_DD2D_MX_DOF););
+                            EDOF * NEL););
         cuddh_assert(s_elems(subsp) <= NEL,
                      printf("DDH2D error: exceeded maximum number of elements per subdomain.\n"));
 
@@ -276,7 +276,8 @@ DDSubstructedProblem<scalar_t>::DDSubstructedProblem(double omega, const double 
     // determine max subspace dimensions
     mx_dof = efem.max_size();
     cuddh_verify(mx_dof <= CUDDH_DD2D_MX_DOF,
-                 printf("DDH error: Subdomain with %d DOFs exceeds maximum DOF (=%d)\n", mx_dof, CUDDH_DD2D_MX_DOF));
+                 printf("DDH error: Subdomain with %d DOFs exceeds maximum DOFs allowed per subdomain (=%d)\n", mx_dof,
+                        CUDDH_DD2D_MX_DOF));
 
     mx_fdof = efem.max_fsize();
     mx_elem_per_dom = efem.max_n_elem();
@@ -290,36 +291,131 @@ template <typename scalar_t>
 void DDSubstructedProblem<scalar_t>::action(const double *fem_in, double *fem_out, const scalar_t *lambda_in,
                                             scalar_t *lambda_out) const
 {
-    cuddh_verify(n_basis <= 8, printf("DDH error: Only n_basis <= 8 supported.\n"););
+    cuddh_verify(n_basis <= 8, printf("DDH error: Only n_basis <= 8 supported.\n"));
 
     auto B = reshape(_B, 2, mx_fdof, n_domains);
     auto T = reshape(_T, 2, mx_fdof, n_domains);
-
     auto punity = reshape(_partition_of_unity, mx_dof, n_domains);
 
-    using func_t = decltype(&::ddh_action<4, CUDDH_DD2D_MX_DOF / (4 * 4), scalar_t>);
-    auto actionf = [&]() -> func_t {
-        switch (n_basis)
-        {
-            case 2:
-                return ::ddh_action<2, CUDDH_DD2D_MX_DOF / (2 * 2), scalar_t>;
-            case 3:
-                return ::ddh_action<3, CUDDH_DD2D_MX_DOF / (3 * 3), scalar_t>;
-            case 4:
-                return ::ddh_action<4, CUDDH_DD2D_MX_DOF / (4 * 4), scalar_t>;
-            case 5:
-                return ::ddh_action<5, CUDDH_DD2D_MX_DOF / (5 * 5), scalar_t>;
-            case 6:
-                return ::ddh_action<6, CUDDH_DD2D_MX_DOF / (6 * 6), scalar_t>;
-            case 7:
-                return ::ddh_action<7, CUDDH_DD2D_MX_DOF / (7 * 7), scalar_t>;
-            case 8:
-                return ::ddh_action<8, CUDDH_DD2D_MX_DOF / (8 * 8), scalar_t>;
-            default:
-                return (func_t) nullptr;
-                break;
-        }
-    }();
+    // Determine the maximum number of DOFs per subdomain
+    int max_dofs = mx_elem_per_dom * n_basis * n_basis;
+
+    // Select the smallest MX_DOF variant that fits
+    int mx_dof_variant = 0;
+    if (max_dofs <= 256)
+    {
+        mx_dof_variant = 256;
+    }
+    else if (max_dofs <= 512)
+    {
+        mx_dof_variant = 512;
+    }
+    else if (max_dofs <= 1024)
+    {
+        mx_dof_variant = 1024;
+    }
+    else
+    {
+        cuddh_verify(false, printf("DDH error: Subdomain with %d DOFs exceeds supported maximum (1024)\n", max_dofs));
+    }
+
+    using func_t = decltype(&::ddh_action<2, 256 / (2 * 2), scalar_t>);
+    func_t actionf = nullptr;
+    switch (mx_dof_variant)
+    {
+        case 256:
+            switch (n_basis)
+            {
+                case 2:
+                    actionf = ::ddh_action<2, 256 / (2 * 2), scalar_t>;
+                    break;
+                case 3:
+                    actionf = ::ddh_action<3, 256 / (3 * 3), scalar_t>;
+                    break;
+                case 4:
+                    actionf = ::ddh_action<4, 256 / (4 * 4), scalar_t>;
+                    break;
+                case 5:
+                    actionf = ::ddh_action<5, 256 / (5 * 5), scalar_t>;
+                    break;
+                case 6:
+                    actionf = ::ddh_action<6, 256 / (6 * 6), scalar_t>;
+                    break;
+                case 7:
+                    actionf = ::ddh_action<7, 256 / (7 * 7), scalar_t>;
+                    break;
+                case 8:
+                    actionf = ::ddh_action<8, 256 / (8 * 8), scalar_t>;
+                    break;
+                default:
+                    actionf = nullptr;
+                    break;
+            }
+            break;
+        case 512:
+            switch (n_basis)
+            {
+                case 2:
+                    actionf = ::ddh_action<2, 512 / (2 * 2), scalar_t>;
+                    break;
+                case 3:
+                    actionf = ::ddh_action<3, 512 / (3 * 3), scalar_t>;
+                    break;
+                case 4:
+                    actionf = ::ddh_action<4, 512 / (4 * 4), scalar_t>;
+                    break;
+                case 5:
+                    actionf = ::ddh_action<5, 512 / (5 * 5), scalar_t>;
+                    break;
+                case 6:
+                    actionf = ::ddh_action<6, 512 / (6 * 6), scalar_t>;
+                    break;
+                case 7:
+                    actionf = ::ddh_action<7, 512 / (7 * 7), scalar_t>;
+                    break;
+                case 8:
+                    actionf = ::ddh_action<8, 512 / (8 * 8), scalar_t>;
+                    break;
+                default:
+                    actionf = nullptr;
+                    break;
+            }
+            break;
+        case 1024:
+            switch (n_basis)
+            {
+                case 2:
+                    actionf = ::ddh_action<2, 1024 / (2 * 2), scalar_t>;
+                    break;
+                case 3:
+                    actionf = ::ddh_action<3, 1024 / (3 * 3), scalar_t>;
+                    break;
+                case 4:
+                    actionf = ::ddh_action<4, 1024 / (4 * 4), scalar_t>;
+                    break;
+                case 5:
+                    actionf = ::ddh_action<5, 1024 / (5 * 5), scalar_t>;
+                    break;
+                case 6:
+                    actionf = ::ddh_action<6, 1024 / (6 * 6), scalar_t>;
+                    break;
+                case 7:
+                    actionf = ::ddh_action<7, 1024 / (7 * 7), scalar_t>;
+                    break;
+                case 8:
+                    actionf = ::ddh_action<8, 1024 / (8 * 8), scalar_t>;
+                    break;
+                default:
+                    actionf = nullptr;
+                    break;
+            }
+            break;
+        default:
+            actionf = nullptr;
+    }
+
+    cuddh_verify(actionf != nullptr,
+                 printf("DDH error: No valid kernel for n_basis=%d, mx_dof_variant=%d\n", n_basis, mx_dof_variant));
 
     (*actionf)(&efem, g_ndof, n_lambda, B, T, S.to_device(), punity, W.to_device(), fem_in, fem_out, lambda_in,
                lambda_out);
