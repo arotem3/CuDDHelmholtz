@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cuda/warp>
 #include <type_traits>
 
 #include "EnsembleSpace.hpp"
@@ -11,8 +12,194 @@
 
 namespace cuddh
 {
+    namespace details
+    {
+        template <typename scalar_t, int NB, int NEL>
+            requires(NB == 2 || NB == 4)
+        struct SubdomainStiffnessMatrixWrapImpl;
+
+        template <typename scalar_t, int NB, int NEL>
+        struct SubdomainStiffnessMatrixSmemImpl;
+
+        template <typename scalar_t, int NB, int NEL>
+        struct SSMImpl;
+    } // namespace details
+
     template <typename scalar_t, int NB, int NEL>
-    struct SubdomainStiffnessMatrix
+    using SubdomainStiffnessMatrix = typename details::SSMImpl<scalar_t, NB, NEL>::type;
+
+    template <typename scalar_t>
+    struct DeviceDDStiffnessMatrix
+    {
+        using sym2x2 = SmallSymmetricMatrix<scalar_t, 2>;
+
+        MatrixWrapper<const scalar_t> D;
+        TensorWrapper<4, const sym2x2> G;
+        TensorWrapper<4, const int> I;
+
+        template <int NB, int MX_NEL>
+        __device__ SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL> subspace_op(
+            int subsp, int nel, typename SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>::SharedResources &smem) const
+        {
+            return SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>(smem, subsp, nel, D, G, I);
+        }
+    };
+
+    template <typename scalar_t>
+    class DDStiffnessMatrix
+    {
+        static_assert(std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
+                      "scalar_t must be float or double");
+
+    public:
+        using sym2x2 = SmallSymmetricMatrix<scalar_t, 2>;
+
+        DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem);
+
+        DeviceDDStiffnessMatrix<scalar_t> to_device() const
+        {
+            return {.D = reshape(d.device_read(), n_basis, n_basis),
+                    .G = reshape(g.device_read(), n_basis, n_basis, mx_elem, n_domains),
+                    .I = d_I};
+        }
+
+    private:
+        int n_basis;
+        int mx_elem;
+        int n_domains;
+        HostDeviceArray<scalar_t> d;
+        HostDeviceArray<sym2x2> g;
+        TensorWrapper<4, const int> d_I;
+    };
+
+    extern template class DDStiffnessMatrix<float>;
+    extern template class DDStiffnessMatrix<double>;
+} // namespace cuddh
+
+namespace cuddh::details
+{
+    template <typename scalar_t, int NEL>
+    struct SSMImpl<scalar_t, 2, NEL>
+    {
+        using type = SubdomainStiffnessMatrixWrapImpl<scalar_t, 2, NEL>;
+    };
+
+    template <typename scalar_t, int NEL>
+    struct SSMImpl<scalar_t, 4, NEL>
+    {
+        using type = SubdomainStiffnessMatrixWrapImpl<scalar_t, 4, NEL>;
+    };
+
+    template <typename scalar_t, int NB, int NEL>
+    struct SSMImpl
+    {
+        using type = SubdomainStiffnessMatrixSmemImpl<scalar_t, NB, NEL>;
+    };
+
+    template <typename scalar_t, int NB, int NEL>
+        requires(NB == 2 || NB == 4)
+    struct SubdomainStiffnessMatrixWrapImpl
+    {
+        using vec_t = cuddh::scalar2<scalar_t>;
+        using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
+
+        struct SharedResources
+        {
+            scalar_t D[NB][NB];
+            scalar_t u[NEL * NB * NB];
+        };
+
+        SharedResources &smem;
+        mat_t geom;
+        int I;
+        int tx, ty;
+
+        __device__ SubdomainStiffnessMatrixWrapImpl(SharedResources &mem, int subsp, int nel,
+                                                    const MatrixWrapper<const scalar_t> &D,
+                                                    const TensorWrapper<4, const mat_t> &G,
+                                                    const TensorWrapper<4, const int> &sI)
+            : smem{mem}
+        {
+            cuddh_assert(blockDim.x == NB * NB && blockDim.y == NEL && blockDim.z == 1,
+                         printf("SubsdomainStiffnessMatrix<NB=%d,NEL=%d> expects a thread block of dimensions (NB^2, "
+                                "NEL) = (%d, %d) but got (%d, %d, %d).\n",
+                                NB, NEL, NB * NB, NEL, blockDim.x, blockDim.y, blockDim.z));
+
+            tx = threadIdx.x % NB;
+            ty = threadIdx.x / NB;
+            const auto el = threadIdx.y;
+
+            if (el == 0)
+                smem.D[tx][ty] = D(tx, ty);
+
+            I = (el < nel) ? sI(tx, ty, el, subsp) : -1;
+            geom = (el < nel) ? G(tx, ty, el, subsp) : mat_t{};
+
+            __syncthreads();
+        }
+
+        __device__ scalar_t operator()(scalar_t in) const
+        {
+            const auto lane = cuda::ptx::get_sreg_laneid();
+            const int E = (lane / (NB * NB)) * (NB * NB);
+
+            smem.u[threadIdx.x + NB * NB * threadIdx.y] = in;
+            __syncthreads();
+
+            const scalar_t u = (I >= 0) ? smem.u[I] : 0;
+            __syncthreads();
+
+            smem.u[threadIdx.x + NB * NB * threadIdx.y] = 0;
+
+            vec_t grad = {0, 0};
+
+            // compute grad
+            for (int i = 0; i < NB; ++i)
+            {
+                // grad.x += D[tx][i] * u[ty][i]
+                int src = E + (ty * NB + i);
+                scalar_t uij = cuda::device::warp_shuffle_idx(u, src);
+                grad.x += smem.D[tx][i] * uij;
+            }
+
+            for (int i = 0; i < NB; ++i)
+            {
+                // grad.y += D[ty][i] * u[i][tx]
+                int src = E + (i * NB + tx);
+                scalar_t uij = cuda::device::warp_shuffle_idx(u, src);
+                grad.y += smem.D[ty][i] * uij;
+            }
+
+            grad = geom * grad; // this is grad[ty][tx]
+
+            scalar_t Su = 0;
+            for (int i = 0; i < NB; ++i)
+            {
+                // Su += D[i][tx] * grad[ty][i].x
+                int src = E + (ty * NB + i);
+                scalar_t gx = cuda::device::warp_shuffle_idx(grad.x, src);
+                Su += smem.D[i][tx] * gx;
+            }
+
+            for (int i = 0; i < NB; ++i)
+            {
+                // Su += D[i][ty] * grad[i][tx].y
+                int src = E + (i * NB + tx);
+                scalar_t gy = cuda::device::warp_shuffle_idx(grad.y, src);
+                Su += smem.D[i][ty] * gy;
+            }
+
+            __syncthreads();
+            if (I >= 0)
+                atomicAdd(smem.u + I, Su);
+            __syncthreads();
+
+            return smem.u[threadIdx.x + NB * NB * threadIdx.y];
+        }
+    };
+
+    template <typename scalar_t, int NB, int NEL>
+    struct SubdomainStiffnessMatrixSmemImpl
     {
         using vec_t = cuddh::scalar2<scalar_t>;
         using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
@@ -29,10 +216,10 @@ namespace cuddh
         int I[2][NB];
         int tx, ty;
 
-        __device__ SubdomainStiffnessMatrix(SharedResources &mem, int subsp, int nel,
-                                            const MatrixWrapper<const scalar_t> &D,
-                                            const TensorWrapper<4, const mat_t> &G,
-                                            const TensorWrapper<4, const int> &sI)
+        __device__ SubdomainStiffnessMatrixSmemImpl(SharedResources &mem, int subsp, int nel,
+                                                    const MatrixWrapper<const scalar_t> &D,
+                                                    const TensorWrapper<4, const mat_t> &G,
+                                                    const TensorWrapper<4, const int> &sI)
             : smem{mem}
         {
             cuddh_assert(blockDim.x == NB * NB && blockDim.y == NEL && blockDim.z == 1,
@@ -86,57 +273,11 @@ namespace cuddh
             {
                 Su += smem.D[i][tx] * smem.grad[el][ty][i].x + smem.D[i][ty] * smem.grad[el][i][tx].y;
             }
-            atomicAdd(smem.u + I[0][tx], Su);
+            if (I[0][0] >= 0)
+                atomicAdd(smem.u + I[0][tx], Su);
             __syncthreads();
 
             return smem.u[threadIdx.x + NB * NB * threadIdx.y];
         }
     };
-
-    template <typename scalar_t>
-    struct DeviceDDStiffnessMatrix
-    {
-        using sym2x2 = SmallSymmetricMatrix<scalar_t, 2>;
-
-        MatrixWrapper<const scalar_t> D;
-        TensorWrapper<4, const sym2x2> G;
-        TensorWrapper<4, const int> I;
-
-        template <int NB, int MX_NEL>
-        __device__ SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL> subspace_op(
-            int subsp, int nel, typename SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>::SharedResources &smem) const
-        {
-            return SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>(smem, subsp, nel, D, G, I);
-        }
-    };
-
-    template <typename scalar_t>
-    class DDStiffnessMatrix
-    {
-        static_assert(std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
-                      "scalar_t must be float or double");
-
-    public:
-        using sym2x2 = SmallSymmetricMatrix<scalar_t, 2>;
-
-        DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem);
-
-        DeviceDDStiffnessMatrix<scalar_t> to_device() const
-        {
-            return {.D = reshape(d.device_read(), n_basis, n_basis),
-                    .G = reshape(g.device_read(), n_basis, n_basis, mx_elem, n_domains),
-                    .I = d_I};
-        }
-
-    private:
-        int n_basis;
-        int mx_elem;
-        int n_domains;
-        HostDeviceArray<scalar_t> d;
-        HostDeviceArray<sym2x2> g;
-        TensorWrapper<4, const int> d_I;
-    };
-
-    extern template class DDStiffnessMatrix<float>;
-    extern template class DDStiffnessMatrix<double>;
-} // namespace cuddh
+} // namespace cuddh::details
