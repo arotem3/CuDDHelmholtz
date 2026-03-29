@@ -105,14 +105,14 @@ namespace cuddh::details
 
         struct SharedResources
         {
-            scalar_t D[NB][NB];
-            scalar_t u[NEL * NB * NB];
+            scalar_t u[2][NEL * NB * NB];
         };
 
         SharedResources &smem;
         mat_t geom;
         int I;
         int tx, ty;
+        scalar_t Dxy;
 
         __device__ SubdomainStiffnessMatrixWrapImpl(SharedResources &mem, int subsp, int nel,
                                                     const MatrixWrapper<const scalar_t> &D,
@@ -129,13 +129,10 @@ namespace cuddh::details
             ty = threadIdx.x / NB;
             const auto el = threadIdx.y;
 
-            if (el == 0)
-                smem.D[tx][ty] = D(tx, ty);
+            Dxy = D(tx, ty);
 
             I = (el < nel) ? sI(tx, ty, el, subsp) : -1;
             geom = (el < nel) ? G(tx, ty, el, subsp) : mat_t{};
-
-            __syncthreads();
         }
 
         __device__ scalar_t operator()(scalar_t in) const
@@ -143,58 +140,44 @@ namespace cuddh::details
             const auto lane = cuda::ptx::get_sreg_laneid();
             const int E = (lane / (NB * NB)) * (NB * NB);
 
-            smem.u[threadIdx.x + NB * NB * threadIdx.y] = in;
+            smem.u[0][threadIdx.x + NB * NB * threadIdx.y] = in;
+            smem.u[1][threadIdx.x + NB * NB * threadIdx.y] = 0;
             __syncthreads();
 
-            const scalar_t u = (I >= 0) ? smem.u[I] : 0;
-            __syncthreads();
-
-            smem.u[threadIdx.x + NB * NB * threadIdx.y] = 0;
+            const scalar_t u = (I >= 0) ? smem.u[0][I] : 0;
 
             vec_t grad = {0, 0};
 
-            // compute grad
             for (int i = 0; i < NB; ++i)
             {
-                // grad.x += D[tx][i] * u[ty][i]
-                int src = E + (ty * NB + i);
-                scalar_t uij = cuda::device::warp_shuffle_idx(u, src);
-                grad.x += smem.D[tx][i] * uij;
+                scalar_t uiy = cuda::device::warp_shuffle_idx(u, E + (ty * NB + i));
+                scalar_t Dxi = cuda::device::warp_shuffle_idx(Dxy, E + (i * NB + tx));
+                grad.x += Dxi * uiy;
+
+                scalar_t uxi = cuda::device::warp_shuffle_idx(u, E + (i * NB + tx));
+                scalar_t Dyi = cuda::device::warp_shuffle_idx(Dxy, E + (i * NB + ty));
+                grad.y += Dyi * uxi;
             }
 
-            for (int i = 0; i < NB; ++i)
-            {
-                // grad.y += D[ty][i] * u[i][tx]
-                int src = E + (i * NB + tx);
-                scalar_t uij = cuda::device::warp_shuffle_idx(u, src);
-                grad.y += smem.D[ty][i] * uij;
-            }
-
-            grad = geom * grad; // this is grad[ty][tx]
+            grad = geom * grad;
 
             scalar_t Su = 0;
             for (int i = 0; i < NB; ++i)
             {
-                // Su += D[i][tx] * grad[ty][i].x
-                int src = E + (ty * NB + i);
-                scalar_t gx = cuda::device::warp_shuffle_idx(grad.x, src);
-                Su += smem.D[i][tx] * gx;
+                scalar_t gx_iy = cuda::device::warp_shuffle_idx(grad.x, E + (ty * NB + i));
+                scalar_t Dix = cuda::device::warp_shuffle_idx(Dxy, E + (tx * NB + i));
+                Su += Dix * gx_iy;
+
+                scalar_t gy_xi = cuda::device::warp_shuffle_idx(grad.y, E + (i * NB + tx));
+                scalar_t Diy = cuda::device::warp_shuffle_idx(Dxy, E + (ty * NB + i));
+                Su += Diy * gy_xi;
             }
 
-            for (int i = 0; i < NB; ++i)
-            {
-                // Su += D[i][ty] * grad[i][tx].y
-                int src = E + (i * NB + tx);
-                scalar_t gy = cuda::device::warp_shuffle_idx(grad.y, src);
-                Su += smem.D[i][ty] * gy;
-            }
-
-            __syncthreads();
             if (I >= 0)
-                atomicAdd(smem.u + I, Su);
+                atomicAdd(smem.u[1] + I, Su);
             __syncthreads();
 
-            return smem.u[threadIdx.x + NB * NB * threadIdx.y];
+            return smem.u[1][threadIdx.x + NB * NB * threadIdx.y];
         }
     };
 
