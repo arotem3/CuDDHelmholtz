@@ -30,17 +30,17 @@ static void symmetrize(int n, const scalar_t *x, scalar_t *y)
 }
 
 template <int NB, int NEL, typename scalar_t>
-static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global finite element degrees of freedom */
-                       const int n_lambda,                          /* number of substructured DOFs (lambda) */
-                       const TensorWrapper<3, const int2> B, /* global lambda indices associated with boundary DOF */
-                       const TensorWrapper<3, const scalar_t> T,                 /* lambda trace operator */
-                       const DeviceDDStiffnessMatrix<scalar_t> stiffness_matrix, /* stiffness_matvec matrix on device */
-                       const MatrixWrapper<const scalar_t> punity,               /* partition of unity */
-                       const DeviceDDWaveHoltz<scalar_t> waveholtz,              /* WaveHoltz data */
-                       const double *const __restrict__ x,                       /* input */
-                       double *const __restrict__ y,                             /* output */
-                       const scalar_t *const __restrict__ d_lambda,              /* substructured problem variables */
-                       scalar_t *const __restrict__ d_update                     /* substructured problem variables */
+static void ddh_action(
+    const EnsembleSpace *efem, const int g_ndof,              /* global finite element degrees of freedom */
+    const int n_lambda,                                       /* number of substructured DOFs (lambda) */
+    const TensorWrapper<3, const LambdaDOFData<scalar_t>> B,  /* global lambda indices associated with boundary DOF */
+    const DeviceDDStiffnessMatrix<scalar_t> stiffness_matrix, /* stiffness_matvec matrix on device */
+    const MatrixWrapper<const scalar_t> punity,               /* partition of unity */
+    const DeviceDDWaveHoltz<scalar_t> waveholtz,              /* WaveHoltz data */
+    const double *const __restrict__ x,                       /* input */
+    double *const __restrict__ y,                             /* output */
+    const scalar_t *const __restrict__ d_lambda,              /* substructured problem variables */
+    scalar_t *const __restrict__ d_update                     /* substructured problem variables */
 )
 {
     constexpr int wh_maxit = 100;
@@ -108,23 +108,22 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
                 const int g_idx = gI(tid, subsp);
                 const scalar_t weight = punity(tid, subsp);
 
-                F.x += weight * scalar_t(x[g_idx]);
-                F.y += weight * scalar_t(x[g_ndof + g_idx]);
+                F.x += weight * x[g_idx];
+                F.y += weight * x[g_ndof + g_idx];
             }
 
             if (d_lambda && tid < fdof)
             {
                 for (int o = 0; o < 2; ++o)
                 {
-                    const auto [i, j] = B(o, tid, subsp);
+                    const auto [i, j, T] = B(o, tid, subsp);
                     if (i < 0)
                         break;
 
                     const scalar_t lambda1 = g_lambda[i], lambda2 = g_lambda[j], mu1 = g_mu[i], mu2 = g_mu[j];
-                    const scalar_t t = T(o, tid, subsp);
 
-                    F.x += scalar_t(0.5) * t * (lambda1 + lambda2 - mu1 + mu2);
-                    F.y += scalar_t(0.5) * t * (lambda1 - lambda2 + mu1 + mu2);
+                    F.x += scalar_t(0.5) * T * (lambda1 + lambda2 - mu1 + mu2);
+                    F.y += scalar_t(0.5) * T * (lambda1 - lambda2 + mu1 + mu2);
                 }
             }
 
@@ -162,7 +161,7 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
         if (d_update && tid < fdof)
             for (int o = 0; o < 2; ++o)
             {
-                const auto [i, j] = B(o, tid, subsp);
+                const auto [i, j, T] = B(o, tid, subsp);
                 if (i < 0)
                     break;
 
@@ -175,15 +174,15 @@ static void ddh_action(const EnsembleSpace *efem, const int g_ndof, /* global fi
                     mu = g_mu[i];
                 }
 
-                const scalar_t t = T(o, tid, subsp);
-
-                lambda_update[j] = -lambda + t * u.y;
-                mu_update[j] = -mu - t * u.x;
+                lambda_update[j] = -lambda + T * u.y;
+                mu_update[j] = -mu - T * u.x;
             }
     });
 }
 
-static int lambda_dofs(auto &B, auto &T, const EnsembleSpace &efem, double omega, VectorWrapper<const double> a)
+template <typename scalar_t>
+static int lambda_dofs(thrust::device_vector<LambdaDOFData<scalar_t>> &B, const EnsembleSpace &efem, double omega,
+                       VectorWrapper<const double> a)
 {
     const int n_domains = efem.size();
     const int mx_fdof = efem.max_fsize();
@@ -192,45 +191,40 @@ static int lambda_dofs(auto &B, auto &T, const EnsembleSpace &efem, double omega
     auto gI = efem.global_indices(MemorySpace::HOST);
     const int n_shared = cmap.shape(0);
 
-    B.resize(2 * mx_fdof * n_domains);
-    T.resize(2 * mx_fdof * n_domains);
-    thrust::fill(B.begin(), B.end(), int2{-1, -1});
-    thrust::fill(T.begin(), T.end(), 0.0);
+    thrust::host_vector<LambdaDOFData<scalar_t>> h_B(2 * mx_fdof * n_domains, LambdaDOFData<scalar_t>{});
+    auto b = reshape(thrust::raw_pointer_cast(h_B.data()), 2, mx_fdof, n_domains);
 
-    auto b = reshape(B, 2, mx_fdof, n_domains);
-    auto t = reshape(T, 2, mx_fdof, n_domains);
-
-    int n_lambda = 0;
-    int k = 0;
-    for (const auto &dof : cmap)
+    int n_lambda = 2 * n_shared;
+    for (int k = 0; k < n_shared; ++k)
     {
+        const auto &dof = cmap(k);
+
         for (const int s : {0, 1})
         {
             const int subspace = dof.subspaces[s];
             const int face_index = dof.local_dof_indices[s];
 
-            for (int o = 0; o < 2; ++o)
+            for (const int o : {0, 1})
             {
-                if (b(o, face_index, subspace).x < 0)
+                if (b(o, face_index, subspace).i < 0)
                 {
-                    n_lambda++;
-                    b(o, face_index, subspace) = {(s == 0) ? k : n_shared + k, (s == 0) ? n_shared + k : k};
-                    t(o, face_index, subspace) = std::sqrt(2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass);
+                    const scalar_t T = std::sqrt(2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass);
+
+                    b(o, face_index, subspace) = LambdaDOFData<scalar_t>{
+                        .i = (s == 0) ? k : n_shared + k, .j = (s == 0) ? n_shared + k : k, .trOp = T};
                     break;
                 }
             }
         }
-        k++;
     }
 
-    cuddh_verify(n_lambda == 2 * n_shared,
-                 printf("DDH error: lambda dof computation mismatch (%d != %d)\n", n_lambda, 2 * n_shared));
+    B = h_B;
 
     return n_lambda;
 }
 
 template <typename scalar_t>
-static thrust::universal_vector<scalar_t> partition_of_unity(const H1Space2D &fem, const EnsembleSpace &efem)
+static thrust::device_vector<scalar_t> partition_of_unity(const H1Space2D &fem, const EnsembleSpace &efem)
 {
     MassMatrix M(fem);
     DDMassMatrix<double> DDM(fem, efem);
@@ -244,8 +238,8 @@ static thrust::universal_vector<scalar_t> partition_of_unity(const H1Space2D &fe
     auto sizes = efem.sizes(MemorySpace::DEVICE);
     auto gI = efem.global_indices(MemorySpace::DEVICE);
 
-    thrust::universal_vector<scalar_t> P(mx_dof * n_domains, 0);
-    auto p = reshape(P, mx_dof, n_domains);
+    thrust::device_vector<scalar_t> P(mx_dof * n_domains, 0);
+    auto p = reshape(thrust::raw_pointer_cast(P.data()), mx_dof, n_domains);
 
     forall_1d(mx_dof, n_domains, [=] __device__(int subsp) mutable -> void {
         const auto &i = threadIdx.x;
@@ -282,8 +276,7 @@ DDSubstructedProblem<scalar_t>::DDSubstructedProblem(double omega, const double 
     mx_fdof = efem.max_fsize();
     mx_elem_per_dom = efem.max_n_elem();
 
-    n_lambda = lambda_dofs(_B, _T, efem, omega, reshape(h_a, fem.size()));
-
+    n_lambda = lambda_dofs(_B, efem, omega, reshape(h_a, fem.size()));
     _partition_of_unity = partition_of_unity<scalar_t>(fem, efem);
 }
 
@@ -294,7 +287,6 @@ void DDSubstructedProblem<scalar_t>::action(const double *fem_in, double *fem_ou
     cuddh_verify(n_basis <= 8, printf("DDH error: Only n_basis <= 8 supported.\n"));
 
     auto B = reshape(_B, 2, mx_fdof, n_domains);
-    auto T = reshape(_T, 2, mx_fdof, n_domains);
     auto punity = reshape(_partition_of_unity, mx_dof, n_domains);
 
     // Determine the maximum number of DOFs per subdomain
@@ -417,7 +409,7 @@ void DDSubstructedProblem<scalar_t>::action(const double *fem_in, double *fem_ou
     cuddh_verify(actionf != nullptr,
                  printf("DDH error: No valid kernel for n_basis=%d, mx_dof_variant=%d\n", n_basis, mx_dof_variant));
 
-    (*actionf)(&efem, g_ndof, n_lambda, B, T, S.to_device(), punity, W.to_device(), fem_in, fem_out, lambda_in,
+    (*actionf)(&efem, g_ndof, n_lambda, B, S.to_device(), punity, W.to_device(), fem_in, fem_out, lambda_in,
                lambda_out);
 }
 

@@ -25,6 +25,14 @@
 
 namespace cuddh
 {
+    template <typename scalar_t>
+    struct LambdaDOFData
+    {
+        int i = -1;
+        int j = -1;
+        scalar_t trOp = 0;
+    };
+
     /**
      * @brief Operator for Helmholtz domain decomposition substructured problem.
      * The scalar type scalar_t is either float or double and is the scalar type in which the the substructured problem
@@ -82,13 +90,12 @@ namespace cuddh
 
         const EnsembleSpace &efem;
 
-        thrust::universal_vector<int2> _B;
-        thrust::universal_vector<scalar_t> _T;
+        thrust::device_vector<LambdaDOFData<scalar_t>> _B;
 
         DDStiffnessMatrix<scalar_t> S;
         DDWaveHoltz<scalar_t> W;
 
-        thrust::universal_vector<scalar_t> _partition_of_unity;
+        thrust::device_vector<scalar_t> _partition_of_unity;
     };
 
     extern template class DDSubstructedProblem<float>;
