@@ -45,14 +45,20 @@ static thrust::device_vector<SmallSymmetricMatrix<scalar_t, 3>> geom_factors(con
     thrust::device_vector<mat_t> d_G(n_basis * n_basis * n_basis * mx_elem * n_domains);
     auto G = reshape(thrust::raw_pointer_cast(d_G.data()), n_basis, n_basis, n_basis, mx_elem, n_domains);
 
-    forall_3d(n_basis, n_basis, mx_elem, n_domains, [=] __device__(int subsp) mutable -> void {
-        const auto [i, j, el] = threadIdx;
+    forall_2d(n_basis, n_basis, mx_elem * n_domains, [=] __device__(int b) mutable -> void {
+        const int el = b % mx_elem;
+        const int subsp = b / mx_elem;
+        const int i = threadIdx.x, j = threadIdx.y;
 
         if (el >= n_elems(subsp))
             return;
 
         const int g_el = elems(el, subsp);
-        const HexElement element = mesh.element(g_el);
+
+        __shared__ HexElement element;
+        if (i == 0 && j == 0)
+            element = mesh.element(g_el);
+        __syncthreads();
 
         double3 xi{x(i), x(j), 0.0};
 
