@@ -88,6 +88,11 @@ int main()
     const int nx = 64, ny = 64;              // number of elements along each direction. Mesh will have nx^2 elements
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
+    const DDKernelConfig config = {
+        .block_size = DDKernelConfig::Default, // one of Default, t256, t512, t1024
+        .tdof = 2                              // one of 0, 1, 2, 3, 4.
+    };
+
     const SolverParams opts = {
         .maxit = 1000,                       // maximum number of iterations of GMRES
         .rtol = 1e-5,                        // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
@@ -104,7 +109,7 @@ int main()
     // The mesh and 1D basis functions are combined in H1Space2D to define the
     // total global degrees of freedom of the problem.
     H1Space2D fem(mesh, basis);
-    EnsembleSpace efem = partition_uniform_rect(fem, {nx, ny}, {8, 4});
+    EnsembleSpace efem = partition_uniform_rect(fem, {nx, ny}, {8, 8});
 
     const int ndof = fem.size(); // # of degrees of freedom
 
@@ -113,7 +118,7 @@ int main()
     auto ddh = [&]() {
         auto a = gridfunc(fem, [] __device__(const double X[2]) -> double { return alpha(X); });
         double *d_a = thrust::raw_pointer_cast(a.data());
-        return DDH<float>(omega, d_a, fem, efem);
+        return DDH<float>(omega, d_a, fem, efem, config);
     }();
 
     thrust::universal_vector<double> U(N, 0.0);
@@ -132,6 +137,8 @@ int main()
               << "\tpolynomial degree = " << deg << "\n"
               << "\t#dof = " << 2 * ndof << "\n"
               << "\t#subdomains = " << efem.size() << "\n"
+              << "\tmax #elements / subdomain = " << efem.max_n_elem() << "\n"
+              << "\tmax #dof / subdomain = " << efem.max_size() << "\n"
               << "\t#lambda = " << ddh.n_lambda() << std::endl;
 
     auto out = ddh.solve(u, b, opts);
