@@ -2,146 +2,260 @@
 
 #include "FixedTensorWrapper.hpp"
 
-#define DD3D_MX_DOF 512
-
 using namespace cuddh;
 
-template <typename scalar_t, int NB, int NEL>
-static void ddh_action_dof_per_thread(
-    const EnsembleSpace3D &efem, const int g_ndof, /* global finite element degrees of freedom */
-    const int n_lambda,                            /* number of substructured DOFs (lambda) */
-    const TensorWrapper<3, const int2> B,          /* global lambda indices associated with boundary DOFs */
-    const TensorWrapper<3, const scalar_t> T,      /* lambda trace operator */
-    const DeviceDDStiffnessMatrix3D<scalar_t> stiffness_matrix,
-    const MatrixWrapper<const scalar_t> punity,  /* partition of unity */
-    const DeviceDDWaveHoltz<scalar_t> waveholtz, /* waveholtz */
-    const double *const __restrict__ d_x,        /* input */
-    double *const __restrict__ d_y,              /* output */
-    const scalar_t *const __restrict__ d_lambda, /* substructured problem input DOFs */
-    scalar_t *const __restrict__ d_update        /* substructured problem output DOFs */
-)
+struct alignas(4) SubdomainNDOFs3D
 {
-    using vec2 = cuddh::scalar2<scalar_t>;
+    int16_t ndof;
+    int16_t fdof;
+};
 
-    constexpr int wh_maxit = 20;
+template <typename scalar_t, int NB, int NEL, int TDOF = 1>
+class DDH3DKernelData
+{
+public:
+    static constexpr int EDOF = NB * NB * NB;
+    static constexpr int BDOF = EDOF * NEL;
 
-    constexpr int EDOF = NB * NB * NB;  // number of DOFs per element
-    constexpr int MX_NDOF = EDOF * NEL; // maximum number of degrees of freedom per thread block
+    __device__ constexpr int subspace() const { return blockIdx.x; }
 
-    const int n_domains = efem.size();
+    // Base thread index (t=0) or DOF index for TDOF slot t.
+    __device__ constexpr int thread_index(int t = 0) const { return threadIdx.x + EDOF * threadIdx.y + BDOF * t; }
 
-    auto gI = efem.global_indices(MemorySpace::DEVICE); // global solution DOF associated with subdomain DOFs
+    __device__ constexpr SubdomainNDOFs3D subdomain_limits() const
+    {
+        int ndof = s_ndof[subspace()];
+        int fdof = s_fdof[subspace()];
 
-    auto subsp_elems = efem.n_elems(MemorySpace::DEVICE); // number of elements in a subdoamin
-    auto subsp_sizes = efem.sizes(MemorySpace::DEVICE);   // number of subdomain degrees of freedom
-    auto subsp_fsizes = efem.fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
+        cuddh_assert(ndof <= std::numeric_limits<int16_t>::max() && fdof <= std::numeric_limits<int16_t>::max(),
+                     printf("DDH3D error: subdomains too large."));
 
-    if (d_y)
-        dla::zeros(2 * g_ndof, d_y);
+        return {static_cast<int16_t>(ndof), static_cast<int16_t>(fdof)};
+    }
 
-    const scalar_t *g_lambda = (d_lambda) ? d_lambda : nullptr;
-    const scalar_t *g_mu = (d_lambda) ? (d_lambda + n_lambda) : nullptr;
+    __device__ constexpr int global_ndof() const { return g_ndof; }
+    __device__ constexpr int n_lambda() const { return g_lambda; }
+    __device__ constexpr int subdomain_elems() const { return s_elems[subspace()]; }
 
-    scalar_t *lambda_update = (d_update) ? d_update : nullptr;
-    scalar_t *mu_update = (d_update) ? (d_update + n_lambda) : nullptr;
+    __device__ constexpr int global_index(int t = 0) const { return gI[thread_index(t) + mx_ndof * subspace()]; }
 
-    forall_2d(EDOF, NEL, n_domains, [=] __device__(const int subsp) mutable -> void {
-        using BStiffness = SubdomainStiffnessMatrix3D<scalar_t, NB, NEL>;
+    __device__ constexpr scalar_t partition_of_unity(int t = 0) const
+    {
+        return punity[thread_index(t) + mx_ndof * subspace()];
+    }
 
-        const int tid = threadIdx.x + EDOF * threadIdx.y; // linearized thread index.
+    __device__ constexpr LambdaDOFData<scalar_t> lambda_dof(int o, int t = 0) const
+    {
+        int k = o + 3 * (thread_index(t) + mx_fdof * subspace());
+        return B[k];
+    }
 
-        // get subspace dimensions
-        const int fdof = subsp_fsizes(subsp); // number of face space degrees of freedom
-        const int ndof = subsp_sizes(subsp);  // number of subdomain degrees of freedom
+    __device__ __forceinline__ auto waveholtz(int ndof) const
+    {
+        return _waveholtz.template subspace_op<TDOF>(subspace(), thread_index(), ndof);
+    }
 
-        cuddh_assert(ndof <= MX_NDOF,
-                     printf("DDH3D error: exceeded maximum number of subdomain DOFs per thread block (%d > %d)\n", ndof,
-                            MX_NDOF););
-        cuddh_assert(subsp_elems(subsp) <= NEL,
-                     printf("DDH3D error: subdomain larger than block thread dimension can accomodate.\n"));
+    __device__ __forceinline__ auto stiffness_matrix(
+        typename SubdomainStiffnessMatrix3D<scalar_t, NB, NEL, TDOF>::SharedResources &smem) const
+    {
+        scalar_t *work_ptr = nullptr;
+        if constexpr (TDOF > 1)
+            work_ptr = d_work + subspace() * (BDOF * TDOF);
+        return _stiffness_matrix.template subspace_op<NB, NEL, TDOF>(subspace(), subdomain_elems(), smem, work_ptr);
+    }
 
-        __shared__ typename BStiffness::SharedResources smem;
-        const auto A = stiffness_matrix.template subspace_op<NB, NEL>(subsp, subsp_elems(subsp), smem);
-        const auto evolve_project = waveholtz.template subspace_op<>(subsp, tid, ndof);
+    static __host__ DDH3DKernelData make(int nlambda, int ndof, const EnsembleSpace3D &efem,
+                                         const LambdaDOFData<scalar_t> *B, const scalar_t *punity,
+                                         const DDStiffnessMatrix3D<scalar_t> &stiffness_matrix,
+                                         const DDWaveHoltz<scalar_t> &waveholtz, scalar_t *d_work = nullptr)
+    {
+        return DDH3DKernelData{.mx_ndof = efem.max_size(),
+                               .mx_fdof = efem.max_fsize(),
+                               .g_ndof = ndof,
+                               .g_lambda = nlambda,
+                               .s_ndof = efem.sizes(MemorySpace::DEVICE).data(),
+                               .s_fdof = efem.fsizes(MemorySpace::DEVICE).data(),
+                               .s_elems = efem.n_elems(MemorySpace::DEVICE).data(),
+                               .gI = efem.global_indices(MemorySpace::DEVICE).data(),
+                               .punity = punity,
+                               .B = B,
+                               .d_work = d_work,
+                               ._stiffness_matrix = stiffness_matrix.to_device(),
+                               ._waveholtz = waveholtz.to_device()};
+    }
 
-        const vec2 F = [&]() -> vec2 {
-            vec2 F{0, 0};
+public:
+    int mx_ndof;
+    int mx_fdof;
+    int g_ndof;
+    int g_lambda;
 
-            if (d_x && tid < ndof)
+    const int *s_ndof;
+    const int *s_fdof;
+    const int *s_elems;
+    const int *gI;
+    const scalar_t *punity;
+    const LambdaDOFData<scalar_t> *B;
+    scalar_t *d_work;
+
+    DeviceDDStiffnessMatrix3D<scalar_t> _stiffness_matrix;
+    DeviceDDWaveHoltz<scalar_t> _waveholtz;
+};
+
+template <typename scalar_t, int NB, int NEL, int TDOF = 1>
+__global__ __launch_bounds__(NB * NB * NB * NEL, 1024 / (NB * NB * NB * NEL)) void ddh_action_kernel_3d(
+    const DDH3DKernelData<scalar_t, NB, NEL, TDOF> helper, const double *const __restrict__ x,
+    double *const __restrict__ y, const scalar_t *const __restrict__ d_lambda, scalar_t *const __restrict__ d_update)
+{
+    constexpr int EDOF = NB * NB * NB;
+    constexpr int BDOF = EDOF * NEL;
+
+    using vec_t = cuddh::scalar2<scalar_t>;
+    using arr_t = std::conditional_t<TDOF == 1, vec_t, cuda::std::array<vec_t, TDOF>>;
+    using BStiffness = SubdomainStiffnessMatrix3D<scalar_t, NB, NEL, TDOF>;
+    using BlockReduce = cub::BlockReduce<scalar_t, EDOF, cub::BLOCK_REDUCE_WARP_REDUCTIONS, NEL>;
+
+    constexpr int WHMaxIter = 100;
+    constexpr scalar_t WHRTol = std::is_same_v<scalar_t, double> ? 1e-12 : 1e-6;
+    constexpr scalar_t WHATol = std::is_same_v<scalar_t, double> ? 1e-14 : 1e-7;
+
+    cuddh_assert(blockDim.x == EDOF && blockDim.y == NEL && blockDim.z == 1,
+                 printf("DDH3D error: Attempting to launch ddh_action_kernel_3d<%d, %d, %d> with invalid blockDim "
+                        "%d x %d x %d.\n",
+                        NB, NEL, TDOF, blockDim.x, blockDim.y, blockDim.z));
+
+    const SubdomainNDOFs3D limits = helper.subdomain_limits();
+
+    cuddh_assert(limits.ndof <= BDOF * TDOF,
+                 printf("DDH3D error: exceeded maximum number of subdomain DOFs per thread block (%d > %d)\n",
+                        limits.ndof, BDOF * TDOF););
+    cuddh_assert(helper.subdomain_elems() <= NEL * TDOF,
+                 printf("DDH3D error: exceeded maximum number of elements per subdomain.\n"));
+
+    auto get = [](auto &a, [[maybe_unused]] int t) -> decltype(auto) {
+        if constexpr (TDOF == 1)
+            return a;
+        else
+            return a[t];
+    };
+
+    const arr_t f = [&]() -> arr_t {
+        arr_t F{};
+
+        for (int t = 0; t < TDOF; ++t)
+        {
+            const int idx = helper.thread_index(t);
+            if (idx >= limits.ndof)
+                break;
+
+            if (x)
             {
-                const int g_idx = gI(tid, subsp);
-                const scalar_t weight = punity(tid, subsp);
+                const int g_idx = helper.global_index(t);
+                const scalar_t weight = helper.partition_of_unity(t);
 
-                F.x = weight * d_x[g_idx];
-                F.y = weight * d_x[g_ndof + g_idx];
+                get(F, t).x += weight * x[g_idx];
+                get(F, t).y += weight * x[helper.global_ndof() + g_idx];
             }
 
-            if (d_lambda && tid < fdof)
+            if (d_lambda && idx < limits.fdof)
             {
                 for (int o = 0; o < 3; ++o)
                 {
-                    const int idx = B(o, tid, subsp).x;
-                    if (idx >= 0)
-                    {
-                        F.x += g_lambda[idx];
-                        F.y += g_mu[idx];
-                    }
+                    const auto [i, j, T] = helper.lambda_dof(o, t);
+                    if (i < 0)
+                        break;
+
+                    get(F, t).x += d_lambda[i];
+                    get(F, t).y += d_lambda[helper.n_lambda() + i];
                 }
             }
-
-            return F;
-        }();
-
-        vec2 u{0, 0};
-        for (int it = 0; it < wh_maxit; ++it)
-        {
-            u = evolve_project(A, u, F);
         }
 
-        if (d_y && (tid < ndof))
+        return F;
+    }();
+
+    __shared__ typename BStiffness::SharedResources smem;
+    __shared__ typename BlockReduce::TempStorage reduce_work;
+    __shared__ scalar_t reduce_result;
+
+    auto dist = [&](const arr_t &a, const arr_t &b) -> scalar_t {
+        scalar_t dr = 0;
+        for (int t = 0; t < TDOF; ++t)
         {
-            const scalar_t weight = punity(tid, subsp);
-            const int g_idx = gI(tid, subsp);
-
-            const double m_u = weight * u.x;
-            atomicAdd(d_y + g_idx, m_u);
-
-            const double m_v = weight * u.y;
-            atomicAdd(d_y + g_ndof + g_idx, m_v);
+            scalar_t dx = get(a, t).x - get(b, t).x;
+            scalar_t dy = get(a, t).y - get(b, t).y;
+            dr += dx * dx + dy * dy;
         }
 
-        if (d_update && tid < fdof)
+        dr = BlockReduce(reduce_work).Sum(dr);
+        if (helper.thread_index() == 0)
+            reduce_result = sqrt(dr);
+        __syncthreads();
+
+        return reduce_result;
+    };
+
+    const auto A = helper.stiffness_matrix(smem);
+    const auto evolve_project = helper.waveholtz(limits.ndof);
+
+    arr_t u{};
+    arr_t u1 = evolve_project(A, u, f);
+    scalar_t r = dist(u1, u);
+    u = u1;
+
+    const scalar_t tol = max(WHRTol * r, WHATol);
+    for (int it = 0; it < WHMaxIter && r > tol; ++it)
+    {
+        u1 = evolve_project(A, u, f);
+        r = dist(u1, u);
+        u = u1;
+    }
+
+    for (int t = 0; t < TDOF; ++t)
+    {
+        const int idx = helper.thread_index(t);
+        if (idx >= limits.ndof)
+            break;
+
+        if (y)
+        {
+            const scalar_t weight = helper.partition_of_unity(t);
+            const int g_idx = helper.global_index(t);
+
+            atomicAdd(y + g_idx, double(weight * get(u, t).x));
+            atomicAdd(y + helper.global_ndof() + g_idx, double(weight * get(u, t).y));
+        }
+
+        if (d_update && idx < limits.fdof)
         {
             for (int o = 0; o < 3; ++o)
             {
-                const auto [i, j] = B(o, tid, subsp);
+                const auto [i, j, trace] = helper.lambda_dof(o, t);
 
                 scalar_t lambda = 0, mu = 0;
 
                 if (d_lambda && i >= 0)
                 {
-                    lambda = g_lambda[i];
-                    mu = g_mu[i];
+                    lambda = d_lambda[i];
+                    mu = d_lambda[helper.n_lambda() + i];
                 }
 
                 if (j >= 0)
                 {
-                    const scalar_t t = T(o, tid, subsp);
-                    lambda_update[j] = -lambda + t * u.y;
-                    mu_update[j] = -mu - t * u.x;
+                    d_update[j] = -lambda + trace * get(u, t).y;
+                    d_update[helper.n_lambda() + j] = -mu - trace * get(u, t).x;
                 }
             }
         }
-    });
+    }
 }
 
-// Populate _B (int2, leading dim 3) and _T (scalar_t, leading dim 3) from the connectivity map.
-// B(o, i, p) = {lambda_index, dual_lambda_index} for face DOF i of subspace p, slot o (o in [0,3)).
-// T(o, i, p) = 2 * omega * a(i, p) * dof.face_mass for the same DOF.
+// Populate _B from the connectivity map.
+// B(o, i, p) = {lambda_index, dual_lambda_index, trace_op} for face DOF i of subspace p, slot o (o in [0,3)).
 // Returns n_lambda = 2 * n_shared.
 template <typename scalar_t>
-static int lambda_dofs(thrust::universal_vector<int2> &h_B, thrust::universal_vector<scalar_t> &h_T,
-                       const EnsembleSpace3D &efem, double omega, VectorWrapper<const double> a)
+static int lambda_dofs(thrust::device_vector<LambdaDOFData<scalar_t>> &B, const EnsembleSpace3D &efem, double omega,
+                       VectorWrapper<const double> a)
 {
     const int n_domains = efem.size();
     const int mx_fdof = efem.max_fsize();
@@ -152,13 +266,9 @@ static int lambda_dofs(thrust::universal_vector<int2> &h_B, thrust::universal_ve
     const int n_lambda = 2 * n_shared;
 
     // leading dim 3: at most 3 boundary faces can share a DOF in 3D
-    h_B.resize(3 * mx_fdof * n_domains);
-    h_T.resize(3 * mx_fdof * n_domains);
-    thrust::fill(h_B.begin(), h_B.end(), int2{-1, -1});
-    thrust::fill(h_T.begin(), h_T.end(), scalar_t(0));
+    thrust::host_vector<LambdaDOFData<scalar_t>> h_B(3 * mx_fdof * n_domains, LambdaDOFData<scalar_t>{});
 
-    auto b = reshape(h_B, 3, mx_fdof, n_domains);
-    auto t = reshape(h_T, 3, mx_fdof, n_domains);
+    auto b = reshape(thrust::raw_pointer_cast(h_B.data()), 3, mx_fdof, n_domains);
 
     for (int k = 0; k < n_shared; ++k)
     {
@@ -169,25 +279,26 @@ static int lambda_dofs(thrust::universal_vector<int2> &h_B, thrust::universal_ve
             const int subspace = dof.subspaces[s];
             const int face_index = dof.local_dof_indices[s];
 
-            // find an available slot (o) for this DOF
             for (int o = 0; o < 3; ++o)
             {
-                if (b(o, face_index, subspace).x < 0)
+                if (b(o, face_index, subspace).i < 0)
                 {
-                    b(o, face_index, subspace) = {(s == 0) ? k : n_shared + k, (s == 0) ? n_shared + k : k};
-                    t(o, face_index, subspace) =
-                        static_cast<scalar_t>(2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass);
+                    const scalar_t T = 2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass;
+                    b(o, face_index, subspace) = LambdaDOFData<scalar_t>{
+                        .i = (s == 0) ? k : n_shared + k, .j = (s == 0) ? n_shared + k : k, .trOp = T};
                     break;
                 }
             }
         }
     }
 
+    B = h_B;
+
     return n_lambda;
 }
 
 template <typename scalar_t>
-static thrust::universal_vector<scalar_t> partition_of_unity(const H1Space3D &fem, const EnsembleSpace3D &efem)
+static thrust::device_vector<scalar_t> partition_of_unity(const H1Space3D &fem, const EnsembleSpace3D &efem)
 {
     MassMatrix3D M(fem);
     DDMassMatrix3D DDM(fem, efem);
@@ -201,24 +312,83 @@ static thrust::universal_vector<scalar_t> partition_of_unity(const H1Space3D &fe
     auto sizes = efem.sizes(MemorySpace::DEVICE);
     auto gI = efem.global_indices(MemorySpace::DEVICE);
 
-    thrust::universal_vector<scalar_t> P(mx_dof * n_domains, 0);
-    auto p = reshape(P, mx_dof, n_domains);
+    thrust::device_vector<scalar_t> P(mx_dof * n_domains, 0);
+    auto p = reshape(thrust::raw_pointer_cast(P.data()), mx_dof, n_domains);
 
-    forall_1d(mx_dof, n_domains, [=] __device__(int subsp) mutable -> void {
-        const int i = threadIdx.x;
-        const int ndof = sizes(subsp);
-        if (i < ndof)
-            p(i, subsp) = static_cast<scalar_t>(d_ddm(i, subsp) / d_m[gI(i, subsp)]);
+    forall(mx_dof * n_domains, [=] __device__(int tid) mutable -> void {
+        const int i = tid % mx_dof;
+        const int subsp = tid / mx_dof;
+
+        if (i >= sizes(subsp))
+            return;
+
+        p(i, subsp) = static_cast<scalar_t>(d_ddm(i, subsp) / d_m[gI(i, subsp)]);
     });
 
-    CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
+    CUDDH_CUDA_CHECK(cudaDeviceSynchronize()); // ?
 
     return P;
 }
 
+static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_elems)
+{
+    int mx_dof = nb * nb * nb * mx_elems;
+
+    if (config.block_size == DDKernelConfig::Default)
+    {
+        if (config.tdof <= 0)
+        {
+            if (mx_dof <= 256)
+            {
+                config.block_size = DDKernelConfig::t256;
+                config.tdof = 1;
+            }
+            else if (mx_dof <= 512)
+            {
+                config.block_size = DDKernelConfig::t512;
+                config.tdof = 1;
+            }
+            else if (mx_dof <= 1024)
+            {
+                config.block_size = DDKernelConfig::t1024;
+                config.tdof = 1;
+            }
+            else
+            {
+                config.block_size = DDKernelConfig::t1024;
+                config.tdof = (mx_dof + 1023) / 1024;
+            }
+        }
+        else
+        {
+            int B = (mx_dof + config.tdof - 1) / config.tdof;
+            cuddh_verify(
+                B <= 1024,
+                printf("DDH3D: Kernel configuration with tdof = %d requires %d threads/block which "
+                       "exceeds the maximum of 1024. This occured because at least one subdomain has %d elements.\n",
+                       config.tdof, B, mx_elems));
+
+            if (B <= 256)
+                config.block_size = DDKernelConfig::t256;
+            else if (B <= 512)
+                config.block_size = DDKernelConfig::t512;
+            else
+                config.block_size = DDKernelConfig::t1024;
+        }
+    }
+    else
+    {
+        int B = static_cast<int>(config.block_size);
+        config.tdof = (mx_dof + B - 1) / B;
+    }
+
+    cuddh_verify(config.tdof <= 4, printf("DDH: Kernel configuration with tdof > 4 not compiled.\n"));
+    return config;
+}
+
 template <typename scalar_t>
 DDSubstructedProblem3D<scalar_t>::DDSubstructedProblem3D(double omega_, const double *h_a, const H1Space3D &fem,
-                                                         const EnsembleSpace3D &efem_)
+                                                         const EnsembleSpace3D &efem_, DDKernelConfig config)
     : g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
       n_basis{fem.basis().size()},
@@ -227,51 +397,135 @@ DDSubstructedProblem3D<scalar_t>::DDSubstructedProblem3D(double omega_, const do
       W{make_DDWaveHoltz_3d<scalar_t>(omega_, h_a, fem, efem_)}
 {
     cuddh_verify(n_basis >= 2 && n_basis <= 4, printf("DDH3D error: Only n_basis in [2,3,4] supported.\n"););
-    cuddh_verify(efem.max_size() <= DD3D_MX_DOF, printf("DDH3D error: subdomains too big.\n"));
 
     n_domains = efem.size();
     mx_dof = efem.max_size();
     mx_fdof = efem.max_fsize();
     mx_elem_per_dom = efem.max_n_elem();
 
-    n_lambda = lambda_dofs(_B, _T, efem, omega_, reshape(h_a, fem.size()));
+    kernel_config = make_valid_config(config, n_basis, mx_elem_per_dom);
+
+    printf("DDH3D Kernel Config: block_size = %d, tdof = %d\n", static_cast<int>(kernel_config.block_size),
+           kernel_config.tdof);
+
+    if (kernel_config.tdof > 1)
+    {
+        const int work_size = static_cast<int>(kernel_config.block_size) * kernel_config.tdof * n_domains;
+        _work.resize(work_size);
+    }
 
     _partition_of_unity = partition_of_unity<scalar_t>(fem, efem);
+    n_lambda = lambda_dofs(_B, efem, omega_, reshape(h_a, fem.size()));
 }
+
+template <typename scalar_t>
+struct KernelDispatcher3D
+{
+    int n_basis, tdof, block_size;
+    KernelDispatcher3D(int n_basis, int tdof, int block_size) : n_basis(n_basis), tdof(tdof), block_size(block_size) {}
+
+    template <int NB, int TDOF, int BLOCK_SIZE>
+    static void dispatch_kernel(const EnsembleSpace3D &efem, const int g_ndof, const int n_lambda,
+                                const LambdaDOFData<scalar_t> *B, const DDStiffnessMatrix3D<scalar_t> &stiffness_matrix,
+                                const scalar_t *punity, const DDWaveHoltz<scalar_t> &waveholtz,
+                                const double *const __restrict__ x, double *const __restrict__ y,
+                                const scalar_t *const __restrict__ d_lambda, scalar_t *const __restrict__ d_update,
+                                scalar_t *d_work)
+    {
+        constexpr int NEL = BLOCK_SIZE / (NB * NB * NB);
+
+        if (y)
+            dla::zeros(2 * g_ndof, y);
+        if (d_update)
+            dla::zeros(2 * n_lambda, d_update);
+
+        auto data = DDH3DKernelData<scalar_t, NB, NEL, TDOF>::make(n_lambda, g_ndof, efem, B, punity, stiffness_matrix,
+                                                                   waveholtz, d_work);
+        const int n_domains = efem.size();
+        dim3 block_size(NB * NB * NB, NEL);
+        ddh_action_kernel_3d<scalar_t, NB, NEL, TDOF><<<n_domains, block_size>>>(data, x, y, d_lambda, d_update);
+        CUDDH_CHECK_KERNEL();
+    }
+
+    template <int NB, int TDOF, typename... Args>
+    void dispatch_blocksize(Args &&...args) const
+    {
+        switch (block_size)
+        {
+            case 256:
+                dispatch_kernel<NB, TDOF, 256>(std::forward<Args>(args)...);
+                break;
+            case 512:
+                dispatch_kernel<NB, TDOF, 512>(std::forward<Args>(args)...);
+                break;
+            case 1024:
+                dispatch_kernel<NB, TDOF, 1024>(std::forward<Args>(args)...);
+                break;
+            default:
+                cuddh_verify(false,
+                             printf("DDH error: block_size (=%d) not supported. Must be one of {256, 512, 1024}.\n",
+                                    block_size));
+                break;
+        }
+    }
+
+    template <int NB, typename... Args>
+    void dispatch_tdof(Args &&...args) const
+    {
+        switch (tdof)
+        {
+            case 1:
+                dispatch_blocksize<NB, 1>(std::forward<Args>(args)...);
+                break;
+            case 2:
+                dispatch_blocksize<NB, 2>(std::forward<Args>(args)...);
+                break;
+            case 3:
+                dispatch_blocksize<NB, 3>(std::forward<Args>(args)...);
+                break;
+            case 4:
+                dispatch_blocksize<NB, 4>(std::forward<Args>(args)...);
+                break;
+            default:
+                cuddh_verify(false, printf("DDH3D error: Invalid tdof (=%d). Must be one of {1, 2, 3, 4}\n", tdof));
+        }
+    }
+
+    template <typename... Args>
+    void invoke(Args &&...args) const
+    {
+        switch (n_basis)
+        {
+            case 2:
+                dispatch_tdof<2>(std::forward<Args>(args)...);
+                break;
+            case 3:
+                dispatch_tdof<3>(std::forward<Args>(args)...);
+                break;
+            case 4:
+                dispatch_tdof<4>(std::forward<Args>(args)...);
+                break;
+            default:
+                cuddh_verify(false, printf("DDH3D error: Invalid n_basis (=%d). Must be one of {2, 3, 4}.\n", n_basis));
+        }
+    }
+};
 
 template <typename scalar_t>
 void DDSubstructedProblem3D<scalar_t>::action(const double *fem_in, double *fem_out, const scalar_t *lambda_in,
                                               scalar_t *lambda_out) const
 {
-    constexpr int MX_NDOF = DD3D_MX_DOF;
-    using func_t = decltype(&ddh_action_dof_per_thread<scalar_t, 2, MX_NDOF / (2 * 2 * 2)>);
+    const LambdaDOFData<scalar_t> *B = thrust::raw_pointer_cast(_B.data());
+    const scalar_t *punity = thrust::raw_pointer_cast(_partition_of_unity.data());
+    scalar_t *d_work = thrust::raw_pointer_cast(_work.data());
 
-    auto func = [&]() -> func_t {
-        switch (n_basis)
-        {
-            case 2:
-                return ddh_action_dof_per_thread<scalar_t, 2, MX_NDOF / (2 * 2 * 2)>;
-            case 3:
-                return ddh_action_dof_per_thread<scalar_t, 3, MX_NDOF / (3 * 3 * 3)>;
-            case 4:
-                return ddh_action_dof_per_thread<scalar_t, 4, MX_NDOF / (4 * 4 * 4)>;
-            default:
-                cuddh_verify(n_basis < 4, printf("DDH3D error: not implemented for n_basis > 4.\n"));
-                return nullptr;
-        }
-    }();
-
-    auto B = reshape(_B, 3, mx_fdof, n_domains);
-    auto T = reshape(_T, 3, mx_fdof, n_domains);
-    auto punity = reshape(_partition_of_unity, mx_dof, n_domains);
-
-    (*func)(efem, g_ndof, n_lambda, B, T, S.to_device(), punity, W.to_device(), fem_in, fem_out, lambda_in, lambda_out);
+    KernelDispatcher3D<scalar_t>(n_basis, kernel_config.tdof, static_cast<int>(kernel_config.block_size))
+        .invoke(efem, g_ndof, n_lambda, B, S, punity, W, fem_in, fem_out, lambda_in, lambda_out, d_work);
 }
 
 template <typename scalar_t>
 void DDSubstructedProblem3D<scalar_t>::action(const scalar_t *x, scalar_t *y) const
 {
-    dla::zeros(2 * n_lambda, y);
     action((const double *)nullptr, (double *)nullptr, x, y);
     dla::axpby(2 * n_lambda, scalar_t(1), x, scalar_t(-1), y);
 }
@@ -279,7 +533,6 @@ void DDSubstructedProblem3D<scalar_t>::action(const scalar_t *x, scalar_t *y) co
 template <typename scalar_t>
 void DDSubstructedProblem3D<scalar_t>::rhs(const double *f, scalar_t *b) const
 {
-    dla::zeros(2 * n_lambda, b);
     action(f, (double *)nullptr, (const scalar_t *)nullptr, b);
 }
 
