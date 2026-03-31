@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cuda/std/array>
 #include <cuda/warp>
 #include <type_traits>
 
@@ -16,17 +17,21 @@ namespace cuddh
     {
         template <typename scalar_t, int NB, int NEL>
             requires(NB == 2 || NB == 4)
-        struct SubdomainStiffnessMatrixWrapImpl;
+        struct SubdomainStiffnessMatrixWarpImpl;
 
         template <typename scalar_t, int NB, int NEL>
         struct SubdomainStiffnessMatrixSmemImpl;
 
-        template <typename scalar_t, int NB, int NEL>
+        template <typename scalar_t, int TDOF, int NB, int NEL>
+        struct SubdomainStiffnessMatrixTDOFImpl;
+
+        template <typename scalar_t, int NB, int NEL, int TDOF>
         struct SSMImpl;
+
     } // namespace details
 
-    template <typename scalar_t, int NB, int NEL>
-    using SubdomainStiffnessMatrix = typename details::SSMImpl<scalar_t, NB, NEL>::type;
+    template <typename scalar_t, int NB, int NEL, int TDOF = 1>
+    using SubdomainStiffnessMatrix = typename details::SSMImpl<scalar_t, NB, NEL, TDOF>::type;
 
     template <typename scalar_t>
     struct DeviceDDStiffnessMatrix
@@ -37,11 +42,11 @@ namespace cuddh
         TensorWrapper<4, const sym2x2> G;
         TensorWrapper<4, const int> I;
 
-        template <int NB, int MX_NEL>
-        __device__ SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL> subspace_op(
-            int subsp, int nel, typename SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>::SharedResources &smem) const
+        template <int NB, int MX_NEL, int TDOF = 1, typename SharedResources>
+        __forceinline__ __device__ auto subspace_op(int subsp, int nel, SharedResources &smem,
+                                                    scalar_t *work = nullptr) const
         {
-            return SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL>(smem, subsp, nel, D, G, I);
+            return SubdomainStiffnessMatrix<scalar_t, NB, MX_NEL, TDOF>(smem, work, subsp, nel, D, G, I);
         }
     };
 
@@ -79,26 +84,32 @@ namespace cuddh
 namespace cuddh::details
 {
     template <typename scalar_t, int NEL>
-    struct SSMImpl<scalar_t, 2, NEL>
+    struct SSMImpl<scalar_t, 2, NEL, 1>
     {
-        using type = SubdomainStiffnessMatrixWrapImpl<scalar_t, 2, NEL>;
+        using type = SubdomainStiffnessMatrixWarpImpl<scalar_t, 2, NEL>;
     };
 
     template <typename scalar_t, int NEL>
-    struct SSMImpl<scalar_t, 4, NEL>
+    struct SSMImpl<scalar_t, 4, NEL, 1>
     {
-        using type = SubdomainStiffnessMatrixWrapImpl<scalar_t, 4, NEL>;
+        using type = SubdomainStiffnessMatrixWarpImpl<scalar_t, 4, NEL>;
     };
 
     template <typename scalar_t, int NB, int NEL>
-    struct SSMImpl
+    struct SSMImpl<scalar_t, NB, NEL, 1>
     {
         using type = SubdomainStiffnessMatrixSmemImpl<scalar_t, NB, NEL>;
     };
 
+    template <typename scalar_t, int NB, int NEL, int TDOF>
+    struct SSMImpl
+    {
+        using type = SubdomainStiffnessMatrixTDOFImpl<scalar_t, TDOF, NB, NEL>;
+    };
+
     template <typename scalar_t, int NB, int NEL>
         requires(NB == 2 || NB == 4)
-    struct SubdomainStiffnessMatrixWrapImpl
+    struct SubdomainStiffnessMatrixWarpImpl
     {
         using vec_t = cuddh::scalar2<scalar_t>;
         using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
@@ -114,7 +125,7 @@ namespace cuddh::details
         int tx, ty;
         scalar_t Dxy;
 
-        __device__ SubdomainStiffnessMatrixWrapImpl(SharedResources &mem, int subsp, int nel,
+        __device__ SubdomainStiffnessMatrixWarpImpl(SharedResources &mem, scalar_t *, int subsp, int nel,
                                                     const MatrixWrapper<const scalar_t> &D,
                                                     const TensorWrapper<4, const mat_t> &G,
                                                     const TensorWrapper<4, const int> &sI)
@@ -199,7 +210,7 @@ namespace cuddh::details
         int I[2][NB];
         int tx, ty;
 
-        __device__ SubdomainStiffnessMatrixSmemImpl(SharedResources &mem, int subsp, int nel,
+        __device__ SubdomainStiffnessMatrixSmemImpl(SharedResources &mem, scalar_t *, int subsp, int nel,
                                                     const MatrixWrapper<const scalar_t> &D,
                                                     const TensorWrapper<4, const mat_t> &G,
                                                     const TensorWrapper<4, const int> &sI)
@@ -261,6 +272,105 @@ namespace cuddh::details
             __syncthreads();
 
             return smem.u[threadIdx.x + NB * NB * threadIdx.y];
+        }
+    };
+
+    template <typename scalar_t, int TDOF, int NB, int NEL>
+    struct SubdomainStiffnessMatrixTDOFImpl
+    {
+        using vec_t = cuddh::scalar2<scalar_t>;
+        using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
+        using arr_t = cuda::std::array<scalar_t, TDOF>;
+
+        struct SharedResources
+        {
+            scalar_t D[NB][NB];
+            scalar_t u[NEL][NB][NB];
+            vec_t grad[NEL][NB][NB];
+        };
+
+        SharedResources &smem;
+        scalar_t *const global_work;
+        mat_t geom[TDOF];
+        int I[TDOF];
+        int tx, ty;
+
+        __device__ SubdomainStiffnessMatrixTDOFImpl(SharedResources &mem, scalar_t *global_work, int subsp, int nel,
+                                                    const auto &D, const auto &G, const auto &sI)
+            : smem{mem}, global_work{global_work}
+        {
+            cuddh_assert(blockDim.x == NB * NB && blockDim.y == NEL && blockDim.z == 1,
+                         printf("SubsdomainStiffnessMatrix<NB=%d,NEL=%d> expects a thread block of dimensions (NB^2, "
+                                "NEL) = (%d, %d) but got (%d, %d, %d).\n",
+                                NB, NEL, NB * NB, NEL, blockDim.x, blockDim.y, blockDim.z));
+
+            tx = threadIdx.x % NB;
+            ty = threadIdx.x / NB;
+
+            if (threadIdx.y == 0)
+                smem.D[tx][ty] = D(tx, ty);
+
+            for (int t = 0; t < TDOF; ++t)
+            {
+                const int el = threadIdx.y + NEL * t;
+
+                I[t] = (el < nel) ? sI(tx, ty, el, subsp) : -1;
+                geom[t] = (el < nel) ? G(tx, ty, el, subsp) : mat_t{};
+            }
+
+            __syncthreads();
+        }
+
+        __device__ arr_t operator()(arr_t values) const
+        {
+            constexpr int EDOF = NB * NB;
+            constexpr int BDOF = EDOF * NEL;
+            const auto el = threadIdx.y;
+            const int tid = threadIdx.x + EDOF * threadIdx.y;
+
+            for (int t = 0; t < TDOF; ++t)
+                global_work[tid + BDOF * t] = values[t];
+            __syncthreads();
+
+            for (int t = 0; t < TDOF; ++t)
+            {
+                if (I[t] >= 0)
+                    smem.u[el][ty][tx] = global_work[I[t]];
+                __syncthreads();
+
+                vec_t grad{0, 0};
+
+                for (int i = 0; i < NB; ++i)
+                {
+                    grad.x += smem.D[tx][i] * smem.u[el][ty][i];
+                    grad.y += smem.D[ty][i] * smem.u[el][i][tx];
+                }
+
+                smem.grad[el][ty][tx] = geom[t] * grad;
+                __syncthreads();
+
+                values[t] = 0;
+
+                for (int i = 0; i < NB; ++i)
+                {
+                    values[t] += smem.D[i][tx] * smem.grad[el][ty][i].x;
+                    values[t] += smem.D[i][ty] * smem.grad[el][i][tx].y;
+                }
+            }
+
+            for (int t = 0; t < TDOF; ++t)
+                global_work[tid + BDOF * t] = 0;
+            __syncthreads();
+
+            for (int t = 0; t < TDOF; ++t)
+                if (I[t] >= 0)
+                    atomicAdd(global_work + I[t], values[t]);
+            __syncthreads();
+
+            for (int t = 0; t < TDOF; ++t)
+                values[t] = global_work[tid + BDOF * t];
+
+            return values;
         }
     };
 } // namespace cuddh::details
