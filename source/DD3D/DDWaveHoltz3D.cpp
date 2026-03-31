@@ -23,26 +23,25 @@ static HostDeviceArray<cuddh::scalar2<scalar_t>> make_alpha_beta(double theta, d
     HostDeviceArray<cuddh::scalar2<scalar_t>> ab(mx_dof * n_domains);
     auto alpha_beta = reshape(ab.device_write(), mx_dof, n_domains);
 
-    forall_1d(mx_dof, n_domains, [=] __device__(int subsp) mutable -> void {
-        const int i = threadIdx.x;
-        const int ndof = s_dof(subsp);
-        const int fdof = s_fdof(subsp);
+    forall(mx_dof * n_domains, [=] __device__(int tid) mutable -> void {
+        const int i = tid % mx_dof;
+        const int subsp = tid / mx_dof;
+
+        if (i >= s_dof(subsp))
+            return;
 
         cuddh::scalar2<scalar_t> ab_i{0, 0};
 
-        if (i < ndof)
-        {
-            scalar_t ai = a(gI(i, subsp));
-            scalar_t Mi = m(i, subsp);
-            scalar_t Hi = (i < fdof) ? h(i, subsp) : scalar_t(0);
+        scalar_t ai = a(gI(i, subsp));
+        scalar_t Mi = m(i, subsp);
+        scalar_t Hi = (i < s_fdof(subsp)) ? h(i, subsp) : scalar_t(0);
 
-            Hi *= ai;
-            Mi *= ai * ai;
+        Hi *= ai;
+        Mi *= ai * ai;
 
-            const scalar_t inv = 1 / (Mi + theta * Hi);
-            ab_i.x = (Mi - theta * Hi) * inv;
-            ab_i.y = sigma * inv;
-        }
+        const scalar_t inv = 1 / (Mi + theta * Hi);
+        ab_i.x = (Mi - theta * Hi) * inv;
+        ab_i.y = sigma * inv;
 
         alpha_beta(i, subsp) = ab_i;
     });
