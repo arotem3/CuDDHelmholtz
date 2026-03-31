@@ -551,17 +551,11 @@ static thrust::device_vector<scalar_t> partition_of_unity(const H1Space2D &fem, 
     forall(mx_dof * n_domains, [=] __device__(int tid) mutable {
         const auto [i, subsp] = get_indices(tid, {mx_dof, n_domains});
 
-        const int ndof = sizes(subsp);
-        if (i < ndof)
-            p(i, subsp) = d_ddm(i, subsp) / d_m[gI(i, subsp)];
-    });
+        if (i >= sizes(subsp))
+            return;
 
-    // forall_1d(mx_dof, n_domains, [=] __device__(int subsp) mutable -> void {
-    //     const auto &i = threadIdx.x;
-    //     const int ndof = sizes(subsp);
-    //     if (i < ndof)
-    //         p(i, subsp) = static_cast<scalar_t>(d_ddm(i, subsp) / d_m[gI(i, subsp)]);
-    // });
+        p(i, subsp) = d_ddm(i, subsp) / d_m[gI(i, subsp)];
+    });
 
     return P;
 }
