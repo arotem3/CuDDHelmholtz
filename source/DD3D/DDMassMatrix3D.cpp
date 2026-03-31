@@ -30,29 +30,32 @@ static thrust::universal_vector<float> mass(const H1Space3D &fem, const Ensemble
     thrust::universal_vector<float> u_m(mx_dofs * n_domains, 0.0f);
     auto M = reshape(u_m, mx_dofs, n_domains);
 
-    forall_3d(n_basis, n_basis, mx_elem_per_dom, n_domains, [=] __device__ (int subsp) mutable
-    {
-        const int s_nel = d_n_elems(subsp);
-        
+    forall_2d(n_basis, n_basis, mx_elem_per_dom * n_domains, [=] __device__(int b) mutable {
+        const int el = b % mx_elem_per_dom;
+        const int subsp = b / mx_elem_per_dom;
+
+        if (el >= d_n_elems(subsp))
+            return;
+
         const int i = threadIdx.x;
         const int j = threadIdx.y;
-        const int el = threadIdx.z;
 
-        if (el < s_nel)
+        const int g_el = d_elems(el, subsp);
+
+        __shared__ HexElement element;
+        if (i == 0 && j == 0)
+            element = mesh.element(g_el);
+        __syncthreads();
+
+        double3 xi{x(i), x(j), 0.0};
+
+        for (int k = 0; k < n_basis; ++k)
         {
-            const int g_el = d_elems(el, subsp);
-            const HexElement element = mesh.element(g_el);
-            
-            double3 xi{x(i), x(j), 0.0};
+            const int l = sI(i, j, k, el, subsp);
 
-            for (int k = 0; k < n_basis; ++k)
-            {
-                const int l = sI(i, j, k, el, subsp);
-
-                xi.z = x(k);
-                float val = w(i) * w(j) * w(k) * element.measure(xi);
-                atomicAdd(&M(l, subsp), val);
-            }
+            xi.z = x(k);
+            float val = w(i) * w(j) * w(k) * element.measure(xi);
+            atomicAdd(&M(l, subsp), val);
         }
     });
 
@@ -60,8 +63,7 @@ static thrust::universal_vector<float> mass(const H1Space3D &fem, const Ensemble
 }
 
 DDMassMatrix3D::DDMassMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem)
-    : mx_dofs(efem.max_size()),
-      n_domains(efem.size())
+    : mx_dofs(efem.max_size()), n_domains(efem.size())
 {
     m = mass(fem, efem);
 }
