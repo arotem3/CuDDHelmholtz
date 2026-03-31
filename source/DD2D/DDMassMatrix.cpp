@@ -2,6 +2,24 @@
 
 using namespace cuddh;
 
+static constexpr __device__ int4 get_indices(int t, int4 dims)
+{
+    int4 i;
+
+    int bw = dims.x * dims.y * dims.z;
+    i.w = t / bw;
+    t = t % bw;
+
+    int bz = dims.x * dims.y;
+    i.z = t / bz;
+    t = t % bz;
+
+    i.y = t / dims.x;
+    i.x = t % dims.x;
+
+    return i;
+}
+
 template <typename scalar_t>
 static void mass(scalar_t *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
 {
@@ -29,20 +47,16 @@ static void mass(scalar_t *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
 
     auto M = reshape(d_m, mx_dofs, n_domains);
 
-    forall_2d(n_basis * n_basis, mx_elem_per_dom, n_domains, [=] __device__(int subsp) mutable {
-        const int s_nel = d_n_elems(subsp);
+    forall(n_basis * n_basis * mx_elem_per_dom * n_domains, [=] __device__(int tid) mutable {
+        const auto [i, j, el, subsp] = get_indices(tid, {n_basis, n_basis, mx_elem_per_dom, n_domains});
 
-        const int i = threadIdx.x % n_basis;
-        const int j = threadIdx.x / n_basis;
-        const int el = threadIdx.y;
+        if (el >= d_n_elems(subsp))
+            return;
 
-        if (el < s_nel)
-        {
-            const int g_el = d_elems(el, subsp);
-            int l = sI(i, j, el, subsp);
-            scalar_t val = static_cast<scalar_t>(w(i) * w(j) * detJ(i, j, g_el));
-            atomicAdd(&M(l, subsp), val);
-        }
+        const int g_el = d_elems(el, subsp);
+        int l = sI(i, j, el, subsp);
+        scalar_t val = w(i) * w(j) * detJ(i, j, g_el);
+        atomicAdd(&M(l, subsp), val);
     });
 }
 

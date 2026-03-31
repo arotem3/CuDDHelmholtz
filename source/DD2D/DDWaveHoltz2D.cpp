@@ -2,6 +2,11 @@
 
 using namespace cuddh;
 
+static constexpr __device__ int2 get_indices(int t, int2 dims)
+{
+    return {.x = t % dims.x, .y = t / dims.x};
+}
+
 template <typename scalar_t>
 static HostDeviceArray<cuddh::scalar2<scalar_t>> make_alpha_beta(double theta, double sigma,
                                                                  VectorWrapper<const double> a, const H1Space2D &fem,
@@ -23,26 +28,27 @@ static HostDeviceArray<cuddh::scalar2<scalar_t>> make_alpha_beta(double theta, d
     HostDeviceArray<cuddh::scalar2<scalar_t>> ab(mx_dof * n_domains);
     auto alpha_beta = reshape(ab.device_write(), mx_dof, n_domains);
 
-    forall_1d(mx_dof, n_domains, [=] __device__(int subsp) mutable -> void {
-        const auto i = threadIdx.x;
+    forall(mx_dof * n_domains, [=] __device__(int tid) mutable {
+        const auto [i, subsp] = get_indices(tid, {mx_dof, n_domains});
+
         const int ndof = s_dof(subsp);  // dimension of subspace
         const int fdof = s_fdof(subsp); // dimension of facespace
 
-        if (i < ndof)
-        {
-            scalar_t ai = a(gI(i, subsp));
-            scalar_t Mi = m(i, subsp);
-            scalar_t Hi = (i < fdof) ? h(i, subsp) : 0;
+        if (i >= ndof)
+            return;
 
-            Hi *= ai;
-            Mi *= ai * ai;
+        scalar_t ai = a(gI(i, subsp));
+        scalar_t Mi = m(i, subsp);
+        scalar_t Hi = (i < fdof) ? h(i, subsp) : 0;
 
-            scalar_t inv = 1 / (Mi + theta * Hi);
-            scalar_t alpha = (Mi - theta * Hi) * inv;
-            scalar_t beta = sigma * inv;
+        Hi *= ai;
+        Mi *= ai * ai;
 
-            alpha_beta(i, subsp) = {alpha, beta};
-        }
+        scalar_t inv = 1 / (Mi + theta * Hi);
+        scalar_t alpha = (Mi - theta * Hi) * inv;
+        scalar_t beta = sigma * inv;
+
+        alpha_beta(i, subsp) = {alpha, beta};
     });
 
     return ab;

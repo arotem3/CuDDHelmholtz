@@ -12,6 +12,24 @@ static void make_diffmat(scalar_t *h_D, const Basis &basis)
         h_D[i] = scalar_t(D[i]);
 }
 
+static constexpr __device__ int4 get_indices(int t, int4 dims)
+{
+    int4 i;
+
+    int bw = dims.x * dims.y * dims.z;
+    i.w = t / bw;
+    t = t % bw;
+
+    int bz = dims.x * dims.y;
+    i.z = t / bz;
+    t = t % bz;
+
+    i.y = t / dims.x;
+    i.x = t % dims.x;
+
+    return i;
+}
+
 template <typename scalar_t>
 static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D &fem, const EnsembleSpace &efem)
 {
@@ -37,14 +55,10 @@ static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D
 
     auto G = reshape(d_G, n_basis, n_basis, mx_elem, n_domains);
 
-    forall_2d(n_basis * n_basis, mx_elem, n_domains, [=] __device__(int subsp) mutable -> void {
-        const int n_elem = n_elems[subsp];
+    forall(n_basis * n_basis * mx_elem * n_domains, [=] __device__(int tid) mutable -> void {
+        const auto [i, j, el, subsp] = get_indices(tid, {n_basis, n_basis, mx_elem, n_domains});
 
-        const int i = threadIdx.x % n_basis;
-        const int j = threadIdx.x / n_basis;
-        const int el = threadIdx.y;
-
-        if (el >= n_elem)
+        if (el >= n_elems[subsp])
             return;
 
         const int g_el = elems(el, subsp);
