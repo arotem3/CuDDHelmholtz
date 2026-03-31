@@ -120,6 +120,7 @@ namespace cuddh
         DDWaveHoltz<scalar_t> W;
 
         thrust::device_vector<scalar_t> _partition_of_unity;
+        mutable thrust::device_vector<scalar_t> _work;
     };
 
     extern template class DDSubstructedProblem<float>;
