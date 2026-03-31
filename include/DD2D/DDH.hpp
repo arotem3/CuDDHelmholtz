@@ -11,6 +11,8 @@
 #include <unordered_set>
 
 #include "DD2D.hpp"
+#include "DDKernelConfig.hpp"
+#include "LambdaDOFData.hpp"
 #include "DDFaceMassMatrix.hpp"
 #include "DDMassMatrix.hpp"
 #include "DDStiffnessMatrix.hpp"
@@ -27,32 +29,6 @@
 
 namespace cuddh
 {
-    template <typename scalar_t>
-    struct LambdaDOFData
-    {
-        int i = -1;
-        int j = -1;
-        scalar_t trOp = 0;
-    };
-
-    /* Kernels are deployed with `block_size` threads per block with each thread computing `tdof` DOFs.
-     * if `block_size == Default`, then it is determined from the EnsembleSpace and `todf`.
-     * if `tdof <= 0`, then it is determined from the EnsembleSpace and `block_size`.
-     * if both are unspecified, then some viable configuration will be selected.
-     */
-    struct DDKernelConfig
-    {
-        enum BlockSize
-        {
-            Default = 0,
-            t256 = 256,
-            t512 = 512,
-            t1024 = 1024,
-        };
-
-        BlockSize block_size = Default;
-        int tdof = 0;
-    };
 
     /**
      * @brief Operator for Helmholtz domain decomposition substructured problem.

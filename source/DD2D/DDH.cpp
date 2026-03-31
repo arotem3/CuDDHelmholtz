@@ -384,7 +384,7 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
                 config.block_size = DDKernelConfig::t512;
                 config.tdof = 1;
             }
-            else if (mx_dof < 1024)
+            else if (mx_dof <= 1024)
             {
                 config.block_size = DDKernelConfig::t1024;
                 config.tdof = 1;
@@ -419,7 +419,6 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
     }
 
     cuddh_verify(config.tdof <= 4, printf("DDH: Kernel configuration with tdof > 4 not compiled.\n"));
-
     return config;
 }
 
@@ -483,7 +482,7 @@ struct KernelDispatcher
     }
 
     template <int NB, int TDOF, typename... Args>
-    static void dispatch_blocksize(int block_size, Args &&...args)
+    void dispatch_blocksize(Args &&...args) const
     {
         switch (block_size)
         {
@@ -497,29 +496,31 @@ struct KernelDispatcher
                 dispatch_kernel<NB, TDOF, 1024>(std::forward<Args>(args)...);
                 break;
             default:
-                cuddh_verify(false, printf("DDH error: Invalid block_size %d\n", block_size));
+                cuddh_verify(
+                    false,
+                    printf("DDH error: block_size (=%d) not supported. Must be one of {256, 512, 1024}\n", block_size));
         }
     }
 
     template <int NB, typename... Args>
-    static void dispatch_tdof(int tdof, int block_size, Args &&...args)
+    void dispatch_tdof(Args &&...args) const
     {
         switch (tdof)
         {
             case 1:
-                dispatch_blocksize<NB, 1>(block_size, std::forward<Args>(args)...);
+                dispatch_blocksize<NB, 1>(std::forward<Args>(args)...);
                 break;
             case 2:
-                dispatch_blocksize<NB, 2>(block_size, std::forward<Args>(args)...);
+                dispatch_blocksize<NB, 2>(std::forward<Args>(args)...);
                 break;
             case 3:
-                dispatch_blocksize<NB, 3>(block_size, std::forward<Args>(args)...);
+                dispatch_blocksize<NB, 3>(std::forward<Args>(args)...);
                 break;
             case 4:
-                dispatch_blocksize<NB, 4>(block_size, std::forward<Args>(args)...);
+                dispatch_blocksize<NB, 4>(std::forward<Args>(args)...);
                 break;
             default:
-                cuddh_verify(false, printf("DDH error: Invalid tdof %d\n", tdof));
+                cuddh_verify(false, printf("DDH error: Only tdof (=%d) <= 4\n", tdof));
         }
     }
 
@@ -529,28 +530,28 @@ struct KernelDispatcher
         switch (n_basis)
         {
             case 2:
-                dispatch_tdof<2>(tdof, block_size, std::forward<Args>(args)...);
+                dispatch_tdof<2>(std::forward<Args>(args)...);
                 break;
             case 3:
-                dispatch_tdof<3>(tdof, block_size, std::forward<Args>(args)...);
+                dispatch_tdof<3>(std::forward<Args>(args)...);
                 break;
             case 4:
-                dispatch_tdof<4>(tdof, block_size, std::forward<Args>(args)...);
+                dispatch_tdof<4>(std::forward<Args>(args)...);
                 break;
             case 5:
-                dispatch_tdof<5>(tdof, block_size, std::forward<Args>(args)...);
+                dispatch_tdof<5>(std::forward<Args>(args)...);
                 break;
             case 6:
-                dispatch_tdof<6>(tdof, block_size, std::forward<Args>(args)...);
+                dispatch_tdof<6>(std::forward<Args>(args)...);
                 break;
             case 7:
-                dispatch_tdof<7>(tdof, block_size, std::forward<Args>(args)...);
+                dispatch_tdof<7>(std::forward<Args>(args)...);
                 break;
             case 8:
-                dispatch_tdof<8>(tdof, block_size, std::forward<Args>(args)...);
+                dispatch_tdof<8>(std::forward<Args>(args)...);
                 break;
             default:
-                cuddh_verify(false, printf("DDH error: on n_basis (=%d) <= 8 supported\n", n_basis));
+                cuddh_verify(false, printf("DDH error: only n_basis (=%d) <= 8 supported\n", n_basis));
         }
     }
 };
@@ -562,9 +563,8 @@ void DDSubstructedProblem<scalar_t>::action(const double *fem_in, double *fem_ou
     const LambdaDOFData<scalar_t> *B = thrust::raw_pointer_cast(_B.data());
     const scalar_t *punity = thrust::raw_pointer_cast(_partition_of_unity.data());
     scalar_t *d_work = thrust::raw_pointer_cast(_work.data());
-    int block_size = static_cast<int>(kernel_config.block_size);
-    int tdof = kernel_config.tdof;
-    KernelDispatcher<scalar_t>(n_basis, tdof, block_size)
+
+    KernelDispatcher<scalar_t>(n_basis, kernel_config.tdof, static_cast<int>(kernel_config.block_size))
         .invoke(efem, g_ndof, n_lambda, B, S, punity, W, fem_in, fem_out, lambda_in, lambda_out, d_work);
 }
 
