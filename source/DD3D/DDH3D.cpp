@@ -62,7 +62,7 @@ static void ddh_action_dof_per_thread(
 
         __shared__ typename BStiffness::SharedResources smem;
         const auto A = stiffness_matrix.template subspace_op<NB, NEL>(subsp, subsp_elems(subsp), smem);
-        const auto evolve_project = waveholtz.subspace_op(subsp, tid, ndof);
+        const auto evolve_project = waveholtz.template subspace_op<>(subsp, tid, ndof);
 
         const vec2 F = [&]() -> vec2 {
             vec2 F{0, 0};
