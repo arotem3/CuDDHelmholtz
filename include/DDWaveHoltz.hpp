@@ -9,15 +9,18 @@ namespace cuddh
     template <typename scalar_t>
     struct DeviceDDWaveHoltz;
 
-    template <typename scalar_t>
+    template <typename scalar_t, int TDOF = 1>
     struct SubdomainWaveHoltz
     {
+        using vec_t = scalar2<scalar_t>;
+        using arr_t = cuda::std::array<vec_t, TDOF>;
+
         const DeviceDDWaveHoltz<scalar_t> &wh;
-        scalar_t alpha, beta;
+        scalar_t alpha[TDOF], beta[TDOF];
 
         template <typename SubdomainStiffnessMatrix>
-        __device__ scalar2<scalar_t> operator()(const SubdomainStiffnessMatrix &A, scalar2<scalar_t> u,
-                                                const scalar2<scalar_t> &F) const
+        __forceinline__ __device__ vec_t operator()(const SubdomainStiffnessMatrix &A, vec_t u, const vec_t &F) const
+            requires(TDOF == 1)
         {
             scalar_t cs = 1, sn = 0;
             scalar_t K = wh.filter(cs);
@@ -41,7 +44,7 @@ namespace cuddh
                 p += wh.sigma * q;
                 u.x += K * p;
 
-                q = alpha * q + beta * (-A(p) + cs * F.x + sn * F.y);
+                q = alpha[0] * q + beta[0] * (-A(p) + cs * F.x + sn * F.y);
 
                 details::cxmult(cs, sn, wh.C, wh.S);
                 K = wh.filter(cs);
@@ -50,6 +53,70 @@ namespace cuddh
             }
 
             u.y /= wh.omega;
+
+            return u;
+        }
+
+        template <typename SubdomainStiffnessMatrix>
+        __forceinline__ __device__ arr_t operator()(const SubdomainStiffnessMatrix &A, arr_t u, const arr_t &F) const
+        {
+            scalar_t cs = 1, sn = 0;
+            scalar_t K = wh.filter(cs);
+
+            cuda::std::array<scalar_t, TDOF> p, q;
+
+#pragma unroll TDOF
+            for (int t = 0; t < TDOF; ++t)
+                p[t] = u[t].x;
+
+            details::cxmult(cs, sn, wh.C, wh.S);
+
+#pragma unroll TDOF
+            for (int t = 0; t < TDOF; ++t)
+                q[t] = (-sn * u[t].x + cs * u[t].y) * wh.omega;
+
+#pragma unroll TDOF
+            for (int t = 0; t < TDOF; ++t)
+                u[t].x = K * p[t];
+
+            K = wh.filter(cs);
+
+#pragma unroll TDOF
+            for (int t = 0; t < TDOF; ++t)
+                u[t].y = K * q[t];
+
+            for (int n = 1; n < wh.nt; ++n)
+            {
+                details::cxmult(cs, sn, wh.C, wh.S);
+                K = wh.filter(cs);
+
+#pragma unroll TDOF
+                for (int t = 0; t < TDOF; ++t)
+                    p[t] += wh.sigma * q[t];
+
+#pragma unroll TDOF
+                for (int t = 0; t < TDOF; ++t)
+                    u[t].x += K * p[t];
+
+                const auto Ap = A(p);
+
+#pragma unroll TDOF
+                for (int t = 0; t < TDOF; ++t)
+                    q[t] = alpha[t] * q[t] + beta[t] * (-Ap[t] + cs * F[t].x + sn * F[t].y);
+
+                details::cxmult(cs, sn, wh.C, wh.S);
+                K = wh.filter(cs);
+
+#pragma unroll TDOF
+                for (int t = 0; t < TDOF; ++t)
+                    u[t].y += K * q[t];
+            }
+
+            scalar_t rw = 1 / wh.omega;
+
+#pragma unroll TDOF
+            for (int t = 0; t < TDOF; ++t)
+                u[t].y *= rw;
 
             return u;
         }
@@ -72,10 +139,21 @@ namespace cuddh
 
         inline constexpr scalar_t filter(scalar_t cs) const { return weight * cs - shift; }
 
-        __device__ SubdomainWaveHoltz<scalar_t> subspace_op(int subsp, int tid, int ndof) const
+        template <int TDOF = 1>
+        __device__ SubdomainWaveHoltz<scalar_t, TDOF> subspace_op(int subsp, int tid, int ndof) const
         {
-            const scalar2<scalar_t> ab = (tid < ndof) ? alpha_beta(tid, subsp) : scalar2<scalar_t>{0, 0};
-            return SubdomainWaveHoltz<scalar_t>{*this, ab.x, ab.y};
+            SubdomainWaveHoltz<scalar_t, TDOF> out{.wh = *this};
+
+            for (int t = 0; t < TDOF; ++t)
+            {
+                const int idx = tid + (blockDim.x * blockDim.y) * t;
+                const scalar2<scalar_t> ab = (idx < ndof) ? alpha_beta(idx, subsp) : scalar2<scalar_t>{0, 0};
+
+                out.alpha[t] = ab.x;
+                out.beta[t] = ab.y;
+            }
+
+            return out;
         }
     };
 
