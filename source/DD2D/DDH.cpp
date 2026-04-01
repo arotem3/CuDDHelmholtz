@@ -2,33 +2,6 @@
 
 using namespace cuddh;
 
-// Applies R = 0.5*[1-i, 1+i; 1+i, 1-i] which symmetrizes the DDH operator.
-// If x is provided, y <- R * (x - y), otherwise y <- R * y.
-template <typename scalar_t>
-static void symmetrize(int n, const scalar_t *x, scalar_t *y)
-{
-    constexpr scalar_t half(0.5);
-    const int m = n / 2;
-
-    forall(m, [=] __device__(const int i) mutable -> void {
-        const int inds[] = {i, i + m, n + i, n + m + i};
-
-        scalar_t Y[4];
-        for (int j = 0; j < 4; ++j)
-        {
-            Y[j] = y[inds[j]];
-            if (x)
-                Y[j] = x[inds[j]] - Y[j];
-        }
-
-        scalar_t RY[] = {half * (Y[0] + Y[1] + Y[2] - Y[3]), half * (Y[0] + Y[1] - Y[2] + Y[3]),
-                         -half * (-Y[0] + Y[1] + Y[2] + Y[3]), -half * (Y[0] - Y[1] + Y[2] + Y[3])};
-
-        for (int j = 0; j < 4; ++j)
-            y[inds[j]] = RY[j];
-    });
-}
-
 struct alignas(4) SubdomainNDOFs
 {
     int16_t ndof;
@@ -572,14 +545,14 @@ template <typename scalar_t>
 void DDSubstructedProblem<scalar_t>::action(const scalar_t *x, scalar_t *y) const
 {
     action((const double *)nullptr, (double *)nullptr, x, y);
-    symmetrize(n_lambda, x, y);
+    symmetrize_ddh(n_lambda, x, y);
 }
 
 template <typename scalar_t>
 void DDSubstructedProblem<scalar_t>::rhs(const double *f, scalar_t *b) const
 {
     action(f, (double *)nullptr, (const scalar_t *)nullptr, b);
-    symmetrize<scalar_t>(n_lambda, nullptr, b);
+    symmetrize_ddh(n_lambda, (const scalar_t *)nullptr, b);
 }
 
 template <typename scalar_t>

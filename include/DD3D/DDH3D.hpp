@@ -11,11 +11,12 @@
 #include "DDKernelConfig.hpp"
 #include "DDMassMatrix3D.hpp"
 #include "DDStiffnessMatrix3D.hpp"
+#include "DDSymmetrize.hpp"
 #include "DDWaveHoltz3D.hpp"
 #include "EnsembleSpace3D.hpp"
 #include "HostDeviceArray.hpp"
 #include "LambdaDOFData.hpp"
-#include "LinearSolvers/gmres.hpp"
+#include "LinearSolvers/minres.hpp"
 #include "Operator.hpp"
 #include "Operators3D/MassMatrix3D.hpp"
 #include "cuddh_config.hpp"
@@ -106,11 +107,11 @@ namespace cuddh
     class DDH3D
     {
     public:
-        DDH3D(double omega, const double *h_a, const H1Space3D &fem, const EnsembleSpace3D &efem, int kdim = 20,
+        DDH3D(double omega, const double *h_a, const H1Space3D &fem, const EnsembleSpace3D &efem,
               DDKernelConfig kernel_config = {})
             : ndof{fem.size()},
               F(omega, h_a, fem, efem, kernel_config),
-              solver(F.size(), F, nullptr, kdim),
+              solver(F.size(), F),
               lambda(F.size()),
               Y(F.size())
         {}
@@ -137,7 +138,7 @@ namespace cuddh
     private:
         const int ndof;
         DDSubstructedProblem3D<scalar_t> F;
-        GMRES<scalar_t> solver;
+        MINRES<scalar_t> solver;
         mutable thrust::device_vector<scalar_t> lambda;
         mutable thrust::device_vector<scalar_t> Y;
     };

@@ -11,14 +11,15 @@
 #include <unordered_set>
 
 #include "DD2D.hpp"
-#include "DDKernelConfig.hpp"
-#include "LambdaDOFData.hpp"
 #include "DDFaceMassMatrix.hpp"
+#include "DDKernelConfig.hpp"
 #include "DDMassMatrix.hpp"
 #include "DDStiffnessMatrix.hpp"
+#include "DDSymmetrize.hpp"
 #include "DDWaveHoltz2D.hpp"
 #include "EnsembleSpace.hpp"
 #include "HostDeviceArray.hpp"
+#include "LambdaDOFData.hpp"
 #include "LinearSolvers/minres.hpp"
 #include "Operator.hpp"
 #include "Operators2D/MassMatrix.hpp"

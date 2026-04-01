@@ -165,8 +165,27 @@ __global__ __launch_bounds__(NB * NB * NB * NEL, 1024 / (NB * NB * NB * NEL)) vo
                     if (i < 0)
                         break;
 
-                    get(F, t).x += d_lambda[i];
-                    get(F, t).y += d_lambda[helper.n_lambda() + i];
+                    scalar_t lambda = d_lambda[i];
+                    scalar_t re = lambda;
+                    scalar_t im = lambda;
+
+                    lambda = d_lambda[j];
+                    re += lambda;
+                    im -= lambda;
+
+                    lambda = d_lambda[helper.n_lambda() + i];
+                    re -= lambda;
+                    im += lambda;
+
+                    lambda = d_lambda[helper.n_lambda() + j];
+                    re += lambda;
+                    im += lambda;
+
+                    re *= scalar_t(0.5);
+                    im *= scalar_t(0.5);
+
+                    get(F, t).x += T * re;
+                    get(F, t).y += T * im;
                 }
             }
         }
@@ -230,7 +249,7 @@ __global__ __launch_bounds__(NB * NB * NB * NEL, 1024 / (NB * NB * NB * NEL)) vo
         {
             for (int o = 0; o < 3; ++o)
             {
-                const auto [i, j, trace] = helper.lambda_dof(o, t);
+                const auto [i, j, T] = helper.lambda_dof(o, t);
 
                 scalar_t lambda = 0, mu = 0;
 
@@ -242,8 +261,8 @@ __global__ __launch_bounds__(NB * NB * NB * NEL, 1024 / (NB * NB * NB * NEL)) vo
 
                 if (j >= 0)
                 {
-                    d_update[j] = -lambda + trace * get(u, t).y;
-                    d_update[helper.n_lambda() + j] = -mu - trace * get(u, t).x;
+                    d_update[j] = -lambda + T * get(u, t).y;
+                    d_update[helper.n_lambda() + j] = -mu - T * get(u, t).x;
                 }
             }
         }
@@ -283,7 +302,7 @@ static int lambda_dofs(thrust::device_vector<LambdaDOFData<scalar_t>> &B, const 
             {
                 if (b(o, face_index, subspace).i < 0)
                 {
-                    const scalar_t T = 2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass;
+                    const scalar_t T = std::sqrt(2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass);
                     b(o, face_index, subspace) = LambdaDOFData<scalar_t>{
                         .i = (s == 0) ? k : n_shared + k, .j = (s == 0) ? n_shared + k : k, .trOp = T};
                     break;
@@ -527,13 +546,14 @@ template <typename scalar_t>
 void DDSubstructedProblem3D<scalar_t>::action(const scalar_t *x, scalar_t *y) const
 {
     action((const double *)nullptr, (double *)nullptr, x, y);
-    dla::axpby(2 * n_lambda, scalar_t(1), x, scalar_t(-1), y);
+    symmetrize_ddh(n_lambda, x, y);
 }
 
 template <typename scalar_t>
 void DDSubstructedProblem3D<scalar_t>::rhs(const double *f, scalar_t *b) const
 {
     action(f, (double *)nullptr, (const scalar_t *)nullptr, b);
+    symmetrize_ddh(n_lambda, (const scalar_t *)nullptr, b);
 }
 
 template <typename scalar_t>
