@@ -29,6 +29,7 @@ public:
 
     __device__ constexpr int global_ndof() const { return g_ndof; }
     __device__ constexpr int n_lambda() const { return g_lambda; }
+    __device__ constexpr int waveholtz_iterations() const { return wh_iterations; }
 
     __device__ constexpr int subdomain_elems() const { return s_elems[subspace()]; }
     __device__ constexpr int global_index(int t = 0) const { return gI[thread_dof_index(t) + mx_ndof * subspace()]; }
@@ -60,12 +61,14 @@ public:
     static __host__ DDHKernelData make(int nlambda, int ndof, const EnsembleSpace &efem,
                                        const LambdaDOFData<scalar_t> *B, const scalar_t *punity,
                                        const DDStiffnessMatrix<scalar_t> &stiffness_matrix,
-                                       const DDWaveHoltz<scalar_t> &waveholtz, scalar_t *d_work = nullptr)
+                                       const DDWaveHoltz<scalar_t> &waveholtz, int wh_iterations,
+                                       scalar_t *d_work = nullptr)
     {
         return DDHKernelData{.mx_ndof = efem.max_size(),
                              .mx_fdof = efem.max_fsize(),
                              .g_ndof = ndof,
                              .g_lambda = nlambda,
+                             .wh_iterations = wh_iterations,
                              .s_ndof = efem.sizes(MemorySpace::DEVICE).data(),
                              .s_fdof = efem.fsizes(MemorySpace::DEVICE).data(),
                              .s_elems = efem.n_elems(MemorySpace::DEVICE).data(),
@@ -82,6 +85,7 @@ public:
     int mx_fdof;
     int g_ndof;
     int g_lambda;
+    int wh_iterations;
 
     const int *s_ndof;
     const int *s_fdof;
@@ -187,40 +191,50 @@ __global__ __launch_bounds__(NB * NB * NEL, 1024 / (NB * NB * NEL)) void ddh_act
     }();
 
     __shared__ typename BStiffness::SharedResources smem;
-    __shared__ typename BlockReduce::TempStorage reduce_work;
-    __shared__ scalar_t reduce_result;
-
-    auto dist = [&](const arr_t &a, const arr_t &b) -> scalar_t {
-        scalar_t dr = 0;
-        for (int t = 0; t < TDOF; ++t)
-        {
-            scalar_t dx = get(a, t).x - get(b, t).x;
-            scalar_t dy = get(a, t).y - get(b, t).y;
-            dr += dx * dx + dy * dy;
-        }
-
-        dr = BlockReduce(reduce_work).Sum(dr);
-        if (helper.thread_index() == 0)
-            reduce_result = sqrt(dr);
-        __syncthreads();
-
-        return reduce_result;
-    };
 
     const auto A = helper.stiffness_matrix(smem);
     const auto evolve_project = helper.waveholtz(limits.ndof);
 
     arr_t u{};
-    arr_t u1 = evolve_project(A, u, f);
-    scalar_t r = dist(u1, u);
-    u = u1;
-
-    const scalar_t tol = max(WHRTol * r, WHATol);
-    for (int it = 0; it < WHMaxIter && r > tol; ++it)
+    const int fixed_iterations = helper.waveholtz_iterations();
+    if (fixed_iterations > 0)
     {
-        u1 = evolve_project(A, u, f);
-        r = dist(u1, u);
+        for (int it = 0; it < fixed_iterations; ++it)
+            u = evolve_project(A, u, f);
+    }
+    else
+    {
+        __shared__ typename BlockReduce::TempStorage reduce_work;
+        __shared__ scalar_t reduce_result;
+
+        auto dist = [&](const arr_t &a, const arr_t &b) -> scalar_t {
+            scalar_t dr = 0;
+            for (int t = 0; t < TDOF; ++t)
+            {
+                scalar_t dx = get(a, t).x - get(b, t).x;
+                scalar_t dy = get(a, t).y - get(b, t).y;
+                dr += dx * dx + dy * dy;
+            }
+
+            dr = BlockReduce(reduce_work).Sum(dr);
+            if (helper.thread_index() == 0)
+                reduce_result = sqrt(dr);
+            __syncthreads();
+
+            return reduce_result;
+        };
+
+        arr_t u1 = evolve_project(A, u, f);
+        scalar_t r = dist(u1, u);
         u = u1;
+
+        const scalar_t tol = max(WHRTol * r, WHATol);
+        for (int it = 0; it < WHMaxIter && r > tol; ++it)
+        {
+            u1 = evolve_project(A, u, f);
+            r = dist(u1, u);
+            u = u1;
+        }
     }
 
     for (int t = 0; t < TDOF; ++t)
@@ -397,14 +411,19 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
 
 template <typename scalar_t>
 DDSubstructedProblem<scalar_t>::DDSubstructedProblem(double omega, const double *h_a, const H1Space2D &fem,
-                                                     const EnsembleSpace &efem, DDKernelConfig config)
+                                                     const EnsembleSpace &efem, DDKernelConfig config,
+                                                     int waveholtz_iterations)
     : g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
       n_basis{fem.basis().size()},
       efem{efem},
       S(fem, efem),
-      W{make_DDWaveHoltz_2d<scalar_t>(omega, h_a, fem, efem)}
+      W{make_DDWaveHoltz_2d<scalar_t>(omega, h_a, fem, efem)},
+      waveholtz_iterations{waveholtz_iterations}
 {
+    cuddh_verify(this->waveholtz_iterations != 0,
+                 printf("DDH error: waveholtz_iterations must be positive or -1 for residual-based stopping.\n"));
+
     n_domains = efem.size();
 
     mx_fdof = efem.max_fsize();
@@ -435,9 +454,9 @@ struct KernelDispatcher
     static void dispatch_kernel(const EnsembleSpace &efem, const int g_ndof, const int n_lambda,
                                 const LambdaDOFData<scalar_t> *B, const DDStiffnessMatrix<scalar_t> &stiffness_matrix,
                                 const scalar_t *punity, const DDWaveHoltz<scalar_t> &waveholtz,
-                                const double *const __restrict__ x, double *const __restrict__ y,
-                                const scalar_t *const __restrict__ d_lambda, scalar_t *const __restrict__ d_update,
-                                scalar_t *const d_work)
+                                int waveholtz_iterations, const double *const __restrict__ x,
+                                double *const __restrict__ y, const scalar_t *const __restrict__ d_lambda,
+                                scalar_t *const __restrict__ d_update, scalar_t *const d_work)
     {
         constexpr int NEL = BLOCK_SIZE / (NB * NB);
 
@@ -447,7 +466,7 @@ struct KernelDispatcher
             dla::zeros(2 * n_lambda, d_update);
 
         auto data = DDHKernelData<scalar_t, NB, NEL, TDOF>::make(n_lambda, g_ndof, efem, B, punity, stiffness_matrix,
-                                                                 waveholtz, d_work);
+                                                                 waveholtz, waveholtz_iterations, d_work);
         const int n_domains = efem.size();
         dim3 block_size(NB * NB, NEL);
         ddh_action_kernel<scalar_t, NB, NEL, TDOF><<<n_domains, block_size>>>(data, x, y, d_lambda, d_update);
@@ -538,7 +557,8 @@ void DDSubstructedProblem<scalar_t>::action(const double *fem_in, double *fem_ou
     scalar_t *d_work = thrust::raw_pointer_cast(_work.data());
 
     KernelDispatcher<scalar_t>(n_basis, kernel_config.tdof, static_cast<int>(kernel_config.block_size))
-        .invoke(efem, g_ndof, n_lambda, B, S, punity, W, fem_in, fem_out, lambda_in, lambda_out, d_work);
+        .invoke(efem, g_ndof, n_lambda, B, S, punity, W, waveholtz_iterations, fem_in, fem_out, lambda_in, lambda_out,
+                d_work);
 }
 
 template <typename scalar_t>
