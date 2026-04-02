@@ -94,3 +94,4 @@ set_target_properties(cuddh PROPERTIES PUBLIC_HEADER ${CMAKE_CURRENT_SOURCE_DIR}
 # Subdirectories
 add_subdirectory(tests)
 add_subdirectory(examples)
+add_subdirectory(benchmarks)
