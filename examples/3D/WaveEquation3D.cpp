@@ -106,7 +106,7 @@ int main()
               << "\tdt = " << dt << "\n"
               << "\t#time steps = " << nt << std::endl;
 
-    copy(ndof, d_b, acc.device_write());
+    dla::copy(ndof, d_b, acc.device_write());
     W.initialize_acceleration(U.device_read(), acc.device_write());
 
     // save the initial condition and grid to file
@@ -119,7 +119,7 @@ int main()
     for (int it = 1; it <= nt; ++it)
     {
         //set the forcing:
-        axpby(ndof, std::cos(omega * (t + dt)), d_b, 0.0, acc1.device_write());
+        dla::axpby(ndof, std::cos(omega * (t + dt)), d_b, 0.0, acc1.device_write());
 
         W.step(dt, U.device_read(), U1.device_write(), acc.device_read(), acc1.device_write());
 

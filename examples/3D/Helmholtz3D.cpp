@@ -85,7 +85,7 @@ __device__ static double a(double3 x)
 
 int main()
 {
-    const int deg = 2;                       // polynomial degree of basis functions
+    const int deg = 3;                       // polynomial degree of basis functions
     const int nx = 32;                       // number of elements along each direction
     const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
 
@@ -138,8 +138,7 @@ int main()
     double *u = thrust::raw_pointer_cast(U.data());
     double *b = thrust::raw_pointer_cast(B.data());
 
-    MassMatrix3D M(fem);
-    l2_project(M, [=] __device__(double3 x) -> double { return f(x, omega); }, b);
+    l2_project(MassMatrix3D(fem), [=] __device__(double3 x) -> double { return f(x, omega); }, b);
 
     // solve a([u, v], phi) = b(phi)
     std::cout << "\nsolving with MINRES ... \n";

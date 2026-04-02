@@ -25,16 +25,15 @@ __device__ static double alpha(double3 x)
 
 int main()
 {
-    const int deg = 3;
+    const int deg = 1;
     const int nx = 32;
     const double omega = 2 * M_PI * nx / 10;
 
     const DDKernelConfig config = {
         .block_size = DDKernelConfig::Default, // one of Default, t256, t512, t1024
-        .tdof = 4                              // one of 0, 1, 2, 3, 4
+        .tdof = 1                              // one of 0, 1, 2, 3, 4
     };
 
-    const int kdim = 100;
     const SolverParams opts = {
         .maxit = 1000,                       // maximum number of iterations for DDH solver
         .rtol = 1e-5,                        // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
@@ -46,7 +45,7 @@ int main()
     Basis basis(deg + 1);
 
     H1Space3D fem(mesh, basis);
-    EnsembleSpace3D efem = partition_uniform_cube(fem, {nx, nx, nx}, {4, 4, 4});
+    EnsembleSpace3D efem = partition_uniform_cube(fem, {nx, nx, nx}, {4, 2, 2});
 
     const int ndof = fem.size();
     const int N = 2 * ndof;
@@ -64,7 +63,7 @@ int main()
 
     gridfunc(fem, [=] __device__(double3 x) -> double { return alpha(x); }, u_a);
 
-    DDH3D<float> ddh(omega, u_a, fem, efem, kdim, config);
+    DDH3D<float> ddh(omega, u_a, fem, efem, config);
 
     std::cout << "Solving the Helmholtz equation...\n"
               << "\tomega = " << omega << "\n"

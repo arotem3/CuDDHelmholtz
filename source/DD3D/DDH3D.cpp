@@ -108,7 +108,7 @@ __global__ __launch_bounds__(NB * NB * NB * NEL, 1024 / (NB * NB * NB * NEL)) vo
     double *const __restrict__ y, const scalar_t *const __restrict__ d_lambda, scalar_t *const __restrict__ d_update)
 {
     constexpr int EDOF = NB * NB * NB;
-    constexpr int BDOF = EDOF * NEL;
+    [[maybe_unused]] constexpr int BDOF = EDOF * NEL;
 
     using vec_t = cuddh::scalar2<scalar_t>;
     using arr_t = std::conditional_t<TDOF == 1, vec_t, cuda::std::array<vec_t, TDOF>>;

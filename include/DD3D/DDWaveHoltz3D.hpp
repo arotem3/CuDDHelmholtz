@@ -1,5 +1,7 @@
 #pragma once
 
+#include <thrust/extrema.h>
+
 #include "DDFaceMassMatrix3D.hpp"
 #include "DDMassMatrix3D.hpp"
 #include "DDStiffnessMatrix3D.hpp"

@@ -29,25 +29,24 @@ static thrust::universal_vector<float> init_face_mass(const H1Space3D &fem, cons
     auto n_faces = efem.n_faces(MemorySpace::DEVICE);
     auto faces = efem.faces(MemorySpace::DEVICE);
     auto I = efem.face_indices(MemorySpace::DEVICE);
-    
-    forall_2d(n_basis, n_basis, mx_n_faces * n_domains, [=] __device__ (int b) mutable -> void
-    {
+
+    forall_2d(n_basis, n_basis, mx_n_faces * n_domains, [=] __device__(int b) mutable -> void {
         const int i = threadIdx.x;
         const int j = threadIdx.y;
         const int f = b % mx_n_faces;
         const int p = b / mx_n_faces;
 
-        if (f > n_faces(p))
+        if (f >= n_faces(p))
             return;
 
         __shared__ QuadFace face;
         if (i == 0 && j == 0)
-            face = mesh.face(f);
-        
+            face = mesh.face(faces(f, p));
+
         const int idx = I(i, j, f, p);
         double value = w(i) * w(j);
 
-        const double2 r{ x(i), x(j) };
+        const double2 r{x(i), x(j)};
 
         __syncthreads();
 
@@ -59,8 +58,7 @@ static thrust::universal_vector<float> init_face_mass(const H1Space3D &fem, cons
 }
 
 DDFaceMassMatrix3D::DDFaceMassMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem)
-    : mx_fdofs(efem.max_fsize()),
-      n_domains(efem.size())
+    : mx_fdofs(efem.max_fsize()), n_domains(efem.size())
 {
     m = init_face_mass(fem, efem);
 }

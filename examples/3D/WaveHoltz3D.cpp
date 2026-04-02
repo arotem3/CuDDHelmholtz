@@ -47,7 +47,7 @@ __device__ static double alpha(double3 x)
 
 int main()
 {
-    const int deg = 2;                       // polynomial degree
+    const int deg = 1;                       // polynomial degree
     const int nx = 32;                       // number of elements in x direction
     const double omega = 2 * M_PI * nx / 10; // time-harmonic frequency
 
