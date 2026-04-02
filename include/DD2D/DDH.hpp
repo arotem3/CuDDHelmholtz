@@ -151,6 +151,8 @@ namespace cuddh
             return out;
         }
 
+        const DDSubstructedProblem<scalar_t> &op() const { return F; }
+
     private:
         const int ndof;
         DDSubstructedProblem<scalar_t> F;

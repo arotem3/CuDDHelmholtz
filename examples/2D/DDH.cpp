@@ -139,6 +139,7 @@ int main()
               << "\t#subdomains = " << efem.size() << "\n"
               << "\tmax #elements / subdomain = " << efem.max_n_elem() << "\n"
               << "\tmax #dof / subdomain = " << efem.max_size() << "\n"
+              << "\tkernel = {" << ddh.op().kernel_str() << "}\n"
               << "\t#lambda = " << ddh.n_lambda() << std::endl;
 
     auto out = ddh.solve(u, b, opts);

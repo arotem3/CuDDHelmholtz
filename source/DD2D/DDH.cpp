@@ -475,8 +475,7 @@ struct KernelDispatcher
         auto data = DDHKernelData<scalar_t, NB, NEL, TDOF>::make(n_lambda, g_ndof, efem, B, punity, stiffness_matrix,
                                                                  waveholtz, waveholtz_iterations, d_work);
         const int n_domains = efem.size();
-        const int mx_elems = efem.max_n_elems();
-        dim3 block_size(NB * NB, mx_elems);
+        dim3 block_size(NB * NB, NEL);
         ddh_action_kernel<scalar_t, NB, NEL, TDOF><<<n_domains, block_size>>>(data, x, y, d_lambda, d_update);
         CUDDH_CHECK_KERNEL();
     }
