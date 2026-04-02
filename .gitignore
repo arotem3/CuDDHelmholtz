@@ -5,7 +5,6 @@ CMakeCache.txt
 libcuddh.a
 .vscode
 .DS_Store
-*.py
 solution
 *.sh
 tmp
