@@ -5,6 +5,7 @@
 
 #include <cub/cub.cuh>
 #include <cuda/std/array>
+#include <format>
 #include <functional>
 #include <random>
 #include <type_traits>
@@ -74,6 +75,13 @@ namespace cuddh
         void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
         {
             cuddh_verify(false, printf("DDSubstructedProblem::action(c, x, y) not implemented\n"));
+        }
+
+        /// @brief Returns a string describing the kernel launch configuration: threads per block and DOFs per thread.
+        std::string kernel_str() const
+        {
+            return std::format("block_size = {} threads/block, tdof = {} DOFs/thread",
+                               static_cast<int>(kernel_config.block_size), kernel_config.tdof);
         }
 
     private:

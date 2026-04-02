@@ -424,9 +424,6 @@ DDSubstructedProblem3D<scalar_t>::DDSubstructedProblem3D(double omega_, const do
 
     kernel_config = make_valid_config(config, n_basis, mx_elem_per_dom);
 
-    printf("DDH3D Kernel Config: block_size = %d, tdof = %d\n", static_cast<int>(kernel_config.block_size),
-           kernel_config.tdof);
-
     if (kernel_config.tdof > 1)
     {
         const int work_size = static_cast<int>(kernel_config.block_size) * kernel_config.tdof * n_domains;
