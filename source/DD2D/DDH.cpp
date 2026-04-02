@@ -402,7 +402,14 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
     else
     {
         int B = static_cast<int>(config.block_size);
-        config.tdof = (mx_dof + B - 1) / B;
+        int t = (mx_dof + B - 1) / B;
+
+        if (config.tdof <= 0)
+            config.tdof = t;
+        cuddh_verify(config.tdof >= t,
+                     printf("DDH: Kernel configuration with %d threads/block requires tdof >= %d, but tdof = %d "
+                            "was specified. This occured because at least one subdomain has %d elements.\n",
+                            B, t, config.tdof, mx_elems));
     }
 
     cuddh_verify(config.tdof <= 4, printf("DDH: Kernel configuration with tdof > 4 not compiled.\n"));
