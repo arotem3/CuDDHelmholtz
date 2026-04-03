@@ -30,7 +30,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
     auto a = gridfunc(fem, [] __device__(const double X[2]) -> double { return 1.0; });
     double *d_a = thrust::raw_pointer_cast(a.data());
 
-    DDSubstructedProblem<scalar_t> F(omega, d_a, fem, efem, config, 5);
+    DDSubstructedProblem<scalar_t> F(omega, d_a, fem, efem, config, 2);
 
     ivec boundary_faces = mesh.boundary_edges();
     TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
@@ -121,7 +121,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
               << "  subdomains dims:  " << sx << " x " << sy << "\n"
               << "  kernel:           " << F.kernel_str() << "\n"
               << "  #subdomains:      " << efem.size() << "\n"
-              << "  #dof:             " << fem.size() << "\n"
+              << "  #dof:             " << n_fem << "\n"
               << "  #lambda dof:      " << F.size() << "\n"
               << "  warmup:           " << warmup << "\n"
               << "  iterations:       " << iterations << "\n"
@@ -137,7 +137,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
     {
         const bool ok = write_csv_row(output_file, precision, degree, nx, ny, omega, sx, sy,
                                       static_cast<int>(config.block_size), config.tdof, warmup, iterations, efem.size(),
-                                      fem.size(), F.size(), helmholtz_avg_ms, *min_it, *max_it, avg_ms, total_ms);
+                                      n_fem, F.size(), helmholtz_avg_ms, *min_it, *max_it, avg_ms, total_ms);
         if (!ok)
             throw std::runtime_error("failed to write output file: " + output_file);
     }

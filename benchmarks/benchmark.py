@@ -11,8 +11,20 @@ import matplotlib.ticker as ticker
 import pandas as pd
 
 
-MESHES: list[tuple[int, int]] = [(32, 32), (64, 32), (64, 64), (128, 64), (128, 128)]
-DEGREES: list[int] = [1, 2, 3, 4]
+MESHES: list[tuple[int, int]] = [
+    (32, 32),
+    (64, 32),
+    (64, 64),
+    (128, 64),
+    (128, 128),
+    (256, 128),
+    (256, 256),
+    (512, 256),
+    (512, 512),
+    (1024, 512),
+    (1024, 1024),
+]
+DEGREES: list[int] = [1, 2, 3, 4, 7]
 
 KERNEL_BLOCK_SIZES: list[int] = [256, 512, 1024]
 KERNEL_TDOFS: list[int] = [1, 2, 4]
@@ -107,7 +119,10 @@ def configure_plot_style() -> None:
             "axes.grid": True,
             "grid.alpha": 0.25,
             "grid.linestyle": "--",
-            "legend.frameon": False,
+            "legend.frameon": True,
+            "legend.facecolor": "white",
+            "legend.edgecolor": "black",
+            "legend.framealpha": 0.9,
             "xtick.labelsize": 10,
             "ytick.labelsize": 10,
             "pdf.fonttype": 42,
@@ -337,11 +352,11 @@ def ensure_plot_dir(output_dir: Path) -> Path:
 
 def _kernel_title(block_size: int, tdof: int) -> str:
     """Human-readable fixed kernel configuration label."""
-    return f"$B={block_size}$, $K={tdof}$"
+    return f"$B = {block_size}, T = {tdof}$"
 
 
 def _kernel_slug(block_size: int, tdof: int) -> str:
-    return f"B{block_size}_K{tdof}"
+    return f"B{block_size}_T{tdof}"
 
 
 def _kernel_columns(sub: pd.DataFrame) -> pd.DataFrame:
@@ -361,16 +376,18 @@ def _single_precision(sub: pd.DataFrame) -> pd.DataFrame:
     return sub[sub["precision"] == "float"].copy()
 
 
-def _set_mesh_xticks(ax: matplotlib.axes.Axes, sub: pd.DataFrame) -> None:
-    """Replace numeric x-axis with mesh-dimension labels (e.g. 32×32)."""
-    mapping: dict[int, str] = {}
-    for _, row in sub[["nx", "ny"]].drop_duplicates().iterrows():
-        nx, ny = int(row["nx"]), int(row["ny"])
-        mapping[nx * ny] = f"${nx}\\times{ny}$"
-    ticks = sorted(mapping)
-    ax.set_xticks(ticks)
-    ax.set_xticklabels([mapping[t] for t in ticks], rotation=35, ha="right", fontsize=8)
-    ax.xaxis.set_minor_locator(ticker.NullLocator())
+def _set_dof_xaxis(ax: matplotlib.axes.Axes) -> None:
+    ax.set_xscale("log", base=10)
+    ax.xaxis.set_major_locator(ticker.LogLocator(base=10))
+    ax.xaxis.set_minor_locator(ticker.LogLocator(base=10, subs=range(2, 10)))
+    ax.xaxis.set_major_formatter(ticker.LogFormatterMathtext(base=10))
+    ax.xaxis.set_minor_formatter(ticker.NullFormatter())
+
+
+def _style_axes(ax: matplotlib.axes.Axes) -> None:
+    ax.minorticks_on()
+    ax.grid(True, which="major", linestyle="--", alpha=0.25)
+    ax.grid(True, which="minor", linestyle=":", alpha=0.15)
 
 
 # ---------------------------------------------------------------------------
@@ -383,9 +400,9 @@ def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
     Produce per-kernel scaling figures (single precision):
       1) absolute runtime [ms]
       2) runtime / helmholtz runtime (log y-axis)
-      3) runtime per DOF [ms / dof]
+            3) throughput [MDOF/s]
 
-    x-axis: total mesh elements nx*ny (log-2 scale).
+        x-axis: number of degrees of freedom (log-10 scale).
     lines: polynomial degree.
     """
     sub = df[df["study"] == "degree_mesh_scaling"].copy()
@@ -394,8 +411,7 @@ def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
 
     sub = _kernel_columns(sub)
     sub = _single_precision(sub)
-    sub["n_elements"] = sub["nx"] * sub["ny"]
-    sub["ms_per_dof"] = sub["avg_ms"] / sub["n_dof"]
+    sub["throughput"] = sub["n_dof"] / sub["avg_ms"] * 1e-3  # MDOF/s
 
     degrees = sorted(sub["degree"].unique())
     palette = [plt.get_cmap("tab10")(i) for i in range(len(degrees))]
@@ -407,16 +423,16 @@ def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
 
         for metric, ylabel, suffix, log_y in [
             ("avg_ms", "Runtime [ms]", "runtime", False),
-            ("avg_rel_to_helmholtz", "Runtime / Helmholtz runtime", "relative", True),
-            ("ms_per_dof", "Runtime per DOF [ms/dof]", "per_dof", False),
+            ("avg_rel_to_helmholtz", "DD Time / Operator Time", "relative", True),
+            ("throughput", "Throughput [MDOF/s]", "throughput", False),
         ]:
-            fig, ax = plt.subplots(figsize=(6.6, 4.8))
+            fig, ax = plt.subplots(figsize=(6.6, 4.8), layout="constrained")
             for deg in degrees:
-                ddata = kdata[kdata["degree"] == deg].sort_values("n_elements")
+                ddata = kdata[kdata["degree"] == deg].sort_values("n_dof")
                 if ddata.empty:
                     continue
                 ax.plot(
-                    ddata["n_elements"],
+                    ddata["n_dof"],
                     ddata[metric],
                     marker="o",
                     linewidth=1.9,
@@ -425,15 +441,17 @@ def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
                     label=f"$p={deg}$",
                 )
 
-            ax.set_xscale("log", base=2)
+            _set_dof_xaxis(ax)
             if log_y:
                 ax.set_yscale("log", base=10)
-            _set_mesh_xticks(ax, kdata)
-            ax.set_xlabel("Mesh ($n_x \\times n_y$)")
+                ax.set_ylim(bottom=1)
+            else:
+                ax.set_ylim(bottom=0)
+            _style_axes(ax)
+            ax.set_xlabel("#DOFs")
             ax.set_ylabel(ylabel)
-            ax.set_title(f"2D DDH scaling (single precision), {_kernel_title(bs, td)}")
+            ax.set_title(f"{_kernel_title(bs, td)}")
             ax.legend(title="Degree")
-            fig.tight_layout()
             fig.savefig(
                 plot_dir / f"scaling_{suffix}_{_kernel_slug(bs, td)}.pdf",
                 bbox_inches="tight",
@@ -444,7 +462,7 @@ def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
 def plot_fixed_degree_kernel_comparison(df: pd.DataFrame, plot_dir: Path) -> None:
     """
     For fixed degree (1 and 3), compare all kernels together as mesh grows.
-    y-axis: runtime [ms], x-axis: number of mesh elements.
+    Produce both runtime and throughput figures.
     """
     sub = df[df["study"] == "degree_mesh_scaling"].copy()
     if sub.empty:
@@ -452,7 +470,7 @@ def plot_fixed_degree_kernel_comparison(df: pd.DataFrame, plot_dir: Path) -> Non
 
     sub = _kernel_columns(sub)
     sub = _single_precision(sub)
-    sub["n_elements"] = sub["nx"] * sub["ny"]
+    sub["throughput"] = sub["n_dof"] / sub["avg_ms"] * 1e-3  # MDOF/s
 
     degree_targets = [1, 3]
     palette = [plt.get_cmap("tab10")(i) for i in range(len(KERNEL_CONFIGS))]
@@ -463,40 +481,48 @@ def plot_fixed_degree_kernel_comparison(df: pd.DataFrame, plot_dir: Path) -> Non
         if dsub.empty:
             continue
 
-        fig, ax = plt.subplots(figsize=(6.8, 4.8))
-        for bs, td in KERNEL_CONFIGS:
-            kdata = dsub[(dsub["req_bs"] == bs) & (dsub["req_td"] == td)].sort_values(
-                "n_elements"
-            )
-            if kdata.empty:
-                continue
-            ax.plot(
-                kdata["n_elements"],
-                kdata["avg_ms"],
-                marker="o",
-                linewidth=1.9,
-                markersize=5,
-                color=kernel_colors[(bs, td)],
-                label=_kernel_title(bs, td),
-            )
+        for metric, ylabel, slug in [
+            ("avg_ms", "Runtime [ms]", "runtime"),
+            ("throughput", "Throughput [MDOF/s]", "throughput"),
+        ]:
+            fig, ax = plt.subplots(figsize=(6.8, 4.8))
+            for bs, td in KERNEL_CONFIGS:
+                kdata = dsub[
+                    (dsub["req_bs"] == bs) & (dsub["req_td"] == td)
+                ].sort_values("n_dof")
+                if kdata.empty:
+                    continue
+                ax.plot(
+                    kdata["n_dof"],
+                    kdata[metric],
+                    marker="o",
+                    linewidth=1.9,
+                    markersize=5,
+                    color=kernel_colors[(bs, td)],
+                    label=_kernel_title(bs, td),
+                )
 
-        ax.set_xscale("log", base=2)
-        _set_mesh_xticks(ax, dsub)
-        ax.set_xlabel("Mesh ($n_x \\times n_y$)")
-        ax.set_ylabel("Runtime [ms]")
-        ax.set_title(f"Kernel comparison at fixed degree $p={deg}$ (single precision)")
-        ax.legend(title="Kernel", fontsize=9)
-        fig.tight_layout()
-        fig.savefig(
-            plot_dir / f"kernel_comparison_degree_{deg}.pdf", bbox_inches="tight"
-        )
-        plt.close(fig)
+            _set_dof_xaxis(ax)
+            ax.set_ylim(bottom=0)
+            _style_axes(ax)
+            ax.set_xlabel("#DOFs")
+            ax.set_ylabel(ylabel)
+            # ax.set_title(
+            #     f"Kernel comparison at fixed degree $p={deg}$ (single precision)"
+            # )
+            ax.legend(title="Kernel", fontsize=9)
+            fig.tight_layout()
+            fig.savefig(
+                plot_dir / f"kernel_comparison_degree_{deg}_{slug}.pdf",
+                bbox_inches="tight",
+            )
+            plt.close(fig)
 
 
 def plot_precision_ratio(df: pd.DataFrame, plot_dir: Path) -> None:
     """
     Double / single runtime ratio for a fixed kernel B=1024, K=1.
-    x-axis: total mesh elements (log-2, labelled as mesh dims).
+    x-axis: number of degrees of freedom (log-10 scale).
     Lines:  polynomial degree.
     """
     sub = df[df["study"] == "degree_mesh_scaling"].copy()
@@ -506,12 +532,14 @@ def plot_precision_ratio(df: pd.DataFrame, plot_dir: Path) -> None:
     sub = _kernel_columns(sub)
     sub = sub[(sub["req_bs"] == 1024) & (sub["req_td"] == 1)]
 
-    sub["n_elements"] = sub["nx"] * sub["ny"]
-
     pivot = (
-        sub.groupby(["nx", "ny", "degree", "precision"], as_index=False)["avg_ms"]
+        sub.groupby(["nx", "ny", "degree", "n_dof", "precision"], as_index=False)[
+            "avg_ms"
+        ]
         .mean()
-        .pivot(index=["nx", "ny", "degree"], columns="precision", values="avg_ms")
+        .pivot(
+            index=["nx", "ny", "degree", "n_dof"], columns="precision", values="avg_ms"
+        )
         .dropna()
         .reset_index()
     )
@@ -519,7 +547,6 @@ def plot_precision_ratio(df: pd.DataFrame, plot_dir: Path) -> None:
         return
 
     pivot["ratio"] = pivot["double"] / pivot["float"]
-    pivot["n_elements"] = pivot["nx"] * pivot["ny"]
 
     degrees = sorted(pivot["degree"].unique())
     palette = [plt.get_cmap("tab10")(i) for i in range(len(degrees))]
@@ -527,9 +554,9 @@ def plot_precision_ratio(df: pd.DataFrame, plot_dir: Path) -> None:
 
     fig, ax = plt.subplots(figsize=(6.0, 4.4))
     for deg in degrees:
-        g = pivot[pivot["degree"] == deg].sort_values("n_elements")
+        g = pivot[pivot["degree"] == deg].sort_values("n_dof")
         ax.plot(
-            g["n_elements"],
+            g["n_dof"],
             g["ratio"],
             marker="^",
             linewidth=1.8,
@@ -538,12 +565,11 @@ def plot_precision_ratio(df: pd.DataFrame, plot_dir: Path) -> None:
             label=f"$p={deg}$",
         )
 
-    ax.axhline(1.0, color="black", linestyle=":", linewidth=1.0)
-    ax.set_xscale("log", base=2)
-    _set_mesh_xticks(ax, sub)
-    ax.set_xlabel("Mesh ($n_x \\times n_y$)")
+    _set_dof_xaxis(ax)
+    _style_axes(ax)
+    ax.set_xlabel("#DOFs")
     ax.set_ylabel("Runtime ratio (double / single)")
-    ax.set_title(r"Precision overhead at fixed kernel ($B=1024, K=1$)")
+    ax.set_title(r"Precision overhead ($B=1024, K=1$)")
     ax.legend(title="Degree")
     fig.tight_layout()
     fig.savefig(plot_dir / "precision_ratio.pdf", bbox_inches="tight")
@@ -556,6 +582,56 @@ def make_plots(df: pd.DataFrame, output_dir: Path) -> None:
     plot_scaling_per_kernel(df, plot_dir)
     plot_fixed_degree_kernel_comparison(df, plot_dir)
     plot_precision_ratio(df, plot_dir)
+    plot_helmholtz_throughput(df, plot_dir)
+
+
+def plot_helmholtz_throughput(df: pd.DataFrame, plot_dir: Path) -> None:
+    """
+    Throughput of the standalone Helmholtz operator (single precision).
+    The Helmholtz runtime is independent of the DDH kernel config, so results
+    are averaged across all kernel configs before plotting.
+
+    x-axis: number of degrees of freedom (log-10 scale).
+    Lines:  polynomial degree.
+    """
+    sub = df[df["study"] == "degree_mesh_scaling"].copy()
+    if sub.empty or "helmholtz_avg_ms" not in sub.columns:
+        return
+
+    sub = _single_precision(sub)
+
+    # Average over kernel configs (Helmholtz is kernel-independent)
+    agg = sub.groupby(["nx", "ny", "degree", "n_dof"], as_index=False)[
+        "helmholtz_avg_ms"
+    ].mean()
+    agg["throughput"] = agg["n_dof"] / agg["helmholtz_avg_ms"] * 1e-3  # MDOF/s
+
+    degrees = sorted(agg["degree"].unique())
+    palette = [plt.get_cmap("tab10")(i) for i in range(len(degrees))]
+    degree_colors = dict(zip(degrees, palette))
+
+    fig, ax = plt.subplots(figsize=(6.6, 4.8), layout="constrained")
+    for deg in degrees:
+        g = agg[agg["degree"] == deg].sort_values("n_dof")
+        ax.plot(
+            g["n_dof"],
+            g["throughput"],
+            marker="s",
+            linewidth=1.9,
+            markersize=5,
+            color=degree_colors[deg],
+            label=f"$p={deg}$",
+        )
+
+    _set_dof_xaxis(ax)
+    ax.set_ylim(bottom=0)
+    _style_axes(ax)
+    ax.set_xlabel("#DOFs")
+    ax.set_ylabel("Throughput [MDOF/s]")
+    ax.set_title("Helmholtz operator throughput (single precision)")
+    ax.legend(title="Degree")
+    fig.savefig(plot_dir / "helmholtz_throughput.pdf", bbox_inches="tight")
+    plt.close(fig)
 
 
 def main() -> None:
