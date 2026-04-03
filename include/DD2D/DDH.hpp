@@ -38,7 +38,7 @@ namespace cuddh
      * is solved. The original finite element problem is always in double precision.
      */
     template <typename scalar_t>
-    class DDSubstructedProblem : public Operator<scalar_t>
+    class DDSubstructuredOperator : public Operator<scalar_t>
     {
         static_assert(std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
                       "scalar_t must be float or double");
@@ -51,10 +51,10 @@ namespace cuddh
         /// @param efem EnsembleSpace. Must be a uniform partition of the mesh into rectangular subdomains.
         /// @param waveholtz_iterations Optional fixed number of WaveHoltz iterations per subdomain action.
         /// If positive, this exact number of iterations is used and residual-based stopping is skipped.
-        DDSubstructedProblem(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem,
-                             DDKernelConfig config = {}, int waveholtz_iterations = -1);
+        DDSubstructuredOperator(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem,
+                                DDKernelConfig config = {}, int waveholtz_iterations = -1);
 
-        ~DDSubstructedProblem() = default;
+        ~DDSubstructuredOperator() = default;
 
         /// return the number of degrees of freedom for the substructured problem.
         int size() const { return 2 * n_lambda; }
@@ -74,7 +74,7 @@ namespace cuddh
 
         void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
         {
-            cuddh_verify(false, printf("DDSubstructedProblem::action(c, x, y) not implemented\n"));
+            cuddh_verify(false, printf("DDSubstructuredOperator::action(c, x, y) not implemented\n"));
         }
 
         /// @brief Returns a string describing the kernel launch configuration: threads per block and DOFs per thread.
@@ -111,8 +111,8 @@ namespace cuddh
         mutable thrust::device_vector<scalar_t> _work;
     };
 
-    extern template class DDSubstructedProblem<float>;
-    extern template class DDSubstructedProblem<double>;
+    extern template class DDSubstructuredOperator<float>;
+    extern template class DDSubstructuredOperator<double>;
 
     /**
      * @brief Domain decomposition Helmholtz solver.
@@ -151,11 +151,11 @@ namespace cuddh
             return out;
         }
 
-        const DDSubstructedProblem<scalar_t> &op() const { return F; }
+        const DDSubstructuredOperator<scalar_t> &op() const { return F; }
 
     private:
         const int ndof;
-        DDSubstructedProblem<scalar_t> F;
+        DDSubstructuredOperator<scalar_t> F;
         MINRES<scalar_t> solver;
 
         mutable thrust::device_vector<scalar_t> lambda;

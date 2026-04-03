@@ -419,9 +419,9 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
 }
 
 template <typename scalar_t>
-DDSubstructedProblem<scalar_t>::DDSubstructedProblem(double omega, const double *h_a, const H1Space2D &fem,
-                                                     const EnsembleSpace &efem, DDKernelConfig config,
-                                                     int waveholtz_iterations)
+DDSubstructuredOperator<scalar_t>::DDSubstructuredOperator(double omega, const double *h_a, const H1Space2D &fem,
+                                                           const EnsembleSpace &efem, DDKernelConfig config,
+                                                           int waveholtz_iterations)
     : g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
       n_basis{fem.basis().size()},
@@ -558,8 +558,8 @@ struct KernelDispatcher
 };
 
 template <typename scalar_t>
-void DDSubstructedProblem<scalar_t>::action(const double *fem_in, double *fem_out, const scalar_t *lambda_in,
-                                            scalar_t *lambda_out) const
+void DDSubstructuredOperator<scalar_t>::action(const double *fem_in, double *fem_out, const scalar_t *lambda_in,
+                                               scalar_t *lambda_out) const
 {
     const LambdaDOFData<scalar_t> *B = thrust::raw_pointer_cast(_B.data());
     const scalar_t *punity = thrust::raw_pointer_cast(_partition_of_unity.data());
@@ -571,29 +571,29 @@ void DDSubstructedProblem<scalar_t>::action(const double *fem_in, double *fem_ou
 }
 
 template <typename scalar_t>
-void DDSubstructedProblem<scalar_t>::action(const scalar_t *x, scalar_t *y) const
+void DDSubstructuredOperator<scalar_t>::action(const scalar_t *x, scalar_t *y) const
 {
     action((const double *)nullptr, (double *)nullptr, x, y);
     symmetrize_ddh(n_lambda, x, y);
 }
 
 template <typename scalar_t>
-void DDSubstructedProblem<scalar_t>::rhs(const double *f, scalar_t *b) const
+void DDSubstructuredOperator<scalar_t>::rhs(const double *f, scalar_t *b) const
 {
     action(f, (double *)nullptr, (const scalar_t *)nullptr, b);
     symmetrize_ddh(n_lambda, (const scalar_t *)nullptr, b);
 }
 
 template <typename scalar_t>
-void DDSubstructedProblem<scalar_t>::postprocess(const scalar_t *lambda, const double *f, double *y) const
+void DDSubstructuredOperator<scalar_t>::postprocess(const scalar_t *lambda, const double *f, double *y) const
 {
     action(f, y, lambda, (scalar_t *)nullptr);
 }
 
 namespace cuddh
 {
-    template class DDSubstructedProblem<float>;
-    template class DDSubstructedProblem<double>;
+    template class DDSubstructuredOperator<float>;
+    template class DDSubstructuredOperator<double>;
     template class DDH<float>;
     template class DDH<double>;
 } // namespace cuddh

@@ -406,8 +406,8 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
 }
 
 template <typename scalar_t>
-DDSubstructedProblem3D<scalar_t>::DDSubstructedProblem3D(double omega_, const double *h_a, const H1Space3D &fem,
-                                                         const EnsembleSpace3D &efem_, DDKernelConfig config)
+DDSubstructuredOperator3D<scalar_t>::DDSubstructuredOperator3D(double omega_, const double *h_a, const H1Space3D &fem,
+                                                               const EnsembleSpace3D &efem_, DDKernelConfig config)
     : g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
       n_basis{fem.basis().size()},
@@ -528,8 +528,8 @@ struct KernelDispatcher3D
 };
 
 template <typename scalar_t>
-void DDSubstructedProblem3D<scalar_t>::action(const double *fem_in, double *fem_out, const scalar_t *lambda_in,
-                                              scalar_t *lambda_out) const
+void DDSubstructuredOperator3D<scalar_t>::action(const double *fem_in, double *fem_out, const scalar_t *lambda_in,
+                                                 scalar_t *lambda_out) const
 {
     const LambdaDOFData<scalar_t> *B = thrust::raw_pointer_cast(_B.data());
     const scalar_t *punity = thrust::raw_pointer_cast(_partition_of_unity.data());
@@ -540,27 +540,27 @@ void DDSubstructedProblem3D<scalar_t>::action(const double *fem_in, double *fem_
 }
 
 template <typename scalar_t>
-void DDSubstructedProblem3D<scalar_t>::action(const scalar_t *x, scalar_t *y) const
+void DDSubstructuredOperator3D<scalar_t>::action(const scalar_t *x, scalar_t *y) const
 {
     action((const double *)nullptr, (double *)nullptr, x, y);
     symmetrize_ddh(n_lambda, x, y);
 }
 
 template <typename scalar_t>
-void DDSubstructedProblem3D<scalar_t>::rhs(const double *f, scalar_t *b) const
+void DDSubstructuredOperator3D<scalar_t>::rhs(const double *f, scalar_t *b) const
 {
     action(f, (double *)nullptr, (const scalar_t *)nullptr, b);
     symmetrize_ddh(n_lambda, (const scalar_t *)nullptr, b);
 }
 
 template <typename scalar_t>
-void DDSubstructedProblem3D<scalar_t>::postprocess(const scalar_t *lambda, const double *f, double *y) const
+void DDSubstructuredOperator3D<scalar_t>::postprocess(const scalar_t *lambda, const double *f, double *y) const
 {
     action(f, y, lambda, (scalar_t *)nullptr);
 }
 
 namespace cuddh
 {
-    template class DDSubstructedProblem3D<float>;
+    template class DDSubstructuredOperator3D<float>;
     template class DDH3D<float>;
 } // namespace cuddh

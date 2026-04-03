@@ -30,7 +30,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
     auto a = gridfunc(fem, [] __device__(const double X[2]) -> double { return 1.0; });
     double *d_a = thrust::raw_pointer_cast(a.data());
 
-    DDSubstructedProblem<scalar_t> F(omega, d_a, fem, efem, config, 2);
+    DDSubstructuredOperator<scalar_t> F(omega, d_a, fem, efem, config, 2);
 
     ivec boundary_faces = mesh.boundary_edges();
     TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
@@ -113,7 +113,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
                   << t_ms << " [ms] " << std::setprecision(1) << "(x" << relative_to_helmholtz(t_ms) << ")\n";
     };
 
-    std::cout << "Benchmarking DDSubstructedProblem<" << precision << ">::action\n"
+    std::cout << "Benchmarking DDSubstructuredOperator<" << precision << ">::action\n"
               << "  precision:        " << precision << "\n"
               << "  degree:           " << degree << "\n"
               << "  mesh:             " << nx << " x " << ny << "\n"
@@ -147,7 +147,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
 
 int main(int argc, char **argv)
 {
-    CLI::App app{"Benchmark DDSubstructedProblem::action in 2D"};
+    CLI::App app{"Benchmark DDSubstructuredOperator::action in 2D"};
 
     std::string precision = "float";
     int degree = 3;
