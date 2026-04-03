@@ -87,7 +87,7 @@ else()
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
-    target_compile_options(cuddh PRIVATE -O3)
+    target_compile_options(cuddh PRIVATE -O3 --use_fast_math -ffast-math -prec-div=false -prec-sqrt=false)
 endif()
 
 # Specify the public header
