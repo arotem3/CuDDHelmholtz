@@ -5,25 +5,25 @@
  * @details This file is a driver for solving the Helmholtz equation with
  * approximate absorbing boundary conditions:
  *
- *      -div(grad U) - omega^2 a^2(x) U == f    in  D := [-1, 1]x[-1, 1]
- *      i a(x) omega U + dU/dn == 0             on boundary of D
+ *      -div(grad u) - omega^2 a^2(x) u == f    in  D := [-1, 1]x[-1, 1]
+ *      i a(x) omega u + du/dn == 0             on boundary of D
  *
- * Here omega is the frequency. We assume f is real valued, and U is complex
+ * Here omega is the frequency. We assume f is real valued, and u is complex
  * valued.
  *
- * Write U = u + i v, the weak formulation is
+ * The weak formulation is
  *
- *      a([u, v], phi) == b(phi)        for all phi in H1(D)
+ *      a(u, phi) == b(phi)        for all phi in H1(D)
  *
  * The bilinear form a is defined as
  *
- *      a([u, v], phi) = [ (grad u, grad phi) - omega^2 (a^2(x) u, phi) - omega <a(x) v, phi>;
- *                         (grad v, grad phi) - omega^2 (a^2(x) v, phi) + omega <a(x) u, phi> ]
+ *      a(u, phi) = (grad u, grad phi) - omega^2 (a^2(x) u, phi) - i omega <a(x) u, phi>
  *
- * And the linear operator b is defined b(phi) = [ (f, phi); 0 ]
+ * And the linear operator b is defined b(phi) = (f, phi)
  *
- * The DDH class implements this discretization but is used to solve the
- * substructured problem instead of the original problem.
+ * The DDH class implements this discretization and solves the problem by solving a substructured problem on the
+ * skeleton of the domain decomposition. The substructured problem is solved with MINRES and the action of the operator
+ * is computed by solving the subdomain problems with the WaveHoltz iterations.
  *
  * To compile & run this program:
  *  (1) From the CuDDHelmholtz directory, compile the library:
@@ -35,23 +35,13 @@
  *      ./examples/DDH
  *
  * The program will write the collocation points to `solution/xy.0000` in binary
- * format. The solution is written to `solution/ddh.0000` in binary
+ * format. The solution is written to `solution/uv.0000` in binary
  * format.
  *
- * This format can be read and visualized, for example, in Python using numpy and matplotlib via:
- *
- *      xy = numpy.fromfile("solution/xy.0000", order='F')
- *      xy = xy.reshape(2, -1)
- *      x, y = xy[0], xy[1]
- *
- *      uv = numpy.fromfile("solution/ddh.0000", order='F')
- *      uv = uv.reshape(-1, 2)
- *      U  = uv[:, 0] + 1j * uv[:, 1]
- *
- *      # visualize the modulus of U
- *      matplotlib.pyplot.tricontourf(x, y, np.abs(U))
+ * This format can be read and visualized, for example, in Python. See `visualize.py`.
  */
 
+#include "CLI11.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
 
@@ -82,22 +72,62 @@ __device__ static double alpha(const double X[2])
         return 1.0;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-    const int deg = 3;                       // polynomial degree of basis functions
-    const int nx = 64, ny = 64;              // number of elements along each direction. Mesh will have nx^2 elements
-    const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
+    int deg = 3;                          // polynomial degree of basis functions
+    std::vector<int> grid = {32};         // grid dimensions [nx, ny]
+    double omega = -1.0;                  // Helmholtz frequency
+    int tdof = 0;                         // one of 0, 1, 2, 3, 4
+    int block_size = 0;                   // 0 (default), 256, 512, 1024
+    int maxit = 1000;                     // maximum number of GMRES iterations
+    double rtol = 1e-3;                   // relative tolerance
+    std::string verbose_str = "progress"; // silent | progress | iteration
 
-    const DDKernelConfig config = {
-        .block_size = DDKernelConfig::Default, // one of Default, t256, t512, t1024
-        .tdof = 2                              // one of 0, 1, 2, 3, 4.
-    };
+    CLI::App app{"DDH: Domain decomposition solver for the 2D Helmholtz equation"};
+    app.add_option("-p,--deg", deg, "Polynomial degree of basis functions")->default_val(3);
+    app.add_option("-n,--grid", grid, "Grid dimensions: nx [ny] (if ny omitted, ny=nx)")
+        ->expected(1, 2)
+        ->default_val("32");
+    app.add_option("-w,--omega", omega, "Helmholtz frequency (default: 0.1 * nx * deg)");
+    app.add_option("--tdof", tdof, "DOFs/thread kernel parameter 0 (auto), 1, ..., 4")
+        ->default_val(0)
+        ->check(CLI::Range(0, 4));
+    app.add_option("--block-size", block_size, "Threads per block: 0 (auto), 256, 512, 1024")
+        ->default_val(0)
+        ->check(CLI::IsMember({0, 256, 512, 1024}));
+    app.add_option("--maxit", maxit, "Maximum number of GMRES iterations")->default_val(1000);
+    app.add_option("--rtol", rtol, "Relative tolerance for GMRES")->default_val(1e-3);
+    app.add_option("-v,--verbose", verbose_str, "Verbosity: silent | progress | iteration")
+        ->default_val("progress")
+        ->check(CLI::IsMember({"silent", "progress", "iteration"}, CLI::ignore_case));
+    CLI11_PARSE(app, argc, argv);
 
-    const SolverParams opts = {
-        .maxit = 1000,                       // maximum number of iterations of GMRES
-        .rtol = 1e-5,                        // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
-        .verbose = SolverParams::ProgressBar // verbosity level: Silent, ProgressBar, Iteration
-    };
+    int nx = grid[0];
+    int ny = grid.size() > 1 ? grid[1] : grid[0];
+    if (omega < 0.0)
+        omega = 0.1 * nx * deg;
+
+    DDKernelConfig::BlockSize bs;
+    if (block_size == 256)
+        bs = DDKernelConfig::t256;
+    else if (block_size == 512)
+        bs = DDKernelConfig::t512;
+    else if (block_size == 1024)
+        bs = DDKernelConfig::t1024;
+    else
+        bs = DDKernelConfig::Default;
+
+    SolverParams::Verbosity verbosity;
+    if (CLI::detail::to_lower(verbose_str) == "silent")
+        verbosity = SolverParams::Silent;
+    else if (CLI::detail::to_lower(verbose_str) == "iteration")
+        verbosity = SolverParams::Iteration;
+    else
+        verbosity = SolverParams::ProgressBar;
+
+    const DDKernelConfig config = {.block_size = bs, .tdof = tdof};
+
+    const SolverParams opts = {.maxit = maxit, .rtol = rtol, .verbose = verbosity};
 
     // Assemble the mesh
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, ny, -1.0, 1.0);
@@ -174,7 +204,7 @@ int main()
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
 
     const char xy_file[] = "solution/xy.0000";
-    const char sol_file[] = "solution/ddh.0000";
+    const char sol_file[] = "solution/uv.0000";
     const char res_file[] = "solution/residuals.0000";
 
     if (to_file(xy_file, N, xy.data()))

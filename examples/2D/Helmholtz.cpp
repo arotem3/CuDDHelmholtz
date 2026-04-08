@@ -5,35 +5,23 @@
  * @details This file is a driver for solving the Helmholtz equation with
  * approximate absorbing boundary conditions:
  *
- *      -div(grad U) - omega^2 a^2(x) U == f    in  D := [-1, 1]x[-1, 1]
- *      i a(x) omega U + dU/dn == 0             on boundary of D
+ *      -div(grad u) - omega^2 a^2(x) u == f    in  D := [-1, 1]x[-1, 1]
+ *      i a(x) omega u + du/dn == 0             on boundary of D
  *
- * Here omega is the frequency. We assume f is real valued, and U is complex
+ * Here omega is the frequency. We assume f is real valued, and u is complex
  * valued.
  *
- * Write U = u + i v, the weak formulation is
+ * The weak formulation is
  *
- *      a([u, v], phi) == b(phi)        for all phi in H1(D)
+ *      a(u, phi) == b(phi)        for all phi in H1(D)
  *
  * The bilinear form a is defined as
  *
- *      a([u, v], phi) = [ (grad u, grad phi) - omega^2 (a^2(x) u, phi) - omega <a(x) v, phi>;
- *                         (grad v, grad phi) - omega^2 (a^2(x) v, phi) + omega <a(x) u, phi> ]
+ *      a(u, phi) = (grad u, grad phi) - omega^2 (a^2(x) u, phi) - i omega <a(x) u, phi>
  *
- * And the linear operator b is defined b(phi) = [ (f, phi); 0 ]
+ * And the linear operator b is defined b(phi) = (f, phi)
  *
- * In cuddh, a is assembled from the following operators:
- *
- *      StiffnessMatrix S;
- *      S.action(c, x, y); // y[i] <- y[i] + c * (grad x, grad phi[i]) where phi[i] is the i-th basis function
- *
- *      MassMatrix M;
- *      M.action(c, x, y); // y[i] <- y[i] + c * (a(x)^2 x, phi[i])
- *
- *      FaceMassMatrix H;
- *      H.action(c, x, y); // y[i] <- y[i] + c * <a(x)  x, phi[i]>
- *
- * The Helmholtz class combines these operations to define the bilinear form a(*,*).
+ * The Helmholtz class implements this discretization and solves the problem by solving a linear system with MINRES.
  *
  * To compile & run this program:
  *  (1) From the CuDDHelmholtz directory, compile the library:
@@ -45,23 +33,13 @@
  *      ./examples/Helmholtz
  *
  * The program will write the collocation points to `solution/xy.0000` in binary
- * format. The solution is written to `solution/helmholtz.0000` in binary
+ * format. The solution is written to `solution/uv.0000` in binary
  * format.
  *
- * This format can be read and visualized, for example, in Python using numpy and matplotlib via:
- *
- *      xy = numpy.fromfile("solution/xy.0000", order='F')
- *      xy = xy.reshape(2, -1)
- *      x, y = xy[0], xy[1]
- *
- *      uv = numpy.fromfile("solution/helmholtz.0000", order='F')
- *      uv = uv.reshape(-1, 2)
- *      U  = uv[:, 0] + 1j * uv[:, 1]
- *
- *      # visualize the modulus of U
- *      matplotlib.pyplot.tricontourf(x, y, np.abs(U))
+ * This format can be read and visualized, for example, in Python. See `visualize.py`.
  */
 
+#include "CLI11.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
 
@@ -92,17 +70,42 @@ __device__ static double a(const double X[2])
         return 1.0;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-    const int deg = 3;                       // polynomial degree of basis functions
-    const int nx = 64, ny = 64;              // number of elements along each direction. Mesh will have nx^2 elements
-    const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
+    int deg = 3;
+    std::vector<int> grid = {32};
+    double omega = -1.0;
+    int maxit = 10'000;
+    double rtol = 1e-3;
+    std::string verbose_str = "progress";
 
-    const SolverParams opts = {
-        .maxit = 100'000,                    // maximum number of iterations of MINRES
-        .rtol = 1e-5,                        // relative tolerance. MINRES stops when ||b-A*x|| < tol*||b||
-        .verbose = SolverParams::ProgressBar // verbosity level: ProgressBar, Iteration, or Silent
-    };
+    CLI::App app{"Helmholtz: Direct solver for the 2D Helmholtz equation"};
+    app.add_option("-p,--deg", deg, "Polynomial degree of basis functions")->default_val(3);
+    app.add_option("-n,--grid", grid, "Grid dimensions: nx [ny] (if ny omitted, ny=nx)")
+        ->expected(1, 2)
+        ->default_val("32");
+    app.add_option("-w,--omega", omega, "Helmholtz frequency (default: 0.1 * nx * deg)");
+    app.add_option("--maxit", maxit, "Maximum number of MINRES iterations")->default_val(10'000);
+    app.add_option("--rtol", rtol, "Relative tolerance for MINRES")->default_val(1e-3);
+    app.add_option("-v,--verbose", verbose_str, "Verbosity: silent | progress | iteration")
+        ->default_val("progress")
+        ->check(CLI::IsMember({"silent", "progress", "iteration"}, CLI::ignore_case));
+    CLI11_PARSE(app, argc, argv);
+
+    const int nx = grid[0];
+    const int ny = grid.size() > 1 ? grid[1] : grid[0];
+    if (omega < 0.0)
+        omega = 0.1 * nx * deg;
+
+    SolverParams::Verbosity verbosity;
+    if (CLI::detail::to_lower(verbose_str) == "silent")
+        verbosity = SolverParams::Silent;
+    else if (CLI::detail::to_lower(verbose_str) == "iteration")
+        verbosity = SolverParams::Iteration;
+    else
+        verbosity = SolverParams::ProgressBar;
+
+    const SolverParams opts = {.maxit = maxit, .rtol = rtol, .verbose = verbosity};
 
     // Assemble the mesh
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, ny, -1.0, 1.0);
@@ -163,7 +166,7 @@ int main()
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
 
     const char xy_file[] = "solution/xy.0000";
-    const char sol_file[] = "solution/helmholtz.0000";
+    const char sol_file[] = "solution/uv.0000";
     const char res_file[] = "solution/residuals.0000";
 
     if (to_file(xy_file, 2 * ndof, xy.data()))

@@ -5,10 +5,10 @@
  * @details This file is a driver for solving the Helmholtz equation with
  * approximate absorbing boundary conditions:
  *
- *      -div(grad U) - omega^2 a^2(x) U == f    in  D := [-1, 1]x[-1, 1]
- *      i a(x) omega U + dU/dn == 0             on boundary of D
+ *      -div(grad u) - omega^2 a^2(x) u == f    in  D := [-1, 1]x[-1, 1]
+ *      i a(x) omega u + du/dn == 0             on boundary of D
  *
- * Here omega is the frequency. We assume f is real valued, and U is complex
+ * Here omega is the frequency. We assume f is real valued, and u is complex
  * valued.
  *
  * The WaveHoltz class implements the finite element discretization of this equation,
@@ -24,27 +24,17 @@
  *     ./examples/WaveHoltz
  *
  * The program will write the collocation points to `solution/xy.0000` in binary
- * format. The solution is written to `solution/waveholtz.0000` in binary
+ * format. The solution is written to `solution/uv.0000` in binary
  * format.
  *
- * This format can be read and visualized, for example, in Python using numpy and matplotlib via:
- *
- *      xy = numpy.fromfile("solution/xy.0000", order='F')
- *      xy = xy.reshape(2, -1)
- *      x, y = xy[0], xy[1]
- *
- *      uv = numpy.fromfile("solution/ddh.0000", order='F')
- *      uv = uv.reshape(-1, 2)
- *      U  = uv[:, 0] + 1j * uv[:, 1]
- *
- *      # visualize the modulus of U
- *      matplotlib.pyplot.tricontourf(x, y, np.abs(U))
+ * This format can be read and visualized, for example, in Python. See `visualize.py`.
  */
 
 #include <format>
 
 #include "cuddh.hpp"
 #include "examples.hpp"
+#include "CLI11.hpp"
 
 using namespace cuddh;
 
@@ -73,18 +63,46 @@ __device__ static double alpha(const double X[2])
 
 constexpr double maxvel = 5.0; // maximum reciprocal of alpha
 
-int main()
+int main(int argc, char *argv[])
 {
-    const int deg = 3;                       // polynomial degree
-    const int nx = 64, ny = 64;              // number of elements in each direction
-    const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
+    int deg = 3;
+    std::vector<int> grid = {32};
+    double omega = -1.0;
+    int kdim = 50;
+    int edim = 20;
+    int maxit = 1000;
+    double rtol = 1e-3;
+    std::string verbose_str = "progress";
 
-    const int kdim = 50; // Krylov dimension.
-    const int edim = 20; // dimension of deflation space.
+    CLI::App app{"WaveHoltz: WaveHoltz solver for the 2D Helmholtz equation"};
+    app.add_option("-p,--deg", deg, "Polynomial degree of basis functions")->default_val(3);
+    app.add_option("-n,--grid", grid, "Grid dimensions: nx [ny] (if ny omitted, ny=nx)")
+        ->expected(1, 2)
+        ->default_val("32");
+    app.add_option("-w,--omega", omega, "Helmholtz frequency (default: 0.1 * nx * deg)")->default_val(-1.0);
+    app.add_option("-k,--kdim", kdim, "Krylov dimension for GCRO")->default_val(50);
+    app.add_option("-e,--edim", edim, "Deflation space dimension for GCRO")->default_val(20);
+    app.add_option("--maxit", maxit, "Maximum number of iterations")->default_val(1000);
+    app.add_option("--rtol", rtol, "Relative tolerance")->default_val(1e-3);
+    app.add_option("-v,--verbose", verbose_str, "Verbosity: silent | progress | iteration")
+        ->default_val("progress")
+        ->check(CLI::IsMember({"silent", "progress", "iteration"}, CLI::ignore_case));
+    CLI11_PARSE(app, argc, argv);
+
+    const int nx = grid[0];
+    const int ny = grid.size() > 1 ? grid[1] : grid[0];
+    if (omega < 0.0)
+        omega = 0.1 * nx * deg;
+
+    SolverParams::Verbosity verbosity;
+    if      (CLI::detail::to_lower(verbose_str) == "silent")    verbosity = SolverParams::Silent;
+    else if (CLI::detail::to_lower(verbose_str) == "iteration") verbosity = SolverParams::Iteration;
+    else                                                         verbosity = SolverParams::ProgressBar;
+
     const SolverParams opts = {
-        .maxit = 1000,                        // maximum number of iterations
-        .rtol = 1e-5,                         // relative tolerance
-        .verbose = SolverParams::ProgressBar, // verbosity level: ProgressBar, Iteration, or Silent
+        .maxit = maxit,
+        .rtol = rtol,
+        .verbose = verbosity,
     };
 
     // Create a uniform rectangular mesh
@@ -166,7 +184,7 @@ int main()
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
 
     auto xyfile = "solution/xy.0000";
-    auto solfile = "solution/waveholtz.0000";
+    auto solfile = "solution/uv.0000";
     auto resfile = "solution/residuals.0000";
 
     if (to_file(xyfile, 2 * ndof, xy.data()))
