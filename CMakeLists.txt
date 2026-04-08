@@ -79,7 +79,7 @@ else()
 endif()
 
 # Find and link CUDA runtime library (cudart)
-find_package(CUDAToolkit 12 REQUIRED)
+find_package(CUDAToolkit 13 REQUIRED)
 if(CUDAToolkit_FOUND)
     target_link_libraries(cuddh PUBLIC CUDA::cudart CUDA::cublas)
 else()
