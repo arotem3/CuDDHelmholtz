@@ -13,15 +13,14 @@ import pandas as pd
 
 MESHES: list[tuple[int, int]] = [
     (32, 32),
-    (64, 32),
     (64, 64),
-    (128, 64),
+    (96, 96),
     (128, 128),
-    (256, 128),
+    (192, 192),
     (256, 256),
-    (512, 256),
+    (384, 384),
     (512, 512),
-    (1024, 512),
+    (768, 768),
     (1024, 1024),
 ]
 DEGREES: list[int] = [1, 2, 3, 4, 7]
@@ -196,6 +195,10 @@ def candidate_subdomains(nx: int, ny: int) -> list[tuple[int, int]]:
     return result
 
 
+def scaling_omega(degree: int, nx: int, ny: int) -> float:
+    return 0.1 * degree * max(nx, ny)
+
+
 def build_plan(precision_mode: str) -> list[dict]:
     plan: list[dict] = []
     run_id = 1
@@ -222,7 +225,7 @@ def build_plan(precision_mode: str) -> list[dict]:
                             "sy": sy,
                             "block_size": block_size,
                             "tdof": tdof,
-                            "omega": 1.0,
+                            "omega": scaling_omega(degree, nx, ny),
                         }
                     )
                     run_id += 1
@@ -423,7 +426,7 @@ def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
 
         for metric, ylabel, suffix, log_y in [
             ("avg_ms", "Runtime [ms]", "runtime", False),
-            ("avg_rel_to_helmholtz", "DD Time / Operator Time", "relative", True),
+            ("avg_rel_to_helmholtz", "DD Time / Operator Time", "relative", False),
             ("throughput", "Throughput [MDOF/s]", "throughput", False),
         ]:
             fig, ax = plt.subplots(figsize=(6.6, 4.8), layout="constrained")
@@ -447,6 +450,12 @@ def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
                 ax.set_ylim(bottom=1)
             else:
                 ax.set_ylim(bottom=0)
+
+            if suffix == "relative":
+                ax.set_ylim(top=50)
+                ax.axhline(1.0, color="gray", linestyle="--", alpha=0.5)
+                ax.text(0.95, 1.05, r"$1\times$", transform=ax.get_yaxis_transform(), ha="right", va="bottom")
+
             _style_axes(ax)
             ax.set_xlabel("#DOFs")
             ax.set_ylabel(ylabel)
@@ -472,7 +481,7 @@ def plot_fixed_degree_kernel_comparison(df: pd.DataFrame, plot_dir: Path) -> Non
     sub = _single_precision(sub)
     sub["throughput"] = sub["n_dof"] / sub["avg_ms"] * 1e-3  # MDOF/s
 
-    degree_targets = [1, 3]
+    degree_targets = [1, 3, 7]
     palette = [plt.get_cmap("tab10")(i) for i in range(len(KERNEL_CONFIGS))]
     kernel_colors = dict(zip(KERNEL_CONFIGS, palette))
 
@@ -504,12 +513,12 @@ def plot_fixed_degree_kernel_comparison(df: pd.DataFrame, plot_dir: Path) -> Non
 
             _set_dof_xaxis(ax)
             ax.set_ylim(bottom=0)
+            if metric == 'throughput':
+                ax.set_ylim(top=550)
+
             _style_axes(ax)
             ax.set_xlabel("#DOFs")
             ax.set_ylabel(ylabel)
-            # ax.set_title(
-            #     f"Kernel comparison at fixed degree $p={deg}$ (single precision)"
-            # )
             ax.legend(title="Kernel", fontsize=9)
             fig.tight_layout()
             fig.savefig(
@@ -567,6 +576,7 @@ def plot_precision_ratio(df: pd.DataFrame, plot_dir: Path) -> None:
 
     _set_dof_xaxis(ax)
     _style_axes(ax)
+    ax.set_ylim(bottom=0)
     ax.set_xlabel("#DOFs")
     ax.set_ylabel("Runtime ratio (double / single)")
     ax.set_title(r"Precision overhead ($B=1024, K=1$)")
