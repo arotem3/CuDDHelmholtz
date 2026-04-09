@@ -100,11 +100,9 @@ public:
 };
 
 template <typename scalar_t, int NB, int NEL, int TDOF = 1>
-__global__ __launch_bounds__(NB * NB * NEL) void ddh_action_kernel(const DDHKernelData<scalar_t, NB, NEL, TDOF> helper,
-                                                                   const double *const __restrict__ x,
-                                                                   double *const __restrict__ y,
-                                                                   const scalar_t *const __restrict__ d_lambda,
-                                                                   scalar_t *const __restrict__ d_update)
+__global__ __launch_bounds__(NB * NB * NEL, 1024 / (NB * NB * NEL)) void ddh_action_kernel(
+    const DDHKernelData<scalar_t, NB, NEL, TDOF> helper, const double *const __restrict__ x,
+    double *const __restrict__ y, const scalar_t *const __restrict__ d_lambda, scalar_t *const __restrict__ d_update)
 {
     constexpr int EDOF = NB * NB;
     [[maybe_unused]] constexpr int BDOF = EDOF * NEL;
