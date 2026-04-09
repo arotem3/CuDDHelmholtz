@@ -292,8 +292,9 @@ def _get_vals(df: pd.DataFrame, configs: list, key: str) -> list[float]:
 def _pynvml_query() -> dict:
     """
     Query the first GPU via pynvml.  Returns a dict with:
-      name            str   GPU product name
-      peak_dram_gbs   float peak DRAM bandwidth (GB/s)
+      name              str   GPU product name
+      peak_dram_gbs     float peak DRAM bandwidth (GB/s)
+      peak_fp32_gflops  float peak FP32 throughput (GFLOP/s)
     Returns an empty dict on any failure.
     """
     try:
@@ -304,10 +305,14 @@ def _pynvml_query() -> dict:
         name = pynvml.nvmlDeviceGetName(handle)
         mem_clock_mhz = pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_MEM)
         bus_width_bits = pynvml.nvmlDeviceGetMemoryBusWidth(handle)
+        sm_clock_mhz = pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM)
+        cuda_cores = pynvml.nvmlDeviceGetNumGpuCores(handle)
         pynvml.nvmlShutdown()
         # DDR: factor of 2 for double data rate
         peak_bw = 2.0 * mem_clock_mhz * 1e6 * (bus_width_bits / 8) / 1e9
-        return {"name": name, "peak_dram_gbs": peak_bw}
+        # Each CUDA core does 2 FLOPs per cycle (FMA = 1 multiply + 1 add)
+        peak_fp32 = cuda_cores * 2 * sm_clock_mhz * 1e6 / 1e9
+        return {"name": name, "peak_dram_gbs": peak_bw, "peak_fp32_gflops": peak_fp32}
     except Exception:
         return {}
 
@@ -367,7 +372,12 @@ def plot_roofline(df: pd.DataFrame, plot_dir: Path) -> None:
     peak_dram_gbs = gpu_info.get("peak_dram_gbs") or float(
         df["peak_dram_gbs_ncu"].median()
     )
-    peak_fp32_gflops = float(df["peak_fp32_gflops_ncu"].median())
+    # Prefer hardware-derived peak FP32 (cuda_cores × 2 × SM_clock) over the
+    # ncu-inferred estimate, which uses SM throughput % and underestimates
+    # when the kernel issues many non-FP32 instructions.
+    peak_fp32_gflops = gpu_info.get("peak_fp32_gflops") or float(
+        df["peak_fp32_gflops_ncu"].median()
+    )
 
     gpu_name = gpu_info.get("name")
     title = f"Roofline Model — {gpu_name}" if gpu_name else "Roofline Model"
@@ -379,12 +389,12 @@ def plot_roofline(df: pd.DataFrame, plot_dir: Path) -> None:
     all_ai = df["arith_int"].dropna()
     ridge_ai = peak_fp32_gflops / peak_dram_gbs  # FLOP/Byte
 
-    log_ai_lo = np.floor(np.log10(all_ai.min())) - 0.3
+    log_ai_lo = np.floor(np.log10(all_ai.min())) - 1
     log_ridge = np.log10(ridge_ai)
-    # Extend right of ridge by ~40% of the memory-bound log-span
-    log_ai_hi = log_ridge + (log_ridge - log_ai_lo) * 0.4
-    ai_lo = 1**log_ai_lo
-    ai_hi = 1000**log_ai_hi
+    
+    log_ai_hi = log_ridge + (log_ridge - log_ai_lo) * 2
+    ai_lo = 10**log_ai_lo
+    ai_hi = 10**log_ai_hi
 
     # y lower bound: base on actual data so points below the theoretical memory
     # line (from incomplete DRAM utilization) are never clipped.
@@ -479,7 +489,7 @@ def plot_roofline(df: pd.DataFrame, plot_dir: Path) -> None:
     ax.set_xlabel("Arithmetic Intensity [FLOP/Byte]")
     ax.set_ylabel("Performance [GFLOP/s]")
     ax.set_title(title)
-    ax.legend(title="Kernel", fontsize=8, title_fontsize=8, loc="upper left")
+    ax.legend(title="Kernel", fontsize=8, title_fontsize=8)
     ax.grid(True, which="both", ls="--", lw=0.4, alpha=0.5)
 
     fig.savefig(plot_dir / "roofline.pdf", bbox_inches="tight")
