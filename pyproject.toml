@@ -6,5 +6,6 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.2.6",
     "pandas>=2.3.3",
+    "nvidia-ml-py",
     "scipy>=1.15.3",
 ]
