@@ -6,7 +6,7 @@ template <typename real_t>
 static void run_minres_test(TestLogger &summary, std::string_view precision, double rtol)
 {
     auto a = sym_test_mat<real_t>();
-    const int n = a.size();
+    const int n = a.ndof();
 
     thrust::universal_vector<real_t> _x_exact(n);
     thrust::device_vector<real_t> _x(n);
@@ -26,7 +26,7 @@ static void run_minres_test(TestLogger &summary, std::string_view precision, dou
     dla::zeros(n, x);
 
     const SolverParams opts = {.maxit = n, .rtol = rtol, .atol = 0.0, .verbose = SolverParams::ProgressBar};
-    auto out = cuddh::minres(n, x, a, b, opts);
+    auto out = cuddh::minres(x, a, b, opts);
 
     a.action(x, r);
     dla::axpby(n, static_cast<real_t>(1.0), b, static_cast<real_t>(-1.0), r);

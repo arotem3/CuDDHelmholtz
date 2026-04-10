@@ -30,7 +30,6 @@ namespace cuddh
     private:
         const H1Space2D &fem;
 
-        const int ndof;
         const int n_elem;
         const int n_basis;
 

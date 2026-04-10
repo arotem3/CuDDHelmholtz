@@ -8,7 +8,7 @@ static void run_fgmres_test(TestLogger &summary, std::string_view precision, dou
     std::srand(1337);
 
     auto A = asym_test_mat<real_t>();
-    const int n = A.size();
+    const int n = A.ndof();
 
     thrust::universal_vector<real_t> _x_exact(n);
     thrust::device_vector<real_t> _x(n);
@@ -37,7 +37,7 @@ static void run_fgmres_test(TestLogger &summary, std::string_view precision, dou
     {
         dla::zeros(n, x);
 
-        const SolverResults out = fgmres(n, x, A, b, 50, nullptr, opts);
+        const SolverResults out = fgmres(x, A, b, 50, nullptr, opts);
 
         A.action(x, r);
         dla::axpby(n, static_cast<real_t>(1.0), b, static_cast<real_t>(-1.0), r);
@@ -63,7 +63,7 @@ static void run_fgmres_test(TestLogger &summary, std::string_view precision, dou
         dla::zeros(n, x);
         InexactPreconditioner<real_t> M(n, A);
 
-        const SolverResults out = fgmres(n, x, A, b, 50, &M, opts);
+        const SolverResults out = fgmres(x, A, b, 50, &M, opts);
 
         A.action(x, r);
         dla::axpby(n, static_cast<real_t>(1.0), b, static_cast<real_t>(-1.0), r);

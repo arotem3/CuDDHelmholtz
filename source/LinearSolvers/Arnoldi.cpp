@@ -8,6 +8,8 @@ int BaseArnoldiSolver<real_t>::arnoldi_cycle(SolverLogger &logger, int m, int k,
 {
     constexpr real_t zero(0.0), one(1.0), eps{64 * std::numeric_limits<real_t>::epsilon()};
 
+    const int n = A->ndof();
+
     cuddh_verify(0 <= k && k <= kdim,
                  printf("The augmented dimension k = %d must be in the range [0, kdim = %d]\n", k, kdim));
     cuddh_verify(0 <= m && m <= kdim, printf("Krylov dimension m = %d must be in the range [0, kdim = %d]\n", m, kdim));
@@ -117,25 +119,23 @@ int BaseArnoldiSolver<real_t>::arnoldi_cycle(SolverLogger &logger, int m, int k,
 }
 
 template <typename real_t>
-BaseArnoldiSolver<real_t>::BaseArnoldiSolver(int n, const Operator<real_t> &A, const Operator<real_t> *M, int kdim,
+BaseArnoldiSolver<real_t>::BaseArnoldiSolver(const Operator<real_t> &A, const Operator<real_t> *M, int kdim,
                                              bool flexible)
-    : n{n},
-      kdim{kdim <= n ? kdim : n},
+    : kdim{kdim <= A.ndof() ? kdim : A.ndof()},
       flexible{flexible},
       A{&A},
       M{M},
-      _W(n * (kdim + 1)),
+      _W(A.ndof() * (kdim + 1)),
       H(kdim + 1, kdim),
       Hqr(kdim + 1, kdim),
       eta(kdim + 1),
       cs(kdim),
       sn(kdim)
 {
-    cuddh_verify(n >= 0, printf("solver error: n = %d must be non-negative.\n", n));
     cuddh_verify(kdim >= 0, printf("solver error: kdim = %d must be non-negative.\n", kdim));
 
     if (flexible)
-        _Z.resize(n * kdim);
+        _Z.resize(A.ndof() * kdim);
 }
 
 template class BaseArnoldiSolver<float>;

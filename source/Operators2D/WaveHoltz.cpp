@@ -4,7 +4,13 @@ using namespace cuddh;
 
 WaveHoltz::WaveHoltz(double omega, double maxvel, const double *a2x, const double *ax, const H1Space2D &fem,
                      const TraceSpace2D &fs)
-    : omega(omega), ndof(fem.size()), stiffness(fem), mass(fem, a2x), face_mass(fs, ax), acc(ndof), w(2 * ndof)
+    : Operator<double>(2 * fem.size()),
+      omega(omega),
+      stiffness(fem),
+      mass(fem, a2x),
+      face_mass(fs, ax),
+      acc(fem.size()),
+      w(this->ndof())
 {
     double T = 2.0 * M_PI / omega;
     double p = fem.basis().size();
@@ -19,14 +25,14 @@ WaveHoltz::WaveHoltz(double omega, double maxvel, const double *a2x, const doubl
 
 void WaveHoltz::action(double c, const double *x, double *y) const
 {
-    dla::axpby(2 * ndof, c, x, 1.0, y); // y <- y + c * x
-    S(-c, x, y);                        // y <- y - c * S(x) = y + c * (I - S) * x
+    dla::axpby(this->ndof(), c, x, 1.0, y); // y <- y + c * x
+    S(-c, x, y);                            // y <- y - c * S(x) = y + c * (I - S) * x
 }
 
 void WaveHoltz::action(const double *x, double *y) const
 {
-    dla::copy(2 * ndof, x, y); // y <- x
-    S(-1.0, x, y);             // y <- y - S(x) = x - S(x)
+    dla::copy(this->ndof(), x, y); // y <- x
+    S(-1.0, x, y);                 // y <- y - S(x) = x - S(x)
 }
 
 void WaveHoltz::evolve_project(double C, const double *d_u, const double *d_f, double *d_out) const
@@ -36,7 +42,7 @@ void WaveHoltz::evolve_project(double C, const double *d_u, const double *d_f, d
 
     cuddh_verify(d_out != nullptr, printf("WaveHoltz::evolve_project: d_out is null"));
 
-    const int ndof = this->ndof;
+    const int ndof = this->ndof() / 2;
     const double theta = std::tan(M_PI / nt) / omega;
     const double sigma = std::sin(M_PI / nt) / (0.5 * omega);
 

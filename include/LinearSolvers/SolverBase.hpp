@@ -35,6 +35,24 @@ namespace cuddh
         Verbosity verbose = Silent; // 0: silent, 1: progress bar, 2: one line per iteration
     };
 
+    template <typename scalar_t>
+    class Solver
+    {
+    public:
+        Solver(int n) : _n{n} {}
+        virtual ~Solver() = default;
+
+        constexpr int ndof() const { return _n; }
+
+        virtual SolverResults solve(scalar_t *x, const scalar_t *b, SolverParams opts = {}) const = 0;
+
+    protected:
+        constexpr void set_size(int n) { _n = n; }
+
+    private:
+        int _n;
+    };
+
     inline void validate_params(const SolverParams &opts)
     {
         cuddh_verify(opts.maxit > 0, printf("solver error: maxit = %d must be positive\n", opts.maxit));

@@ -6,7 +6,7 @@ template <typename real_t>
 static void run_gmres_test(TestLogger &summary, std::string_view precision, double rtol)
 {
     auto a = asym_test_mat<real_t>();
-    const int n = a.size();
+    const int n = a.ndof();
 
     thrust::universal_vector<real_t> _x_exact(n);
     thrust::device_vector<real_t> _x(n);
@@ -26,7 +26,7 @@ static void run_gmres_test(TestLogger &summary, std::string_view precision, doub
     dla::zeros(n, x);
 
     const SolverParams opts = {.maxit = 1000, .rtol = rtol, .atol = 0.0, .verbose = SolverParams::ProgressBar};
-    auto out = gmres(n, x, a, b, 50, nullptr, opts);
+    auto out = gmres(x, a, b, 50, nullptr, opts);
 
     a.action(x, r);
     dla::axpby(n, static_cast<real_t>(1.0), b, static_cast<real_t>(-1.0), r);

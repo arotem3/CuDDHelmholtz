@@ -3,12 +3,18 @@
 using namespace cuddh;
 
 template <typename real_t>
-GCRO<real_t>::GCRO(int n, Operator<real_t> &A, Operator<real_t> *M, int kdim, int edim)
-    : BaseArnoldiSolver<real_t>(n, A, M, kdim, true), edim{edim}, active_edim{0}, update_deflation{true}, _r(n)
+GCRO<real_t>::GCRO(Operator<real_t> &A, Operator<real_t> *M, int kdim, int edim)
+    : Solver<real_t>(A.ndof()),
+      BaseArnoldiSolver<real_t>(A, M, kdim, true),
+      edim{edim},
+      active_edim{0},
+      update_deflation{true},
+      _r(A.ndof())
 {
-    cuddh_verify(n >= 0, printf("GCRO: n must be non-negative"));
-    cuddh_verify(edim >= 0, printf("GCRO: edim must be non-negative"));
-    cuddh_verify(kdim > edim + 1, printf("GCRO: kdim must be greater than edim+1"));
+    cuddh_verify(!M || M->ndof() == A.ndof(),
+                 printf("GCRO: preconditioner M.ndof(=%d) must equal operator A.ndof(=%d)\n", M->ndof(), A.ndof()));
+    cuddh_verify(edim >= 0, printf("GCRO: edim must be non-negative\n"));
+    cuddh_verify(kdim > edim + 1, printf("GCRO: kdim must be greater than edim+1\n"));
     cublasCreate(&cublas_handle);
 }
 
@@ -18,6 +24,8 @@ SolverResults GCRO<real_t>::solve(real_t *x, const real_t *b, SolverParams opts)
     validate_params(opts);
 
     SolverLogger logger(opts.verbose, opts.maxit);
+
+    const int n = this->ndof();
 
     const real_t bnrm = dla::norm(n, b);
     const real_t tol = std::max(opts.rtol * bnrm, opts.atol);
@@ -51,6 +59,7 @@ SolverResults GCRO<real_t>::solve(real_t *x, const real_t *b, SolverParams opts)
 template <typename real_t>
 void GCRO<real_t>::deflate(real_t *x, real_t *r) const
 {
+    const int n = this->ndof();
     auto W = thrust::raw_pointer_cast(_W.data());
     auto Z = thrust::raw_pointer_cast(_Z.data());
 
@@ -68,6 +77,7 @@ template <typename real_t>
 void GCRO<real_t>::compute_deflation_ritz_vecs(int m) const
 {
     constexpr real_t zero(0.0), one(1.0);
+    const int n = this->ndof();
     const int k = std::min(m, edim);
 
     // X = H[:m+1, :m]' * H[:m+1, :m]

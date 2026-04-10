@@ -32,9 +32,9 @@
 
 #include <format>
 
+#include "CLI11.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
-#include "CLI11.hpp"
 
 using namespace cuddh;
 
@@ -95,9 +95,12 @@ int main(int argc, char *argv[])
         omega = 0.1 * nx * deg;
 
     SolverParams::Verbosity verbosity;
-    if      (CLI::detail::to_lower(verbose_str) == "silent")    verbosity = SolverParams::Silent;
-    else if (CLI::detail::to_lower(verbose_str) == "iteration") verbosity = SolverParams::Iteration;
-    else                                                         verbosity = SolverParams::ProgressBar;
+    if (CLI::detail::to_lower(verbose_str) == "silent")
+        verbosity = SolverParams::Silent;
+    else if (CLI::detail::to_lower(verbose_str) == "iteration")
+        verbosity = SolverParams::Iteration;
+    else
+        verbosity = SolverParams::ProgressBar;
 
     const SolverParams opts = {
         .maxit = maxit,
@@ -150,7 +153,7 @@ int main(int argc, char *argv[])
 
     // Solve the system using GMRES
     W.G(b, Gb); // apply G to the right-hand side vector
-    SolverResults out = GCRO<double>(N, W, nullptr, kdim, edim).solve(u, Gb, opts);
+    SolverResults out = GCRO<double>(W, nullptr, kdim, edim).solve(u, Gb, opts);
 
     double res_norm = [&]() {
         thrust::universal_vector<double> Res(N);
@@ -178,7 +181,7 @@ int main(int argc, char *argv[])
 
     CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
 
-    std::cout << "Helmholtz Residual ||A u - b|| / ||b|| ~ " << res_norm << std::endl;
+    std::cout << std::format("Helmholtz residual |b - A u| / |b| ~ {:.2e}", res_norm) << std::endl;
 
     // save the solution to a file
     auto xy = fem.physical_coordinates(MemorySpace::HOST);

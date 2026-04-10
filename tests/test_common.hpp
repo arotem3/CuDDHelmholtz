@@ -94,7 +94,7 @@ class TestMatrix : public cuddh::Operator<scalar_t>
 {
 public:
     TestMatrix(int n1d, scalar_t epsilon_, scalar_t vx_, scalar_t vy_)
-        : n{n1d}, ndof{n * n}, epsilon{epsilon_}, vx{vx_}, vy{vy_}
+        : cuddh::Operator<scalar_t>(n1d * n1d), n{n1d}, epsilon{epsilon_}, vx{vx_}, vy{vy_}
     {}
 
     constexpr ~TestMatrix() = default;
@@ -103,7 +103,7 @@ public:
     {
         const scalar_t h = 1.0 / (n - 1);
 
-        cuddh::forall(ndof, [=, *this] __device__(int idx) -> void {
+        cuddh::forall(this->ndof(), [=, *this] __device__(int idx) -> void {
             int i = idx / n;
             int j = idx % n;
 
@@ -132,10 +132,8 @@ public:
         cuddh_verify(false, printf("Not Implemented."));
     }
 
-    constexpr int size() { return ndof; }
-
 private:
-    int n, ndof;
+    int n;
     scalar_t epsilon, vx, vy;
 };
 
@@ -155,13 +153,13 @@ template <typename scalar_t>
 class InexactPreconditioner : public cuddh::Operator<scalar_t>
 {
 public:
-    InexactPreconditioner(int n_, const cuddh::Operator<scalar_t> &A_) : n{n_}, A{&A_} {}
+    InexactPreconditioner(int n_, const cuddh::Operator<scalar_t> &A_) : cuddh::Operator<scalar_t>(n_), A{&A_} {}
 
     void action(const scalar_t *x, scalar_t *y) const override
     {
         using namespace cuddh;
-        dla::zeros(n, y);
-        gmres(n, y, *A, x, 5, nullptr, {.maxit = 5, .rtol = 1e-2, .atol = 0.0, .verbose = SolverParams::Silent});
+        dla::zeros(this->ndof(), y);
+        gmres(y, *A, x, 5, nullptr, {.maxit = 5, .rtol = 1e-2, .atol = 0.0, .verbose = SolverParams::Silent});
     }
 
     void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
@@ -170,6 +168,5 @@ public:
     }
 
 private:
-    int n;
     const cuddh::Operator<scalar_t> *A;
 };

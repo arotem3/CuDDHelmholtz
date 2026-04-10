@@ -48,27 +48,29 @@ static void init_face_mass(const TraceSpace3D &tr, const double *d_a, double *d_
 
 Helmholtz3D::Helmholtz3D(double omega_, const double *a2x, const double *ax, const H1Space3D &fem,
                          const TraceSpace3D &tr)
-    : omega{omega_}, ndof{fem.size()}, S(fem), M(a2x, fem), H(ndof)
+    : Operator<double>(2 * fem.size()), omega{omega_}, S(fem), M(a2x, fem), H(fem.size())
 {
     init_face_mass(tr, ax, H.device_write());
 }
 
 void Helmholtz3D::action(const double *x, double *y) const
 {
+    const int n = this->ndof() / 2;
+
     const double *u = x;
-    const double *v = x + ndof;
+    const double *v = x + n;
 
     double *Au = y;
-    double *Av = y + ndof;
+    double *Av = y + n;
 
     S.action(u, Au);
     S.action(v, Av);
 
     double omega = this->omega;
     auto m = diagonal_mass(M, MemorySpace::DEVICE);
-    auto h = reshape(H.device_read(), ndof);
+    auto h = reshape(H.device_read(), n);
 
-    forall(ndof, [=] __device__(int i) -> void {
+    forall(n, [=] __device__(int i) -> void {
         const double mi = m[i];
         const double hi = h[i];
 

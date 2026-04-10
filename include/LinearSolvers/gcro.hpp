@@ -11,10 +11,10 @@ namespace cuddh
      * @tparam real_t
      */
     template <typename real_t>
-    class GCRO : private BaseArnoldiSolver<real_t>
+    class GCRO : public Solver<real_t>, private BaseArnoldiSolver<real_t>
     {
     public:
-        GCRO(int n, Operator<real_t> &A, Operator<real_t> *M = nullptr, int kdim = 40, int edim = 20);
+        GCRO(Operator<real_t> &A, Operator<real_t> *M = nullptr, int kdim = 40, int edim = 20);
 
         ~GCRO() { cublasDestroy(cublas_handle); }
 
@@ -22,7 +22,7 @@ namespace cuddh
 
         constexpr void reset_deflation() { active_edim = 0; }
 
-        SolverResults solve(real_t *x, const real_t *b, SolverParams opts = {}) const;
+        SolverResults solve(real_t *x, const real_t *b, SolverParams opts = {}) const override;
 
     private:
         // apply deflation correction
@@ -33,7 +33,6 @@ namespace cuddh
 
     private:
         using BaseArnoldiSolver<real_t>::kdim;
-        using BaseArnoldiSolver<real_t>::n;
         using BaseArnoldiSolver<real_t>::_W;
         using BaseArnoldiSolver<real_t>::_Z;
         using BaseArnoldiSolver<real_t>::H;

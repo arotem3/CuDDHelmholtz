@@ -23,7 +23,7 @@ namespace cuddh
         /// @brief Gf <- G * f
         inline void G(const double *f, double *Gf) const
         {
-            dla::zeros(2 * ndof, Gf);            // Gf <- 0
+            dla::zeros(this->ndof(), Gf);        // Gf <- 0
             evolve_project(1.0, nullptr, f, Gf); // Gf <- G * f
         }
 
@@ -38,7 +38,6 @@ namespace cuddh
 
     private:
         const double omega; // Helmholtz frequency
-        const int ndof;     // number of degrees of freedom
 
         int nt;
         double shift;

@@ -84,11 +84,13 @@ static HostDeviceArray<double2> make_alpha_beta(double theta, double sigma, cons
 
 WaveHoltz3D::WaveHoltz3D(double omega, const double *a2x, const double *ax, const H1Space3D &fem,
                          const TraceSpace3D &fs)
-    : omega(omega), ndof(fem.size()), stiffness(fem), acc(ndof), w(2 * ndof)
+    : Operator<double>(2 * fem.size()), omega(omega), stiffness(fem), acc(fem.size()), w(this->ndof())
 {
+    const int n = this->ndof() / 2;
+
     const double maxvel = [&]() -> double {
         auto iter = thrust::device_pointer_cast(a2x);
-        double amin = *thrust::min_element(iter, iter + ndof);
+        double amin = *thrust::min_element(iter, iter + n);
         return 1.0 / std::sqrt(amin);
     }();
 
@@ -109,14 +111,14 @@ WaveHoltz3D::WaveHoltz3D(double omega, const double *a2x, const double *ax, cons
 
 void WaveHoltz3D::action(double c, const double *x, double *y) const
 {
-    dla::axpby(2 * ndof, c, x, 1.0, y); // y <- y + c * x
-    S(-c, x, y);                        // y <- y - c * S(x) = y + c * (I - S) * x
+    dla::axpby(this->ndof(), c, x, 1.0, y); // y <- y + c * x
+    S(-c, x, y);                            // y <- y - c * S(x) = y + c * (I - S) * x
 }
 
 void WaveHoltz3D::action(const double *x, double *y) const
 {
-    dla::copy(2 * ndof, x, y); // y <- x
-    S(-1.0, x, y);             // y <- y - S(x) = y + (I - S) * x
+    dla::copy(this->ndof(), x, y); // y <- x
+    S(-1.0, x, y);                 // y <- y - S(x) = y + (I - S) * x
 }
 
 void WaveHoltz3D::evolve_project(double C, const double *d_u, const double *d_f, double *d_out) const
@@ -126,7 +128,7 @@ void WaveHoltz3D::evolve_project(double C, const double *d_u, const double *d_f,
 
     cuddh_verify(d_out != nullptr, printf("WaveHoltz3D::evolve_project: d_out is null"));
 
-    const int ndof = this->ndof;
+    const int ndof = this->ndof() / 2;
     const double sigma = std::sin(M_PI / nt) / (0.5 * omega);
 
     double *d_w = w.device_write();

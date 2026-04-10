@@ -219,7 +219,8 @@ template <typename scalar_t, SubdomainSolver Solver>
 DDSubstructuredOperator<scalar_t, Solver>::DDSubstructuredOperator(double omega, const double *h_a,
                                                                    const H1Space2D &fem, const EnsembleSpace &efem,
                                                                    DDKernelConfig config, int waveholtz_iterations)
-    : DDSolverData<scalar_t, Solver>{
+    : Operator<scalar_t>(0),
+      DDSolverData<scalar_t, Solver>{
           MakeSolverData<scalar_t, Solver>::make(omega, h_a, fem, efem, waveholtz_iterations)},
       g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
@@ -243,6 +244,7 @@ DDSubstructuredOperator<scalar_t, Solver>::DDSubstructuredOperator(double omega,
     _partition_of_unity = partition_of_unity<scalar_t>(fem, efem);
     CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
     n_lambda = lambda_dofs(_B, efem, omega, reshape(h_a, fem.size()));
+    this->set_size(2 * n_lambda);
 }
 
 template <typename scalar_t, SubdomainSolver Solver>

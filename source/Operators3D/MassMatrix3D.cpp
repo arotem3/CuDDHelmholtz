@@ -48,12 +48,14 @@ static void init_mass(const H1Space3D &fem, const double *d_a, double *d_M)
     });
 }
 
-MassMatrix3D::MassMatrix3D(const H1Space3D &fem) : fem{fem}, _m(fem.size())
+MassMatrix3D::MassMatrix3D(const H1Space3D &fem)
+    : Operator<double>(fem.size()), fem{fem}, _m(fem.size())
 {
     init_mass(fem, nullptr, _m.device_write());
 }
 
-MassMatrix3D::MassMatrix3D(const double *d_a, const H1Space3D &fem) : fem{fem}, _m(fem.size())
+MassMatrix3D::MassMatrix3D(const double *d_a, const H1Space3D &fem)
+    : Operator<double>(fem.size()), fem{fem}, _m(fem.size())
 {
     init_mass(fem, d_a, _m.device_write());
 }
@@ -90,19 +92,22 @@ static void inv_mass(int n, double *d_m)
     forall(n, [=] __device__(int i) -> void { d_m[i] = 1.0 / d_m[i]; });
 }
 
-InvMassMatrix3D::InvMassMatrix3D(const H1Space3D &fem) : fem{fem}, _mi(fem.size())
+InvMassMatrix3D::InvMassMatrix3D(const H1Space3D &fem)
+    : Operator<double>(fem.size()), fem{fem}, _mi(fem.size())
 {
     init_mass(fem, nullptr, _mi.device_write());
     inv_mass(fem.size(), _mi.device_write());
 }
 
-InvMassMatrix3D::InvMassMatrix3D(const double *d_a, const H1Space3D &fem) : fem{fem}, _mi(fem.size())
+InvMassMatrix3D::InvMassMatrix3D(const double *d_a, const H1Space3D &fem)
+    : Operator<double>(fem.size()), fem{fem}, _mi(fem.size())
 {
     init_mass(fem, d_a, _mi.device_write());
     inv_mass(fem.size(), _mi.device_write());
 }
 
-InvMassMatrix3D::InvMassMatrix3D(const MassMatrix3D &M) : fem{M.fem}, _mi(fem.size())
+InvMassMatrix3D::InvMassMatrix3D(const MassMatrix3D &M)
+    : Operator<double>(M.fem.size()), fem{M.fem}, _mi(fem.size())
 {
     const double *d_m = M._m.device_read();
     double *d_mi = _mi.device_write();

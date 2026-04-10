@@ -20,8 +20,10 @@ struct axpby_op
 };
 
 template <typename real_t>
-static bool _is_symmetric(int n, const cuddh::Operator<real_t> &A, real_t tol)
+static bool _is_symmetric(const cuddh::Operator<real_t> &A, real_t tol)
 {
+    const int n = A.ndof();
+
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_real_distribution<real_t> dist(0., 1.);
@@ -156,13 +158,13 @@ namespace cuddh::dla
         thrust::fill(px, px + n, a);
     }
 
-    bool is_symmetric(int n, const Operator<float> &A, float tol)
+    bool is_symmetric(const Operator<float> &A, float tol)
     {
-        return _is_symmetric(n, A, tol);
+        return _is_symmetric(A, tol);
     }
 
-    bool is_symmetric(int n, const Operator<double> &A, double tol)
+    bool is_symmetric(const Operator<double> &A, double tol)
     {
-        return _is_symmetric(n, A, tol);
+        return _is_symmetric(A, tol);
     }
 } // namespace cuddh::dla

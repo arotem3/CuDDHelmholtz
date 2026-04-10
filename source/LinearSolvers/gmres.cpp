@@ -3,8 +3,8 @@
 using namespace cuddh;
 
 template <typename real_t>
-GMRES<real_t>::GMRES(int n, const Operator<real_t> &A, const Operator<real_t> *M, int kdim, bool flexible)
-    : BaseArnoldiSolver<real_t>(n, A, M, kdim, flexible), _r(n)
+GMRES<real_t>::GMRES(const Operator<real_t> &A, const Operator<real_t> *M, int kdim, bool flexible)
+    : Solver<real_t>(A.ndof()), BaseArnoldiSolver<real_t>(A, M, kdim, flexible), _r(A.ndof())
 {}
 
 template <typename real_t>
@@ -13,6 +13,8 @@ SolverResults GMRES<real_t>::solve(real_t *x, const real_t *b, SolverParams opts
     validate_params(opts);
 
     SolverLogger logger(opts.verbose, opts.maxit);
+
+    const int n = this->ndof();
 
     const real_t bnrm = dla::norm(n, b);
     const real_t tol = std::max(opts.rtol * bnrm, opts.atol);

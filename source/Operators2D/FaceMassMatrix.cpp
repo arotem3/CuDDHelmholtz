@@ -38,6 +38,7 @@ static thrust::universal_vector<double> construct_face_mass(const TraceSpace2D &
 }
 
 cuddh::FaceMassMatrix::FaceMassMatrix(const TraceSpace2D &fs, const double *d_a)
+    : Operator<double>(fs.h1_space().size())
 {
     _m = construct_face_mass(fs, d_a);
 }

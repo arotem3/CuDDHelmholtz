@@ -8,7 +8,7 @@ namespace cuddh
     class BaseArnoldiSolver
     {
     public:
-        BaseArnoldiSolver(int n, const Operator<real_t> &A, const Operator<real_t> *M, int kdim, bool flexible);
+        BaseArnoldiSolver(const Operator<real_t> &A, const Operator<real_t> *M, int kdim, bool flexible);
 
         int arnoldi_cycle(SolverLogger &logger, int m, int k, real_t *x, real_t *r, real_t &rnrm, real_t bnrm,
                           real_t tol) const;
@@ -17,7 +17,7 @@ namespace cuddh
         {
             auto res = [&](const real_t *in, real_t *out) {
                 A->action(in, out);
-                dla::axpby(n, real_t(1.0), b, real_t(-1.0), out);
+                dla::axpby(A->ndof(), real_t(1.0), b, real_t(-1.0), out);
             };
 
             if (M && !flexible)
@@ -31,7 +31,6 @@ namespace cuddh
         }
 
     protected:
-        const int n;
         const int kdim;
         const bool flexible;
 

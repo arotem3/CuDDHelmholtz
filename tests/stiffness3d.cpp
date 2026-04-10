@@ -48,7 +48,7 @@ static void run_stiffness3d_case(TestLogger &summary, const Mesh3D &mesh, const 
 
     StiffnessMatrix3D A(fem);
 
-    if (dla::is_symmetric(ndof, A, 1e-10))
+    if (dla::is_symmetric(A, 1e-10))
         summary.pass(std::format("stiffness3d {} is symmetric.", test_name));
     else
         summary.fail(std::format("stiffness3d {} is not symmetric.", test_name), "|x'Ay - y'Ax| > 1e-10.");

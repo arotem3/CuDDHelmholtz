@@ -35,7 +35,7 @@ static inline thrust::universal_vector<double> compute_mass_matrix(const H1Space
     return _m;
 }
 
-cuddh::MassMatrix::MassMatrix(const H1Space2D &fem_, const double *a_) : fem(fem_)
+cuddh::MassMatrix::MassMatrix(const H1Space2D &fem_, const double *a_) : Operator<double>(fem_.size()), fem(fem_)
 {
     _m = compute_mass_matrix(fem_, a_);
 }

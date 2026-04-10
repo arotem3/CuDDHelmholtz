@@ -159,7 +159,7 @@ int main(int argc, char *argv[])
 
     // solve a([u, v], phi) = b(phi)
     std::cout << "\nsolving with MINRES ... \n";
-    auto out = minres(N, u, A, b, opts);
+    auto out = minres(u, A, b, opts);
     CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
 
     // save solution and collocation nodes to file

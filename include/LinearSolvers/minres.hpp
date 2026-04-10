@@ -5,15 +5,23 @@
 namespace cuddh
 {
     template <typename real_t>
-    class MINRES
+    class MINRES : public Solver<real_t>
     {
     public:
-        MINRES(int n, const Operator<real_t> &A) : n{n}, A{A}, _r(n), _v(n), _w(n), _wp(n), _vp(n), _wpp(n) {}
+        MINRES(const Operator<real_t> &A)
+            : Solver<real_t>(A.ndof()),
+              A{A},
+              _r(A.ndof()),
+              _v(A.ndof()),
+              _w(A.ndof()),
+              _wp(A.ndof()),
+              _vp(A.ndof()),
+              _wpp(A.ndof())
+        {}
 
-        SolverResults solve(real_t *x, const real_t *b, SolverParams opts = {}) const;
+        SolverResults solve(real_t *x, const real_t *b, SolverParams opts = {}) const override;
 
     private:
-        int n;
         const Operator<real_t> &A;
         mutable thrust::device_vector<real_t> _r, _v, _w, _wp, _vp, _wpp;
     };
@@ -32,13 +40,13 @@ namespace cuddh
      * @param opts
      * @return SolverResults
      */
-    inline SolverResults minres(int n, double *x, const Operator<double> &A, const double *b, SolverParams opts = {})
+    inline SolverResults minres(double *x, const Operator<double> &A, const double *b, SolverParams opts = {})
     {
-        return MINRES<double>(n, A).solve(x, b, opts);
+        return MINRES<double>(A).solve(x, b, opts);
     }
 
-    inline SolverResults minres(int n, float *x, const Operator<float> &A, const float *b, SolverParams opts = {})
+    inline SolverResults minres(float *x, const Operator<float> &A, const float *b, SolverParams opts = {})
     {
-        return MINRES<float>(n, A).solve(x, b, opts);
+        return MINRES<float>(A).solve(x, b, opts);
     }
 } // namespace cuddh

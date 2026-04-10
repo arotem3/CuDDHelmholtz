@@ -8,7 +8,7 @@ static void run_gcro_test(TestLogger &summary, std::string_view precision, doubl
     std::srand(1337);
 
     auto A = asym_test_mat<real_t>();
-    const int n = A.size();
+    const int n = A.ndof();
 
     thrust::universal_vector<real_t> _x_exact(n);
     thrust::device_vector<real_t> _x(n);
@@ -39,7 +39,7 @@ static void run_gcro_test(TestLogger &summary, std::string_view precision, doubl
     {
         dla::zeros(n, x);
 
-        auto solver = GCRO<real_t>(n, A, nullptr, kdim, edim);
+        auto solver = GCRO<real_t>(A, nullptr, kdim, edim);
         const SolverResults out = solver.solve(x, b, opts);
 
         A.action(x, r);
@@ -66,7 +66,7 @@ static void run_gcro_test(TestLogger &summary, std::string_view precision, doubl
         dla::zeros(n, x);
         InexactPreconditioner<real_t> M(n, A);
 
-        auto solver = GCRO<real_t>(n, A, &M, kdim, edim);
+        auto solver = GCRO<real_t>(A, &M, kdim, edim);
         const SolverResults out = solver.solve(x, b, opts);
 
         A.action(x, r);

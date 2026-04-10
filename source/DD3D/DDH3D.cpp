@@ -408,7 +408,8 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
 template <typename scalar_t>
 DDSubstructuredOperator3D<scalar_t>::DDSubstructuredOperator3D(double omega_, const double *h_a, const H1Space3D &fem,
                                                                const EnsembleSpace3D &efem_, DDKernelConfig config)
-    : g_ndof{fem.size()},
+    : Operator<scalar_t>(0),
+            g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
       n_basis{fem.basis().size()},
       efem{efem_},
@@ -432,6 +433,7 @@ DDSubstructuredOperator3D<scalar_t>::DDSubstructuredOperator3D(double omega_, co
 
     _partition_of_unity = partition_of_unity<scalar_t>(fem, efem);
     n_lambda = lambda_dofs(_B, efem, omega_, reshape(h_a, fem.size()));
+    this->set_size(2 * n_lambda);
 }
 
 template <typename scalar_t>

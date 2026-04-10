@@ -42,7 +42,11 @@ namespace cuddh
     }
 
     StiffnessMatrix::StiffnessMatrix(const H1Space2D &fem_)
-        : fem{fem_}, ndof{fem.size()}, n_elem{fem.mesh().n_elem()}, n_basis{fem.basis().size()}, _D(n_basis * n_basis)
+        : Operator<double>(fem_.size()),
+          fem{fem_},
+          n_elem{fem.mesh().n_elem()},
+          n_basis{fem.basis().size()},
+          _D(n_basis * n_basis)
     {
         const auto &basis = fem.basis();
         const auto &quad = basis.quadrature();
@@ -123,7 +127,7 @@ namespace cuddh
 
     void StiffnessMatrix::action(const double *x, double *y) const
     {
-        dla::zeros(ndof, y);
+        dla::zeros(this->ndof(), y);
         action(1.0, x, y);
     }
 } // namespace cuddh

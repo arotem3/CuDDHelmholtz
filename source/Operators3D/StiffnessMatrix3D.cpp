@@ -61,7 +61,8 @@ static void setup_geometric_factors(int n_elem, const QuadratureRule &quad, cons
     });
 }
 
-StiffnessMatrix3D::StiffnessMatrix3D(const H1Space3D &fem) : fem{fem}
+StiffnessMatrix3D::StiffnessMatrix3D(const H1Space3D &fem)
+    : Operator<double>(fem.size()), fem{fem}
 {
     const int n_elem = fem.mesh().n_elem();
     const int n_basis = fem.basis().size();

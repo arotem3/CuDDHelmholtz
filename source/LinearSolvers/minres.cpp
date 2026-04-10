@@ -9,6 +9,8 @@ SolverResults MINRES<real_t>::solve(real_t *x, const real_t *b, SolverParams opt
 
     SolverLogger logger(opts.verbose, opts.maxit);
 
+    const int n = this->ndof();
+
     real_t *r = thrust::raw_pointer_cast(_r.data());
     real_t *v = thrust::raw_pointer_cast(_v.data());
     real_t *w = thrust::raw_pointer_cast(_w.data());

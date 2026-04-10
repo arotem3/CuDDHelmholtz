@@ -61,7 +61,6 @@ public:
     void action(double c, const double *x, double *y) const;
 
 private:
-    const int ndof;
     StiffnessMatrix a;
     const TraceSpace2D &fs;
 };
@@ -144,7 +143,7 @@ int main()
 
     // solve for u (without boundary conditions)
     std::cout << "\nsolving with minres... \n";
-    auto out = minres(ndof, u, A, b, opts);
+    auto out = minres(u, A, b, opts);
 
     // add G to u (now u satisfies Dirichlet BCs)
     dla::axpby(ndof, 1.0, G, 1.0, u); // u <- u + G
@@ -177,7 +176,7 @@ int main()
     return 0;
 }
 
-Poisson::Poisson(const H1Space2D &fem, const TraceSpace2D &fs_) : ndof{fem.size()}, a(fem), fs{fs_} {}
+Poisson::Poisson(const H1Space2D &fem, const TraceSpace2D &fs_) : Operator<double>(fem.size()), a(fem), fs{fs_} {}
 
 void Poisson::action(double c, const double *x, double *y) const
 {

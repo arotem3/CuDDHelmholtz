@@ -48,14 +48,16 @@ static void init_face_mass(const TraceSpace3D &tr, const double *a, double *m)
 }
 
 FaceMassMatrix3D::FaceMassMatrix3D(const TraceSpace3D &tr)
-    : tr{tr},
+    : Operator<double>(tr.size()),
+            tr{tr},
       m(tr.size())
 {
     init_face_mass(tr, nullptr, m.device_write());
 }
 
 FaceMassMatrix3D::FaceMassMatrix3D(const double *a, const TraceSpace3D &tr)
-    : tr{tr},
+    : Operator<double>(tr.size()),
+            tr{tr},
       m(tr.size())
 {
     init_face_mass(tr, a, m.device_write());

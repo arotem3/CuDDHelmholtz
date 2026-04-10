@@ -112,21 +112,19 @@ namespace cuddh
      * is solved. The original finite element problem is always in double precision.
      */
     template <typename scalar_t>
-    class DDH3D
+    class DDH3D : Solver<double>
     {
     public:
         DDH3D(double omega, const double *h_a, const H1Space3D &fem, const EnsembleSpace3D &efem,
               DDKernelConfig kernel_config = {})
-            : ndof{fem.size()},
+            : Solver<double>(2 * fem.size()),
               F(omega, h_a, fem, efem, kernel_config),
-              solver(F.size(), F),
+              solver(F),
               lambda(F.size()),
               Y(F.size())
         {}
 
-        int n_lambda() const { return F.size(); }
-
-        SolverResults solve(double *x, const double *b, const SolverParams &opts = {}) const
+        SolverResults solve(double *x, const double *b, SolverParams opts = {}) const override
         {
             thrust::fill(lambda.begin(), lambda.end(), scalar_t(0));
             thrust::fill(Y.begin(), Y.end(), scalar_t(0));
@@ -137,14 +135,13 @@ namespace cuddh
             F.rhs(b, d_Y);
             SolverResults out = solver.solve(d_L, d_Y, opts);
 
-            dla::zeros(2 * ndof, x);
+            dla::zeros(this->ndof(), x);
             F.postprocess(d_L, b, x);
 
             return out;
         }
 
     private:
-        const int ndof;
         DDSubstructuredOperator3D<scalar_t> F;
         MINRES<scalar_t> solver;
         mutable thrust::device_vector<scalar_t> lambda;

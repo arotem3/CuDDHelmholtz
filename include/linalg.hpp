@@ -94,8 +94,8 @@ namespace cuddh
             cudaMemset(x, 1, n * sizeof(int));
         }
 
-        bool is_symmetric(int n, const Operator<float> &A, float tol = 1e-6f);
-        bool is_symmetric(int n, const Operator<double> &A, double tol = 1e-12);
+        bool is_symmetric(const Operator<float> &A, float tol = 1e-6f);
+        bool is_symmetric(const Operator<double> &A, double tol = 1e-12);
 
         /**
          * @brief Performs matrix-matrix multiplication on the device: C = alpha * op(A) * op(B) + beta * C

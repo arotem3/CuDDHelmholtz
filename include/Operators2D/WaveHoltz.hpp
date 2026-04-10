@@ -49,7 +49,6 @@ namespace cuddh
 
     private:
         const double omega; // Helmholtz frequency
-        const int ndof;     // number of degrees of freedom
 
         int nt;
         double shift;

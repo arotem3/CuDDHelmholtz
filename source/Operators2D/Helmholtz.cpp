@@ -4,11 +4,13 @@ using namespace cuddh;
 
 void Helmholtz::action(const double *x, double *y) const
 {
+    const int n = this->ndof() / 2;
+
     const double *u = x;
-    const double *v = x + ndof;
+    const double *v = x + n;
 
     double *Au = y;
-    double *Av = y + ndof;
+    double *Av = y + n;
 
     S.action(u, Au);
     S.action(v, Av);
@@ -17,7 +19,7 @@ void Helmholtz::action(const double *x, double *y) const
     auto m = M.to_device();
     auto h = H.to_device();
 
-    forall(ndof, [=] __device__(int i) -> void {
+    forall(n, [=] __device__(int i) -> void {
         const double mi = m(i);
         const double hi = h(i);
 
@@ -29,5 +31,5 @@ void Helmholtz::action(const double *x, double *y) const
 }
 
 Helmholtz::Helmholtz(double omega_, const double *a2x, const double *ax, const H1Space2D &fem, const TraceSpace2D &fs)
-    : omega{omega_}, ndof{fem.size()}, S(fem), M(fem, a2x), H(fs, ax)
+    : Operator<double>(2 * fem.size()), omega{omega_}, S(fem), M(fem, a2x), H(fs, ax)
 {}

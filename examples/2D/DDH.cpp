@@ -148,7 +148,8 @@ int main(int argc, char *argv[])
     auto ddh = [&]() {
         auto a = gridfunc(fem, [] __device__(const double X[2]) -> double { return alpha(X); });
         double *d_a = thrust::raw_pointer_cast(a.data());
-        return DDH<float>(omega, d_a, fem, efem, config);
+        return DDH<float, SubdomainSolver::MINRES>(omega, d_a, fem, efem, config);
+        // return DDH<float>(omega, d_a, fem, efem, config);
     }();
 
     thrust::universal_vector<double> U(N, 0.0);
@@ -170,7 +171,7 @@ int main(int argc, char *argv[])
               << "\tmax #elements / subdomain = " << efem.max_n_elem() << "\n"
               << "\tmax #dof / subdomain = " << efem.max_size() << "\n"
               << "\tkernel = {" << ddh.op().kernel_str() << "}\n"
-              << "\t#lambda = " << ddh.n_lambda() << std::endl;
+              << "\t#lambda = " << ddh.op().ndof() << std::endl;
 
     auto out = ddh.solve(u, b, opts);
 

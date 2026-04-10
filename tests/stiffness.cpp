@@ -61,7 +61,7 @@ static void symmetry_test(TestLogger &summary, const Mesh2D &mesh, Basis basis, 
 
     StiffnessMatrix A(fem);
 
-    if (dla::is_symmetric(fem.size(), A, tol))
+    if (dla::is_symmetric(A, tol))
         summary.pass(std::format("stiffness {} symmetry test", test_name));
     else
         summary.fail(std::format("stiffness {} symmetry test", test_name),

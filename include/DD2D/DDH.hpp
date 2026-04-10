@@ -150,22 +150,20 @@ namespace cuddh
      * @tparam scalar_t  float or double
      * @tparam Solver    SubdomainSolver::WaveHoltz (default) or MINRES
      */
-    template <typename scalar_t, SubdomainSolver Solver = SubdomainSolver::WaveHoltz>
-    class DDH
+    template <typename scalar_t, SubdomainSolver InnerSolver = SubdomainSolver::WaveHoltz>
+    class DDH : public Solver<double>
     {
     public:
         DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem,
             DDKernelConfig kernel_config = {}, int waveholtz_iterations = -1)
-            : ndof{fem.size()},
+            : Solver<double>(2 * fem.size()),
               F(omega, h_a, fem, efem, kernel_config, waveholtz_iterations),
-              solver(F.size(), F),
+              solver(F),
               lambda(F.size()),
               Y(F.size())
         {}
 
-        int n_lambda() const { return F.size(); }
-
-        SolverResults solve(double *x, const double *b, const SolverParams &opts = {}) const
+        SolverResults solve(double *x, const double *b, SolverParams opts = {}) const override
         {
             thrust::fill(lambda.begin(), lambda.end(), scalar_t(0));
             thrust::fill(Y.begin(), Y.end(), scalar_t(0));
@@ -176,17 +174,16 @@ namespace cuddh
             F.rhs(b, d_Y);
             SolverResults out = solver.solve(d_L, d_Y, opts);
 
-            dla::zeros(2 * ndof, x);
+            dla::zeros(this->ndof(), x);
             F.postprocess(d_L, b, x);
 
             return out;
         }
 
-        const DDSubstructuredOperator<scalar_t, Solver> &op() const { return F; }
+        const DDSubstructuredOperator<scalar_t, InnerSolver> &op() const { return F; }
 
     private:
-        const int ndof;
-        DDSubstructuredOperator<scalar_t, Solver> F;
+        DDSubstructuredOperator<scalar_t, InnerSolver> F;
         MINRES<scalar_t> solver;
 
         mutable thrust::device_vector<scalar_t> lambda;

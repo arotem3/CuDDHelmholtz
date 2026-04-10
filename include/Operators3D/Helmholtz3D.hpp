@@ -26,7 +26,6 @@ namespace cuddh
 
     private:
         const double omega;
-        const int ndof;
 
         StiffnessMatrix3D S;
         MassMatrix3D M;
