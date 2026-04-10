@@ -31,20 +31,13 @@
  *      ./examples/Poisson
  *
  * The program will write the collocation points to `solution/xy.0000` in binary
- * format. The solution is written to `solution/poisson.0000` in binary
+ * format. The solution is written to `solution/u.0000` in binary
  * format.
  *
- * This format can be read and visualized, for example, in Python using numpy and matplotlib via:
- *
- *      xy = numpy.fromfile("solution/xy.0000", order='F')
- *      xy = xy.reshape(2, -1)
- *      x, y = xy[0], xy[1]
- *
- *      u = numpy.fromfile("solution/poisson.0000")
- *
- *      matplotlib.pyplot.tricontourf(x, y, u)
+ * This format can be read and visualized, for example, in Python. See `visualize.py`.
  */
 
+#include "CLI11.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
 
@@ -80,19 +73,41 @@ __device__ static double g(const double X[2])
     return 0.0;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-    const int deg = 3; // polynomial degree of basis functions
-    const int nx = 15; // number of elements along each direction. Mesh will have nx^2 elements
+    int deg = 3;
+    std::vector<int> grid = {15};
+    int maxit = 1000;
+    double rtol = 1e-3;
+    std::string verbose_str = "progress";
 
-    SolverParams opts = {
-        .maxit = 1000,                       // maximum number of minres iterations
-        .rtol = 1e-6,                        // relative tolerance. minres stops when ||b-A*x|| < tol*||b||
-        .verbose = SolverParams::ProgressBar // Silent, ProgressBar, Iterations
-    };
+    CLI::App app{"Poisson: Solves the Poisson equation with Dirichlet boundary conditions"};
+    app.add_option("-p,--deg", deg, "Polynomial degree of basis functions")->default_val(3);
+    app.add_option("-n,--grid", grid, "Grid dimensions: nx [ny] (if ny omitted, ny=nx)")
+        ->expected(1, 2)
+        ->default_val("15");
+    app.add_option("--maxit", maxit, "Maximum number of MINRES iterations")->default_val(1000);
+    app.add_option("--rtol", rtol, "Relative tolerance for MINRES")->default_val(1e-3);
+    app.add_option("-v,--verbose", verbose_str, "Verbosity: silent | progress | iteration")
+        ->default_val("progress")
+        ->check(CLI::IsMember({"silent", "progress", "iteration"}, CLI::ignore_case));
+    CLI11_PARSE(app, argc, argv);
+
+    const int nx = grid[0];
+    const int ny = grid.size() > 1 ? grid[1] : grid[0];
+
+    SolverParams::Verbosity verbosity;
+    if (CLI::detail::to_lower(verbose_str) == "silent")
+        verbosity = SolverParams::Silent;
+    else if (CLI::detail::to_lower(verbose_str) == "iteration")
+        verbosity = SolverParams::Iteration;
+    else
+        verbosity = SolverParams::ProgressBar;
+
+    const SolverParams opts = {.maxit = maxit, .rtol = rtol, .verbose = verbosity};
 
     // Assemble the mesh
-    Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
+    Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, ny, -1.0, 1.0);
 
     // Construct 1D basis functions. On each element, the 2D basis functions are
     // tensor products of these 1D basis functions.
@@ -155,7 +170,7 @@ int main()
     auto xy = fem.physical_coordinates(MemorySpace::HOST);
 
     const char xy_file[] = "solution/xy.0000";
-    const char sol_file[] = "solution/poisson.0000";
+    const char sol_file[] = "solution/u.0000";
     const char res_file[] = "solution/residuals.0000";
 
     if (to_file(xy_file, 2 * ndof, xy.data()))
