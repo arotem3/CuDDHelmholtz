@@ -22,6 +22,9 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
                          DDKernelConfig config, int block_size, int tdof, int warmup, int iterations,
                          const std::string &output_file)
 {
+    std::mt19937 gen(42);
+    std::uniform_real_distribution<scalar_t> dist(-1, 1);
+
     Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, ny, -1.0, 1.0);
     Basis basis(degree + 1);
     H1Space2D fem(mesh, basis);
@@ -41,8 +44,8 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
     thrust::universal_vector<scalar_t> lambda_a(F.size(), scalar_t(0));
     thrust::universal_vector<scalar_t> lambda_b(F.size(), scalar_t(0));
 
-    for (int i = 0; i < F.size(); ++i)
-        lambda_a[i] = scalar_t(1) / static_cast<scalar_t>(1 + (i % 17));
+    for (auto &value : lambda_a)
+        value = dist(gen);
 
     scalar_t *in = thrust::raw_pointer_cast(lambda_a.data());
     scalar_t *out = thrust::raw_pointer_cast(lambda_b.data());
@@ -57,8 +60,8 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
     const int n_fem = 2 * fem.size();
     thrust::universal_vector<double> helm_in(n_fem, 0.0);
     thrust::universal_vector<double> helm_out(n_fem, 0.0);
-    for (int i = 0; i < n_fem; ++i)
-        helm_in[i] = 1.0 / static_cast<double>(1 + (i % 17));
+    for (auto &value : helm_in)
+        value = dist(gen);
 
     double *helm_x = thrust::raw_pointer_cast(helm_in.data());
     double *helm_y = thrust::raw_pointer_cast(helm_out.data());
