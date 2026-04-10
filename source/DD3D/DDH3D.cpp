@@ -67,12 +67,14 @@ public:
     static __host__ DDH3DKernelData make(int nlambda, int ndof, const EnsembleSpace3D &efem,
                                          const LambdaDOFData<scalar_t> *B, const scalar_t *punity,
                                          const DDStiffnessMatrix3D<scalar_t> &stiffness_matrix,
-                                         const DDWaveHoltz<scalar_t> &waveholtz, scalar_t *d_work = nullptr)
+                                         const DDWaveHoltz<scalar_t> &waveholtz, int wh_iterations,
+                                         scalar_t *d_work = nullptr)
     {
         return DDH3DKernelData{.mx_ndof = efem.max_size(),
                                .mx_fdof = efem.max_fsize(),
                                .g_ndof = ndof,
                                .g_lambda = nlambda,
+                               .wh_iterations = wh_iterations,
                                .s_ndof = efem.sizes(MemorySpace::DEVICE).data(),
                                .s_fdof = efem.fsizes(MemorySpace::DEVICE).data(),
                                .s_elems = efem.n_elems(MemorySpace::DEVICE).data(),
@@ -89,6 +91,7 @@ public:
     int mx_fdof;
     int g_ndof;
     int g_lambda;
+    int wh_iterations;
 
     const int *s_ndof;
     const int *s_fdof;
@@ -194,40 +197,48 @@ __global__ __launch_bounds__(NB * NB * NB * NEL, 1024 / (NB * NB * NB * NEL)) vo
     }();
 
     __shared__ typename BStiffness::SharedResources smem;
-    __shared__ typename BlockReduce::TempStorage reduce_work;
-    __shared__ scalar_t reduce_result;
-
-    auto dist = [&](const arr_t &a, const arr_t &b) -> scalar_t {
-        scalar_t dr = 0;
-        for (int t = 0; t < TDOF; ++t)
-        {
-            scalar_t dx = get(a, t).x - get(b, t).x;
-            scalar_t dy = get(a, t).y - get(b, t).y;
-            dr += dx * dx + dy * dy;
-        }
-
-        dr = BlockReduce(reduce_work).Sum(dr);
-        if (helper.thread_index() == 0)
-            reduce_result = sqrt(dr);
-        __syncthreads();
-
-        return reduce_result;
-    };
-
     const auto A = helper.stiffness_matrix(smem);
     const auto evolve_project = helper.waveholtz(limits.ndof);
 
     arr_t u{};
-    arr_t u1 = evolve_project(A, u, f);
-    scalar_t r = dist(u1, u);
-    u = u1;
-
-    const scalar_t tol = max(WHRTol * r, WHATol);
-    for (int it = 0; it < WHMaxIter && r > tol; ++it)
+    if (helper.wh_iterations > 0)
     {
-        u1 = evolve_project(A, u, f);
-        r = dist(u1, u);
+        for (int it = 0; it < helper.wh_iterations; ++it)
+            u = evolve_project(A, u, f);
+    }
+    else
+    {
+        __shared__ typename BlockReduce::TempStorage reduce_work;
+        __shared__ scalar_t reduce_result;
+
+        auto dist = [&](const arr_t &a, const arr_t &b) -> scalar_t {
+            scalar_t dr = 0;
+            for (int t = 0; t < TDOF; ++t)
+            {
+                scalar_t dx = get(a, t).x - get(b, t).x;
+                scalar_t dy = get(a, t).y - get(b, t).y;
+                dr += dx * dx + dy * dy;
+            }
+
+            dr = BlockReduce(reduce_work).Sum(dr);
+            if (helper.thread_index() == 0)
+                reduce_result = sqrt(dr);
+            __syncthreads();
+
+            return reduce_result;
+        };
+
+        arr_t u1 = evolve_project(A, u, f);
+        scalar_t r = dist(u1, u);
         u = u1;
+
+        const scalar_t tol = max(WHRTol * r, WHATol);
+        for (int it = 0; it < WHMaxIter && r > tol; ++it)
+        {
+            u1 = evolve_project(A, u, f);
+            r = dist(u1, u);
+            u = u1;
+        }
     }
 
     for (int t = 0; t < TDOF; ++t)
@@ -407,16 +418,20 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
 
 template <std::floating_point scalar_t>
 DDSubstructuredOperator3D<scalar_t>::DDSubstructuredOperator3D(double omega_, const double *h_a, const H1Space3D &fem,
-                                                               const EnsembleSpace3D &efem_, DDKernelConfig config)
+                                                                                                                             const EnsembleSpace3D &efem_, DDKernelConfig config,
+                                                                                                                             int waveholtz_iterations_)
     : Operator<scalar_t>(0),
       g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
       n_basis{fem.basis().size()},
       efem{efem_},
       S(fem, efem_),
-      W{make_DDWaveHoltz_3d<scalar_t>(omega_, h_a, fem, efem_)}
+            W{make_DDWaveHoltz_3d<scalar_t>(omega_, h_a, fem, efem_)},
+            waveholtz_iterations{waveholtz_iterations_}
 {
     cuddh_verify(n_basis >= 2 && n_basis <= 4, printf("DDH3D error: Only n_basis in [2,3,4] supported.\n"););
+        cuddh_verify(waveholtz_iterations == -1 || waveholtz_iterations > 0,
+                                 printf("DDH3D error: waveholtz_iterations must be positive or -1 for residual-based stopping.\n"));
 
     n_domains = efem.size();
     mx_dof = efem.max_size();
@@ -445,7 +460,7 @@ struct KernelDispatcher3D
     template <int NB, int TDOF, int BLOCK_SIZE>
     static void dispatch_kernel(const EnsembleSpace3D &efem, const int g_ndof, const int n_lambda,
                                 const LambdaDOFData<scalar_t> *B, const DDStiffnessMatrix3D<scalar_t> &stiffness_matrix,
-                                const scalar_t *punity, const DDWaveHoltz<scalar_t> &waveholtz,
+                                const scalar_t *punity, const DDWaveHoltz<scalar_t> &waveholtz, int wh_iterations,
                                 const double *const __restrict__ x, double *const __restrict__ y,
                                 const scalar_t *const __restrict__ d_lambda, scalar_t *const __restrict__ d_update,
                                 scalar_t *d_work)
@@ -457,8 +472,8 @@ struct KernelDispatcher3D
         if (d_update)
             dla::zeros(2 * n_lambda, d_update);
 
-        auto data = DDH3DKernelData<scalar_t, NB, NEL, TDOF>::make(n_lambda, g_ndof, efem, B, punity, stiffness_matrix,
-                                                                   waveholtz, d_work);
+        auto data = DDH3DKernelData<scalar_t, NB, NEL, TDOF>::make(
+            n_lambda, g_ndof, efem, B, punity, stiffness_matrix, waveholtz, wh_iterations, d_work);
         const int n_domains = efem.size();
         dim3 block_size(NB * NB * NB, NEL);
         ddh_action_kernel_3d<scalar_t, NB, NEL, TDOF><<<n_domains, block_size>>>(data, x, y, d_lambda, d_update);
@@ -538,7 +553,8 @@ void DDSubstructuredOperator3D<scalar_t>::action(const double *fem_in, double *f
     scalar_t *d_work = thrust::raw_pointer_cast(_work.data());
 
     KernelDispatcher3D<scalar_t>(n_basis, kernel_config.tdof, static_cast<int>(kernel_config.block_size))
-        .invoke(efem, g_ndof, n_lambda, B, S, punity, W, fem_in, fem_out, lambda_in, lambda_out, d_work);
+        .invoke(efem, g_ndof, n_lambda, B, S, punity, W, waveholtz_iterations, fem_in, fem_out, lambda_in,
+            lambda_out, d_work);
 }
 
 template <std::floating_point scalar_t>
