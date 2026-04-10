@@ -5,35 +5,23 @@
  * @details This file is a driver for solving the Helmholtz equation with
  * approximate absorbing boundary conditions:
  *
- *      -div(grad U) - omega^2 a^2(x) U == f    in  D := [-1, 1]^3
- *      i a(x) omega U + dU/dn == 0             on boundary of D
+ *      -div(grad u) - omega^2 a^2(x) u == f    in  D := [-1, 1]^3
+ *      -i omega a(x) u + du/dn == 0            on boundary of D
  *
- * Here omega is the frequency. We assume f is real valued, and U is complex
+ * Here omega is the frequency. We assume f is real valued, and u is complex
  * valued.
  *
- * Write U = u + i v, the weak formulation is
+ * The weak formulation is
  *
- *      a([u, v], phi) == b(phi)        for all phi in H1(D)
+ *      a(u, phi) == b(phi)        for all phi in H1(D)
  *
  * The bilinear form a is defined as
  *
- *      a([u, v], phi) = [ (grad u, grad phi) - omega^2 (a^2(x) u, phi) - omega <a(x) v, phi>;
- *                         (grad v, grad phi) - omega^2 (a^2(x) v, phi) + omega <a(x) u, phi> ]
+ *      a(u, phi) = (grad u, grad phi) - omega^2 (a^2(x) u, phi) - i omega <a(x) v, phi>.
  *
- * And the linear operator b is defined b(phi) = [ (f, phi); 0 ]
+ * And the linear operator b is defined b(phi) = (f, phi).
  *
- * In cuddh, a is assembled from the following operators:
- *
- *      StiffnessMatrix3D S;
- *      S.action(c, x, y); // y[i] <- y[i] + c * (grad x, grad phi[i])
- *
- *      MassMatrix3D M;
- *      M.action(c, x, y); // y[i] <- y[i] + c * (a(x)^2 x, phi[i])
- *
- *      FaceMassMatrix3D H;
- *      H.action(c, x, y); // y[i] <- y[i] + c * <a(x) x, phi[i]>
- *
- * The Helmholtz3D class combines these operations to define the bilinear form a(*,*).
+ * The Helmholtz3D class implements the operator a(*, phi).
  *
  * To compile & run this program:
  *  (1) From the CuDDHelmholtz directory, compile the library:
@@ -45,18 +33,15 @@
  *      ./examples/Helmholtz3D
  *
  * The program will write the collocation points to `solution/coo.0000` in binary
- * format. The solution is written to `solution/helmholtz.0000` in binary
+ * format. The solution is written to `solution/uv.0000` in binary
  * format.
  *
- * This format can be read and visualized, for example, in Python using numpy and matplotlib via:
- *
- *      coo = numpy.fromfile("solution/coo.0000").view(numpy.float64).reshape(-1, 3)
- *      x, y, z = coo[:, 0], coo[:, 1], coo[:, 2]
- *
- *      uv = numpy.fromfile("solution/helmholtz.0000", dtype=numpy.float64).reshape(-1, 2)
- *      U  = uv[:, 0] + 1j * uv[:, 1]
+ * This format can be read and visualized, for example, in Python. See `visualize.py`.
  */
 
+#include <format>
+
+#include "CLI11.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
 
@@ -83,20 +68,46 @@ __device__ static double a(double3 x)
     return (r < 0.0625) ? 0.2 : 1.0;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-    const int deg = 3;                       // polynomial degree of basis functions
-    const int nx = 32;                       // number of elements along each direction
-    const double omega = 2 * M_PI * nx / 10; // Helmholtz frequency
+    int deg = 3;
+    std::vector<int> grid = {16};
+    double omega = -1.0;
+    int maxit = 10'000;
+    double rtol = 1e-3;
+    std::string verbose_str = "progress";
 
-    const SolverParams opts = {
-        .maxit = 100'000,                    // maximum number of iterations of MINRES
-        .rtol = 1e-5,                        // relative tolerance
-        .verbose = SolverParams::ProgressBar // verbosity level
-    };
+    CLI::App app{"Helmholtz3D: Direct solver for the 3D Helmholtz equation"};
+    app.add_option("-p,--deg", deg, "Polynomial degree of basis functions")->default_val(3);
+    app.add_option("-n,--grid", grid, "Grid dimensions: nx [ny [nz]] (if omitted, ny=nz=nx)")
+        ->expected(1, 3)
+        ->default_val("16");
+    app.add_option("-w,--omega", omega, "Helmholtz frequency (default: 0.1 * nx * deg)");
+    app.add_option("--maxit", maxit, "Maximum number of MINRES iterations")->default_val(10'000);
+    app.add_option("--rtol", rtol, "Relative tolerance for MINRES")->default_val(1e-3);
+    app.add_option("-v,--verbose", verbose_str, "Verbosity: silent | progress | iteration")
+        ->default_val("progress")
+        ->check(CLI::IsMember({"silent", "progress", "iteration"}, CLI::ignore_case));
+    CLI11_PARSE(app, argc, argv);
+
+    const int nx = grid[0];
+    const int ny = grid.size() > 1 ? grid[1] : grid[0];
+    const int nz = grid.size() > 2 ? grid[2] : grid[0];
+    if (omega < 0.0)
+        omega = 0.1 * nx * deg;
+
+    SolverParams::Verbosity verbosity;
+    if (CLI::detail::to_lower(verbose_str) == "silent")
+        verbosity = SolverParams::Silent;
+    else if (CLI::detail::to_lower(verbose_str) == "iteration")
+        verbosity = SolverParams::Iteration;
+    else
+        verbosity = SolverParams::ProgressBar;
+
+    const SolverParams opts = {.maxit = maxit, .rtol = rtol, .verbose = verbosity};
 
     // Assemble the mesh
-    Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, nx, -1.0, 1.0, nx, -1.0, 1.0);
+    Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, ny, -1.0, 1.0, nz, -1.0, 1.0);
 
     // Construct 1D basis functions
     Basis basis(deg + 1);
@@ -142,14 +153,14 @@ int main()
 
     // solve a([u, v], phi) = b(phi)
     std::cout << "\nsolving with MINRES ... \n";
-    auto out = minres(N, u, A, b, opts);
+    auto out = minres(u, A, b, opts);
     CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
 
     // save solution and collocation nodes to file
     auto coo = fem.physical_coordinates(MemorySpace::HOST);
 
     const char coo_file[] = "solution/coo.0000";
-    const char sol_file[] = "solution/helmholtz.0000";
+    const char sol_file[] = "solution/uv.0000";
     const char res_file[] = "solution/residuals.0000";
 
     if (to_file(coo_file, coo.size(), coo.data()))

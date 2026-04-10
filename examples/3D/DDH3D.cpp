@@ -1,5 +1,47 @@
+/**
+ * @file DDH3D.cpp
+ * @brief Example driver for solving the 3D Helmholtz equation with the domain decomposition Helmholtz (DDH) solver.
+ *
+ * @details This file is a driver for solving the Helmholtz equation with
+ * approximate absorbing boundary conditions:
+ *
+ *      -div(grad u) - omega^2 a^2(x) u == f    in  D := [-1, 1]^3
+ *      -i omega a(x) u + du/dn == 0            on boundary of D
+ *
+ * Here omega is the frequency. We assume f is real valued, and u is complex
+ * valued.
+ *
+ * The weak formulation is
+ *
+ *      a(u, phi) == b(phi)        for all phi in H1(D)
+ *
+ * The bilinear form a is defined as
+ *
+ *      a(u, phi) = (grad u, grad phi) - omega^2 (a^2(x) u, phi) - i omega <a(x) v, phi>.
+ *
+ * And the linear operator b is defined b(phi) = (f, phi).
+ *
+ * The DDH3D class implements solves the Helmholtz equation using a domain decomposition approach.
+ *
+ * To compile & run this program:
+ *  (1) From the CuDDHelmholtz directory, compile the library:
+ *      cmake .
+ *      make cuddh -j
+ *  (2) compile the program:
+ *      make DDH3D
+ *  (3) run:
+ *      ./examples/DDH3D
+ *
+ * The program will write the collocation points to `solution/coo.0000` in binary
+ * format. The solution is written to `solution/uv.0000` in binary
+ * format.
+ *
+ * This format can be read and visualized, for example, in Python. See `visualize.py`.
+ */
+
 #include <format>
 
+#include "CLI11.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
 
@@ -23,29 +65,70 @@ __device__ static double alpha(double3 x)
     return (r < 0.0625) ? 0.2 : 1.0;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-    const int deg = 1;
-    const int nx = 32;
-    const double omega = 2 * M_PI * nx / 10;
+    int deg = 3;                          // polynomial degree of basis functions
+    std::vector<int> grid = {16};         // grid dimensions [nx, ny, nz]
+    double omega = -1.0;                  // Helmholtz frequency
+    int tdof = 0;                         // one of 0, 1, 2, 3, 4
+    int block_size = 0;                   // 0 (default), 256, 512, 1024
+    int maxit = 500;                      // maximum number of GMRES iterations
+    double rtol = 1e-3;                   // relative tolerance
+    std::string verbose_str = "progress"; // silent | progress | iteration
 
-    const DDKernelConfig config = {
-        .block_size = DDKernelConfig::Default, // one of Default, t256, t512, t1024
-        .tdof = 1                              // one of 0, 1, 2, 3, 4
-    };
+    CLI::App app{"DDH3D: Domain decomposition solver for the 3D Helmholtz equation"};
+    app.add_option("-p,--deg", deg, "Polynomial degree of basis functions")->default_val(3);
+    app.add_option("-n,--grid", grid, "Grid dimensions: nx [ny [nz]] (if omitted, ny=nz=nx)")
+        ->expected(1, 3)
+        ->default_val("16");
+    app.add_option("-w,--omega", omega, "Helmholtz frequency (default: 0.1 * nx * deg)");
+    app.add_option("--tdof", tdof, "DOFs/thread kernel parameter 0 (auto), 1, ..., 4")
+        ->default_val(0)
+        ->check(CLI::Range(0, 4));
+    app.add_option("--block-size", block_size, "Threads per block: 0 (auto), 256, 512, 1024")
+        ->default_val(0)
+        ->check(CLI::IsMember({0, 256, 512, 1024}));
+    app.add_option("--maxit", maxit, "Maximum number of GMRES iterations")->default_val(500);
+    app.add_option("--rtol", rtol, "Relative tolerance for GMRES")->default_val(1e-3);
+    app.add_option("-v,--verbose", verbose_str, "Verbosity: silent | progress | iteration")
+        ->default_val("progress")
+        ->check(CLI::IsMember({"silent", "progress", "iteration"}, CLI::ignore_case));
+    CLI11_PARSE(app, argc, argv);
 
-    const SolverParams opts = {
-        .maxit = 1000,                       // maximum number of iterations for DDH solver
-        .rtol = 1e-5,                        // relative tolerance. GMRES stops when ||b-A*x|| < tol*||b||
-        .verbose = SolverParams::ProgressBar // Silent, ProgressBar, Iteration
-    };
+    int nx = grid[0];
+    int ny = grid.size() > 1 ? grid[1] : grid[0];
+    int nz = grid.size() > 2 ? grid[2] : grid[0];
+    if (omega <= 0.0)
+        omega = 0.1 * nx * deg;
 
-    Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, nx, -1.0, 1.0, nx, -1.0, 1.0);
+    DDKernelConfig::BlockSize bs;
+    if (block_size == 256)
+        bs = DDKernelConfig::t256;
+    else if (block_size == 512)
+        bs = DDKernelConfig::t512;
+    else if (block_size == 1024)
+        bs = DDKernelConfig::t1024;
+    else
+        bs = DDKernelConfig::Default;
+
+    SolverParams::Verbosity verbosity;
+    if (CLI::detail::to_lower(verbose_str) == "silent")
+        verbosity = SolverParams::Silent;
+    else if (CLI::detail::to_lower(verbose_str) == "iteration")
+        verbosity = SolverParams::Iteration;
+    else
+        verbosity = SolverParams::ProgressBar;
+
+    const DDKernelConfig config = {.block_size = bs, .tdof = tdof};
+
+    const SolverParams opts = {.maxit = maxit, .rtol = rtol, .verbose = verbosity};
+
+    Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, ny, -1.0, 1.0, nz, -1.0, 1.0);
 
     Basis basis(deg + 1);
 
     H1Space3D fem(mesh, basis);
-    EnsembleSpace3D efem = partition_uniform_cube(fem, {nx, nx, nx}, {4, 2, 2});
+    EnsembleSpace3D efem = partition_uniform_cube(fem, {(unsigned)nx, (unsigned)ny, (unsigned)nz});
 
     const int ndof = fem.size();
     const int N = 2 * ndof;
@@ -73,7 +156,8 @@ int main()
               << "\t#subdomains = " << efem.size() << "\n"
               << "\tmax #elements / subdomain = " << efem.max_n_elem() << "\n"
               << "\tmax #dof / subdomain = " << efem.max_size() << "\n"
-              << "\t#lambda = " << ddh.n_lambda() << std::endl;
+              << "\t#lambda = " << ddh.op().ndof() << "\n"
+              << "\tkernel = {" << ddh.op().kernel_str() << "}" << std::endl;
 
     auto out = ddh.solve(u_U, u_b, opts);
 
@@ -110,7 +194,7 @@ int main()
     auto coo = fem.physical_coordinates(MemorySpace::HOST);
 
     auto coofile = "solution/coo.0000";
-    auto solfile = "solution/waveholtz.0000";
+    auto solfile = "solution/uv.0000";
     auto resfile = "solution/residuals.0000";
 
     if (to_file(coofile, coo.size(), coo.data()))

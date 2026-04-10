@@ -26,25 +26,18 @@
  *      cmake .
  *      make cuddh -j
  *  (2) compile the program:
- *      make Poisson
+ *      make Poisson3D
  *  (3) run:
- *      ./examples/Poisson
+ *      ./examples/Poisson3D
  *
- * The program will write the collocation points to `solution/xy.0000` in binary
- * format. The solution is written to `solution/poisson.0000` in binary
+ * The program will write the collocation points to `solution/coo.0000` in binary
+ * format. The solution is written to `solution/u.0000` in binary
  * format.
  *
- * This format can be read and visualized, for example, in Python using numpy and matplotlib via:
- *
- *      x = numpy.fromfile("solution/x.0000", order='F')
- *      x = x.reshape(3, -1)
- *      x, y, z = x[0], x[1], x[2]
- *
- *      u = numpy.fromfile("solution/poisson.0000")
- *
- *
+ * This format can be read and visualized, for example, in Python. See `visualize.py`.
  */
 
+#include "CLI11.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
 
@@ -74,19 +67,42 @@ __device__ static double g(double3 r)
     return 3.0 * r.x * r.x - r.y * r.y + r.z;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-    const int deg = 3; // polynomial degree of basis functions
-    const int nx = 10; // number of elements in each direction. Mesh will have nx^3 elements
+    int deg = 3;
+    std::vector<int> grid = {10};
+    int maxit = 500;
+    double rtol = 1e-3;
+    std::string verbose_str = "progress";
 
-    SolverParams opts = {
-        .maxit = 1000,                        // maximum number of iterations of minres
-        .rtol = 1e-10,                        // relative tolerance. minres stops when ||b-A*x|| < tol*||b||
-        .verbose = SolverParams::ProgressBar, // Silent, ProgressBar, Iteration
-    };
+    CLI::App app{"Poisson3D: Solves the 3D Poisson equation with Dirichlet boundary conditions"};
+    app.add_option("-p,--deg", deg, "Polynomial degree of basis functions")->default_val(3);
+    app.add_option("-n,--grid", grid, "Grid dimensions: nx [ny [nz]] (if omitted, ny=nz=nx)")
+        ->expected(1, 3)
+        ->default_val("10");
+    app.add_option("--maxit", maxit, "Maximum number of MINRES iterations")->default_val(500);
+    app.add_option("--rtol", rtol, "Relative tolerance for MINRES")->default_val(1e-3);
+    app.add_option("-v,--verbose", verbose_str, "Verbosity: silent | progress | iteration")
+        ->default_val("progress")
+        ->check(CLI::IsMember({"silent", "progress", "iteration"}, CLI::ignore_case));
+    CLI11_PARSE(app, argc, argv);
+
+    const int nx = grid[0];
+    const int ny = grid.size() > 1 ? grid[1] : grid[0];
+    const int nz = grid.size() > 2 ? grid[2] : grid[0];
+
+    SolverParams::Verbosity verbosity;
+    if (CLI::detail::to_lower(verbose_str) == "silent")
+        verbosity = SolverParams::Silent;
+    else if (CLI::detail::to_lower(verbose_str) == "iteration")
+        verbosity = SolverParams::Iteration;
+    else
+        verbosity = SolverParams::ProgressBar;
+
+    SolverParams opts = {.maxit = maxit, .rtol = rtol, .verbose = verbosity};
 
     // create the mesh
-    Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, nx, -1.0, 1.0, nx, -1.0, 1.0);
+    Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, ny, -1.0, 1.0, nz, -1.0, 1.0);
 
     // Construct 1D basis functions. On each element, the 3D basis functions are
     // tensor products of these 1D basis functions.
@@ -139,7 +155,7 @@ int main()
 
     // solve the linear system
     std::cout << "\nsolving with minres...\n";
-    auto out = minres(ndof, u, A, b, opts);
+    auto out = minres(u, A, b, opts);
 
     // add G to u
     dla::axpby(ndof, 1.0, G, 1.0, u);
@@ -156,20 +172,28 @@ int main()
     x = fem.physical_coordinates(MemorySpace::HOST);
 
     // save solution
-    const char x_file[] = "solution/x.0000";
-    const char u_file[] = "solution/poisson.0000";
+    const char coo_file[] = "solution/coo.0000";
+    const char u_file[] = "solution/u.0000";
     const char res_file[] = "solution/residuals.0000";
 
-    if (to_file(x_file, ndof, x.data()))
-        std::cout << "Coordinates written to " << x_file << "\n";
+    if (to_file(coo_file, ndof, x.data()))
+        std::cout << "Saved collocation points to " << coo_file << std::endl;
+    else
+        std::cerr << "Failed to save collocation points to " << coo_file << std::endl;
+
     if (to_file(u_file, ndof, h_u))
-        std::cout << "Solution written to " << u_file << "\n";
+        std::cout << "Saved solution to " << u_file << std::endl;
+    else
+        std::cerr << "Failed to save solution to " << u_file << std::endl;
+
     if (to_file(res_file, out.res_norm.size(), out.res_norm.data()))
-        std::cout << "Residuals written to " << res_file << "\n";
+        std::cout << "Saved residuals to " << res_file << std::endl;
+    else
+        std::cerr << "Failed to save residuals to " << res_file << std::endl;
     return 0;
 }
 
-Poisson3D::Poisson3D(const H1Space3D &fem, const TraceSpace3D &tr) : tr(tr), a(fem) {}
+Poisson3D::Poisson3D(const H1Space3D &fem, const TraceSpace3D &tr) : Operator<double>(fem.size()), tr(tr), a(fem) {}
 
 void Poisson3D::action(const double *x, double *y) const
 {

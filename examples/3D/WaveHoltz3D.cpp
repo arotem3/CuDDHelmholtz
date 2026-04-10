@@ -1,27 +1,39 @@
 /**
- * @file WaveHoltz.cpp
- * @brief Example driver for solving the Helmholtz equation with the WaveHoltz solver.
+ * @file WaveHoltz3D.cpp
+ * @brief Example driver for solving the 3D Helmholtz equation with the WaveHoltz solver.
  *
  * @details This file is a driver for solving the Helmholtz equation with
  * approximate absorbing boundary conditions:
  *
- *      -div(grad U) - omega^2 a^2(x) U == f    in  D := [-1, 1]^3
- *      i a(x) omega U + dU/dn == 0             on boundary of D
+ *      -div(grad u) - omega^2 a^2(x) u == f    in  D := [-1, 1]^3
+ *      -i omega a(x) u + du/dn == 0            on boundary of D
  *
- * Here omega is the frequency. We assume f is real valued, and U is complex
+ * Here omega is the frequency. We assume f is real valued, and u is complex
  * valued.
  *
  * The WaveHoltz3D class implements the finite element discretization of this equation,
- * but is actually solving the wave eqution at each iteration.
+ * but is actually solving the wave equation at each iteration.
+ *
+ * To compile & run this program:
+ *  (1) From the CuDDHelmholtz directory, compile the library:
+ *      cmake .
+ *      make cuddh -j
+ *  (2) compile the program:
+ *      make WaveHoltz3D
+ *  (3) run:
+ *      ./examples/WaveHoltz3D
  *
  * The program will write the collocation points to `solution/coo.0000` in binary
- * format. The solution is written to `solution/waveholtz.0000` in binary
+ * format. The solution is written to `solution/uv.0000` in binary
  * format. The residuals from the GMRES iterations are written to `solution/residuals.0000`
  * in binary format.
+ *
+ * This format can be read and visualized, for example, in Python. See `visualize.py`.
  */
 
 #include <format>
 
+#include "CLI11.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
 
@@ -45,21 +57,52 @@ __device__ static double alpha(double3 x)
     return (r < 0.0625) ? 0.2 : 1.0;
 }
 
-int main()
+int main(int argc, char *argv[])
 {
-    const int deg = 1;                       // polynomial degree
-    const int nx = 32;                       // number of elements in x direction
-    const double omega = 2 * M_PI * nx / 10; // time-harmonic frequency
+    int deg = 3;
+    std::vector<int> grid = {16};
+    double omega = -1.0;
+    int kdim = 20;
+    int maxit = 500;
+    double rtol = 1e-3;
+    std::string verbose_str = "progress";
+
+    CLI::App app{"WaveHoltz3D: WaveHoltz solver for the 3D Helmholtz equation"};
+    app.add_option("-p,--deg", deg, "Polynomial degree of basis functions")->default_val(3);
+    app.add_option("-n,--grid", grid, "Grid dimensions: nx [ny [nz]] (if omitted, ny=nz=nx)")
+        ->expected(1, 3)
+        ->default_val("16");
+    app.add_option("-w,--omega", omega, "Helmholtz frequency (default: 0.1 * nx * deg)");
+    app.add_option("-k,--kdim", kdim, "Krylov dimension for GMRES")->default_val(20);
+    app.add_option("--maxit", maxit, "Maximum number of GMRES iterations")->default_val(500);
+    app.add_option("--rtol", rtol, "Relative tolerance for GMRES")->default_val(1e-3);
+    app.add_option("-v,--verbose", verbose_str, "Verbosity: silent | progress | iteration")
+        ->default_val("progress")
+        ->check(CLI::IsMember({"silent", "progress", "iteration"}, CLI::ignore_case));
+    CLI11_PARSE(app, argc, argv);
+
+    const int nx = grid[0];
+    const int ny = grid.size() > 1 ? grid[1] : grid[0];
+    const int nz = grid.size() > 2 ? grid[2] : grid[0];
+    if (omega <= 0.0)
+        omega = 0.1 * nx * deg;
+
+    SolverParams::Verbosity verbosity;
+    if (CLI::detail::to_lower(verbose_str) == "silent")
+        verbosity = SolverParams::Silent;
+    else if (CLI::detail::to_lower(verbose_str) == "iteration")
+        verbosity = SolverParams::Iteration;
+    else
+        verbosity = SolverParams::ProgressBar;
 
     const SolverParams opts = {
-        .maxit = 1000,                       // maximum number of gmres iterations
-        .rtol = 1e-5,                        // relative tolerance. gmres stops when ||b - Ax|| <= rtol * ||b||
-        .verbose = SolverParams::ProgressBar // Silent, ProgressBar, Iteration
+        .maxit = maxit,
+        .rtol = rtol,
+        .verbose = verbosity,
     };
-    const int kdim = 20; // dimension of Krylov space in gmres
 
     // Create a uniform rectangular mesh
-    Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, nx, -1.0, 1.0, nx, -1.0, 1.0);
+    Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, ny, -1.0, 1.0, nz, -1.0, 1.0);
 
     // Construct 1D basis functions
     Basis basis(deg + 1);
@@ -108,13 +151,6 @@ int main()
 
     W.G(d_b, d_Gb); // apply G to the right-hand side vector
 
-    // Peek at the last CUDA error without resetting it
-    cudaError_t err = cudaPeekAtLastError();
-    if (err != cudaSuccess)
-    {
-        std::cerr << "CUDA peek error after W.G: " << cudaGetErrorString(err) << std::endl;
-    }
-
     std::cout << "Solving the Helmholtz equation...\n"
               << "\tomega = " << omega << "\n"
               << "\t#elements = " << mesh.n_elem() << "\n"
@@ -122,7 +158,7 @@ int main()
               << "\t#dof = " << 2 * ndof << std::endl;
 
     // Solve the system using GMRES
-    SolverResults out = gmres(N, d_U, W, d_Gb, kdim, nullptr, opts);
+    SolverResults out = gmres(d_U, W, d_Gb, kdim, nullptr, opts);
 
     double res = [&]() {
         Helmholtz3D A(omega, d_a2, d_a, fem, fs);
@@ -140,7 +176,7 @@ int main()
     auto coo = fem.physical_coordinates(MemorySpace::HOST);
 
     auto coofile = "solution/coo.0000";
-    auto solfile = "solution/waveholtz.0000";
+    auto solfile = "solution/uv.0000";
     auto resfile = "solution/residuals.0000";
 
     if (to_file(coofile, coo.size(), coo.data()))
