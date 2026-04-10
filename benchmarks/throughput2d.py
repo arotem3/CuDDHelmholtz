@@ -391,7 +391,7 @@ def plot_roofline(df: pd.DataFrame, plot_dir: Path) -> None:
 
     log_ai_lo = np.floor(np.log10(all_ai.min())) - 1
     log_ridge = np.log10(ridge_ai)
-    
+
     log_ai_hi = log_ridge + (log_ridge - log_ai_lo) * 2
     ai_lo = 10**log_ai_lo
     ai_hi = 10**log_ai_hi
