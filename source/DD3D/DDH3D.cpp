@@ -405,11 +405,11 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
     return config;
 }
 
-template <typename scalar_t>
+template <std::floating_point scalar_t>
 DDSubstructuredOperator3D<scalar_t>::DDSubstructuredOperator3D(double omega_, const double *h_a, const H1Space3D &fem,
                                                                const EnsembleSpace3D &efem_, DDKernelConfig config)
     : Operator<scalar_t>(0),
-            g_ndof{fem.size()},
+      g_ndof{fem.size()},
       g_elem{fem.mesh().n_elem()},
       n_basis{fem.basis().size()},
       efem{efem_},
@@ -529,7 +529,7 @@ struct KernelDispatcher3D
     }
 };
 
-template <typename scalar_t>
+template <std::floating_point scalar_t>
 void DDSubstructuredOperator3D<scalar_t>::action(const double *fem_in, double *fem_out, const scalar_t *lambda_in,
                                                  scalar_t *lambda_out) const
 {
@@ -541,21 +541,21 @@ void DDSubstructuredOperator3D<scalar_t>::action(const double *fem_in, double *f
         .invoke(efem, g_ndof, n_lambda, B, S, punity, W, fem_in, fem_out, lambda_in, lambda_out, d_work);
 }
 
-template <typename scalar_t>
+template <std::floating_point scalar_t>
 void DDSubstructuredOperator3D<scalar_t>::action(const scalar_t *x, scalar_t *y) const
 {
     action((const double *)nullptr, (double *)nullptr, x, y);
     symmetrize_ddh(n_lambda, x, y);
 }
 
-template <typename scalar_t>
+template <std::floating_point scalar_t>
 void DDSubstructuredOperator3D<scalar_t>::rhs(const double *f, scalar_t *b) const
 {
     action(f, (double *)nullptr, (const scalar_t *)nullptr, b);
     symmetrize_ddh(n_lambda, (const scalar_t *)nullptr, b);
 }
 
-template <typename scalar_t>
+template <std::floating_point scalar_t>
 void DDSubstructuredOperator3D<scalar_t>::postprocess(const scalar_t *lambda, const double *f, double *y) const
 {
     action(f, y, lambda, (scalar_t *)nullptr);

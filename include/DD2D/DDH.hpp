@@ -88,9 +88,6 @@ namespace cuddh
 
         ~DDSubstructuredOperator() = default;
 
-        /// Return the number of degrees of freedom for the substructured problem.
-        int size() const { return 2 * n_lambda; }
-
         /// Compute the right-hand side b of the substructured problem from the
         /// Helmholtz forcing f.
         void rhs(const double *f, scalar_t *b) const;
@@ -159,14 +156,13 @@ namespace cuddh
             : Solver<double>(2 * fem.size()),
               F(omega, h_a, fem, efem, kernel_config, waveholtz_iterations),
               solver(F),
-              lambda(F.size()),
-              Y(F.size())
+              lambda(F.ndof()),
+              Y(F.ndof())
         {}
 
         SolverResults solve(double *x, const double *b, SolverParams opts = {}) const override
         {
             thrust::fill(lambda.begin(), lambda.end(), scalar_t(0));
-            thrust::fill(Y.begin(), Y.end(), scalar_t(0));
 
             scalar_t *d_L = thrust::raw_pointer_cast(lambda.data());
             scalar_t *d_Y = thrust::raw_pointer_cast(Y.data());
@@ -174,7 +170,6 @@ namespace cuddh
             F.rhs(b, d_Y);
             SolverResults out = solver.solve(d_L, d_Y, opts);
 
-            dla::zeros(this->ndof(), x);
             F.postprocess(d_L, b, x);
 
             return out;

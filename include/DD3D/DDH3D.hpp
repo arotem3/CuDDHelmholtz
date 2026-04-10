@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <cuda_runtime.h>
 
+#include <concepts>
 #include <format>
 #include <functional>
 #include <type_traits>
@@ -32,12 +33,9 @@ namespace cuddh
      * The scalar type scalar_t is either float or double and is the scalar type in which the substructured problem
      * is solved. The original finite element problem is always in double precision.
      */
-    template <typename scalar_t>
+    template <std::floating_point scalar_t>
     class DDSubstructuredOperator3D : public Operator<scalar_t>
     {
-        static_assert(std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
-                      "scalar_t must be float or double");
-
     public:
         /// @brief initialize domain decomposition Helmholtz approximate solver.
         /// @param omega the Helmholtz frequency
@@ -49,9 +47,6 @@ namespace cuddh
                                   DDKernelConfig config = {});
 
         ~DDSubstructuredOperator3D() = default;
-
-        /// return the number of degrees of freedom for the substructured problem.
-        int size() const { return 2 * n_lambda; }
 
         // Compute the right hand side `b` of the substructured problem from the
         // forcing `f` of the Helmholtz problem (i.e. the right hand side of the
@@ -111,7 +106,7 @@ namespace cuddh
      * The scalar type scalar_t is either float or double and is the scalar type in which the substructured problem
      * is solved. The original finite element problem is always in double precision.
      */
-    template <typename scalar_t>
+    template <std::floating_point scalar_t>
     class DDH3D : Solver<double>
     {
     public:
@@ -120,14 +115,13 @@ namespace cuddh
             : Solver<double>(2 * fem.size()),
               F(omega, h_a, fem, efem, kernel_config),
               solver(F),
-              lambda(F.size()),
-              Y(F.size())
+              lambda(F.ndof()),
+              Y(F.ndof())
         {}
 
         SolverResults solve(double *x, const double *b, SolverParams opts = {}) const override
         {
             thrust::fill(lambda.begin(), lambda.end(), scalar_t(0));
-            thrust::fill(Y.begin(), Y.end(), scalar_t(0));
 
             scalar_t *d_L = thrust::raw_pointer_cast(lambda.data());
             scalar_t *d_Y = thrust::raw_pointer_cast(Y.data());
@@ -135,11 +129,12 @@ namespace cuddh
             F.rhs(b, d_Y);
             SolverResults out = solver.solve(d_L, d_Y, opts);
 
-            dla::zeros(this->ndof(), x);
             F.postprocess(d_L, b, x);
 
             return out;
         }
+
+        const DDSubstructuredOperator3D<scalar_t> &op() const { return F; }
 
     private:
         DDSubstructuredOperator3D<scalar_t> F;
