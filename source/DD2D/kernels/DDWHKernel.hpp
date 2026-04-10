@@ -36,7 +36,7 @@ namespace cuddh::details
     };
 
     template <typename scalar_t, int NB, int NEL, int TDOF = 1>
-    __global__ __launch_bounds__(NB * NB * NEL, (32 * 48) / (NB * NB * NEL)) void ddh_wh_action_kernel(
+    __global__ __launch_bounds__(NB * NB * NEL, (32 * CUDDH_WARPS_PER_SM) / (NB * NB * NEL)) void ddh_wh_action_kernel(
         const DDHWHKernelData<scalar_t, NB, NEL, TDOF> helper, const double *const __restrict__ x,
         double *const __restrict__ y, const scalar_t *const __restrict__ d_lambda,
         scalar_t *const __restrict__ d_update)

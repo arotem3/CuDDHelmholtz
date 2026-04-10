@@ -18,6 +18,7 @@ endif()
 # Options
 option(CUDDH_DEBUG "Enable debug mode" OFF)
 option(CUDDH_LOG_MEMCPY "Enable logging of memory copies" OFF)
+option(CUDDH_WARPS_PER_SM "Number of warps per SM" 32)
 
 # Set CUDDH_DEBUG if build type is Debug
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -27,6 +28,7 @@ endif()
 # Display option values
 message(STATUS "CUDDH_DEBUG: ${CUDDH_DEBUG}")
 message(STATUS "CUDDH_LOG_MEMCPY: ${CUDDH_LOG_MEMCPY}")
+message(STATUS "CUDDH_WARPS_PER_SM: ${CUDDH_WARPS_PER_SM}")
 
 # Output configuration file
 configure_file(
