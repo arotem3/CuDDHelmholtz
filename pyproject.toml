@@ -8,4 +8,5 @@ dependencies = [
     "pandas>=2.3.3",
     "nvidia-ml-py",
     "scipy>=1.15.3",
+    "pyvista>=0.47.3",
 ]
