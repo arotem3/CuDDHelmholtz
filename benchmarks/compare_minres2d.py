@@ -28,6 +28,7 @@ KERNEL_TDOFS: list[int] = [1, 2, 4]
 KERNEL_CONFIGS: list[tuple[int, int]] = [
     (b, k) for b in KERNEL_BLOCK_SIZES for k in KERNEL_TDOFS
 ]
+SELECTED_KERNEL_CONFIGS: list[tuple[int, int]] = [(256, 1), (1024, 1), (1024, 4)]
 
 
 # ---------------------------------------------------------------------------
@@ -320,9 +321,8 @@ def ensure_plot_dir(output_dir: Path) -> Path:
 
 def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
     """
-    For each fixed kernel config, plot runtime vs DOFs for both subdomain solvers.
-    Error bars are asymmetric and derived from quantiles:
-      lower = p50 - p10, upper = p90 - p50.
+    For each fixed kernel config, plot runtime and throughput vs DOFs for both
+    subdomain solvers.
     """
     if df.empty:
         return
@@ -358,43 +358,31 @@ def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
         x = kdata["n_dof"]
 
         wh_y = kdata["waveholtz_p50_ms"]
-        wh_yerr_low = (kdata["waveholtz_p50_ms"] - kdata["waveholtz_p10_ms"]).clip(
-            lower=0
-        )
-        wh_yerr_high = (kdata["waveholtz_p90_ms"] - kdata["waveholtz_p50_ms"]).clip(
-            lower=0
-        )
-
         mr_y = kdata["minres_p50_ms"]
-        mr_yerr_low = (kdata["minres_p50_ms"] - kdata["minres_p10_ms"]).clip(lower=0)
-        mr_yerr_high = (kdata["minres_p90_ms"] - kdata["minres_p50_ms"]).clip(lower=0)
 
+        # Runtime plot (log y-scale)
         fig, ax = plt.subplots(figsize=(6.6, 4.8), layout="constrained")
-        ax.errorbar(
+        ax.plot(
             x,
             wh_y,
-            yerr=[wh_yerr_low, wh_yerr_high],
             marker="o",
             linewidth=1.9,
             markersize=5,
-            capsize=2.8,
             color="tab:blue",
-            label="WaveHoltz (p50, p10-p90)",
+            label="WaveHoltz",
         )
-        ax.errorbar(
+        ax.plot(
             x,
             mr_y,
-            yerr=[mr_yerr_low, mr_yerr_high],
             marker="s",
             linewidth=1.9,
             markersize=5,
-            capsize=2.8,
             color="tab:orange",
-            label="MINRES (p50, p10-p90)",
+            label="MINRES",
         )
 
         _set_dof_xaxis(ax)
-        ax.set_ylim(bottom=0)
+        ax.set_yscale("log", base=10)
         _style_axes(ax)
         ax.set_xlabel("#DOFs")
         ax.set_ylabel("Runtime [ms]")
@@ -406,11 +394,171 @@ def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
         )
         plt.close(fig)
 
+        # Throughput plot (MDOFs/s)
+        wh_thr_p50 = x / (kdata["waveholtz_p50_ms"] * 1e3)
+        mr_thr_p50 = x / (kdata["minres_p50_ms"] * 1e3)
+
+        fig, ax = plt.subplots(figsize=(6.6, 4.8), layout="constrained")
+        ax.plot(
+            x,
+            wh_thr_p50,
+            marker="o",
+            linewidth=1.9,
+            markersize=5,
+            color="tab:blue",
+            label="WaveHoltz",
+        )
+        ax.plot(
+            x,
+            mr_thr_p50,
+            marker="s",
+            linewidth=1.9,
+            markersize=5,
+            color="tab:orange",
+            label="MINRES",
+        )
+
+        _set_dof_xaxis(ax)
+        ax.set_ylim(bottom=0)
+        _style_axes(ax)
+        ax.set_xlabel("#DOFs")
+        ax.set_ylabel("Throughput [MDOFs/s]")
+        ax.set_title(_kernel_title(bs, td))
+        ax.legend()
+        fig.savefig(
+            plot_dir / f"compare_minres2d_throughput_{_kernel_slug(bs, td)}.pdf",
+            bbox_inches="tight",
+        )
+        plt.close(fig)
+
+
+def plot_selected_kernel_comparison(df: pd.DataFrame, plot_dir: Path) -> None:
+    """
+    Plot selected kernel configurations in a single figure for runtime and
+    throughput. Kernel config is encoded by color, solver by linestyle/marker.
+    """
+    if df.empty:
+        return
+
+    required = {
+        "n_dof",
+        "waveholtz_p50_ms",
+        "minres_p50_ms",
+    }
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise RuntimeError(
+            "Missing required columns in combined CSV: " + ", ".join(missing)
+        )
+
+    sub = df.copy()
+    if "requested_block_size" in sub.columns:
+        sub["req_bs"] = sub["requested_block_size"].astype(int)
+        sub["req_td"] = sub["requested_tdof"].astype(int)
+    else:
+        sub["req_bs"] = sub["kernel_block_size"].astype(int)
+        sub["req_td"] = sub["kernel_tdof"].astype(int)
+
+    selected = sub[
+        sub[["req_bs", "req_td"]].apply(tuple, axis=1).isin(SELECTED_KERNEL_CONFIGS)
+    ].copy()
+    if selected.empty:
+        return
+
+    kernel_colors = {
+        (256, 1): "tab:blue",
+        (1024, 1): "tab:orange",
+        (1024, 4): "tab:green",
+    }
+    solver_style = {
+        "WaveHoltz": {"linestyle": "-", "marker": "o", "ycol": "waveholtz_p50_ms"},
+        "MINRES": {"linestyle": "--", "marker": "s", "ycol": "minres_p50_ms"},
+    }
+
+    # Combined runtime plot
+    fig, ax = plt.subplots(figsize=(7.2, 5.0), layout="constrained")
+    for bs, td in SELECTED_KERNEL_CONFIGS:
+        kdata = selected[
+            (selected["req_bs"] == bs) & (selected["req_td"] == td)
+        ].sort_values("n_dof")
+        if kdata.empty:
+            continue
+        x = kdata["n_dof"]
+        color = kernel_colors.get((bs, td), "tab:gray")
+        kernel_lbl = _kernel_title(bs, td)
+
+        for solver, style in solver_style.items():
+            y = kdata[style["ycol"]]
+            ax.plot(
+                x,
+                y,
+                marker=style["marker"],
+                linestyle=style["linestyle"],
+                linewidth=1.9,
+                markersize=5,
+                color=color,
+                label=f"{solver}, {kernel_lbl}",
+            )
+
+    _set_dof_xaxis(ax)
+    ax.set_yscale("log", base=10)
+    y0, y1 = ax.get_ylim()
+    ax.set_ylim(y0, y1 * 1.35)
+    _style_axes(ax)
+    ax.set_xlabel("#DOFs")
+    ax.set_ylabel("Runtime [ms]")
+    ax.legend(fontsize=9, ncol=2)
+    fig.savefig(
+        plot_dir / "compare_minres2d_runtime_selected_kernels.pdf",
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
+    # Combined throughput plot
+    fig, ax = plt.subplots(figsize=(7.2, 5.0), layout="constrained")
+    for bs, td in SELECTED_KERNEL_CONFIGS:
+        kdata = selected[
+            (selected["req_bs"] == bs) & (selected["req_td"] == td)
+        ].sort_values("n_dof")
+        if kdata.empty:
+            continue
+        x = kdata["n_dof"]
+        color = kernel_colors.get((bs, td), "tab:gray")
+        kernel_lbl = _kernel_title(bs, td)
+
+        for solver, style in solver_style.items():
+            y = x / (kdata[style["ycol"]] * 1e3)
+            ax.plot(
+                x,
+                y,
+                marker=style["marker"],
+                linestyle=style["linestyle"],
+                linewidth=1.9,
+                markersize=5,
+                color=color,
+                label=f"{solver}, {kernel_lbl}",
+            )
+
+    _set_dof_xaxis(ax)
+    ax.set_ylim(bottom=0)
+    _, y1 = ax.get_ylim()
+    ax.set_ylim(0, y1 * 1.20)
+    _style_axes(ax)
+    ax.set_xlabel("#DOFs")
+    ax.set_ylabel("Throughput [MDOFs/s]")
+    ax.legend(fontsize=9, ncol=2)
+    fig.savefig(
+        plot_dir / "compare_minres2d_throughput_selected_kernels.pdf",
+        bbox_inches="tight",
+    )
+    plt.close(fig)
+
 
 def make_plots(df: pd.DataFrame, output_dir: Path) -> None:
     configure_plot_style()
     plot_dir = ensure_plot_dir(output_dir)
     plot_scaling_per_kernel(df, plot_dir)
+    plot_selected_kernel_comparison(df, plot_dir)
 
 
 def main() -> None:
