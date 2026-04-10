@@ -41,6 +41,8 @@
  * This format can be read and visualized, for example, in Python. See `visualize.py`.
  */
 
+#include <memory>
+
 #include "CLI11.hpp"
 #include "cuddh.hpp"
 #include "examples.hpp"
@@ -72,6 +74,9 @@ __device__ static double alpha(const double X[2])
         return 1.0;
 }
 
+static int get_n_lambda(const std::unique_ptr<Solver<double>> &ddh);
+static std::string get_kernel_str(const std::unique_ptr<Solver<double>> &ddh);
+
 int main(int argc, char *argv[])
 {
     int deg = 3;                          // polynomial degree of basis functions
@@ -82,6 +87,7 @@ int main(int argc, char *argv[])
     int maxit = 1000;                     // maximum number of GMRES iterations
     double rtol = 1e-3;                   // relative tolerance
     std::string verbose_str = "progress"; // silent | progress | iteration
+    std::string subsolver = "waveholtz";  // waveholtz | minres
 
     CLI::App app{"DDH: Domain decomposition solver for the 2D Helmholtz equation"};
     app.add_option("-p,--deg", deg, "Polynomial degree of basis functions")->default_val(3);
@@ -100,6 +106,9 @@ int main(int argc, char *argv[])
     app.add_option("-v,--verbose", verbose_str, "Verbosity: silent | progress | iteration")
         ->default_val("progress")
         ->check(CLI::IsMember({"silent", "progress", "iteration"}, CLI::ignore_case));
+    app.add_option("--subsolver", subsolver, "Subdomain solver: waveholtz | minres")
+        ->default_val("waveholtz")
+        ->check(CLI::IsMember({"waveholtz", "minres"}, CLI::ignore_case));
     CLI11_PARSE(app, argc, argv);
 
     int nx = grid[0];
@@ -145,11 +154,13 @@ int main(int argc, char *argv[])
 
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
 
-    auto ddh = [&]() {
+    auto ddh = [&]() -> std::unique_ptr<Solver<double>> {
         auto a = gridfunc(fem, [] __device__(const double X[2]) -> double { return alpha(X); });
         double *d_a = thrust::raw_pointer_cast(a.data());
-        return DDH<float, SubdomainSolver::MINRES>(omega, d_a, fem, efem, config);
-        // return DDH<float>(omega, d_a, fem, efem, config);
+        if (subsolver == "minres")
+            return std::make_unique<DDH<float, SubdomainSolver::MINRES>>(omega, d_a, fem, efem, config);
+        else
+            return std::make_unique<DDH<float>>(omega, d_a, fem, efem, config);
     }();
 
     thrust::universal_vector<double> U(N, 0.0);
@@ -170,10 +181,10 @@ int main(int argc, char *argv[])
               << "\t#subdomains = " << efem.size() << "\n"
               << "\tmax #elements / subdomain = " << efem.max_n_elem() << "\n"
               << "\tmax #dof / subdomain = " << efem.max_size() << "\n"
-              << "\tkernel = {" << ddh.op().kernel_str() << "}\n"
-              << "\t#lambda = " << ddh.op().ndof() << std::endl;
+              << "\tkernel = {" << get_kernel_str(ddh) << "}\n"
+              << "\t#lambda = " << get_n_lambda(ddh) << std::endl;
 
-    auto out = ddh.solve(u, b, opts);
+    auto out = ddh->solve(u, b, opts);
 
     double res = [&]() -> double {
         ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
@@ -216,4 +227,22 @@ int main(int argc, char *argv[])
         std::cout << "Residuals written to: " << res_file << "\n";
 
     return 0;
+}
+
+int get_n_lambda(const std::unique_ptr<Solver<double>> &ddh)
+{
+    if (auto ddh_ptr = dynamic_cast<DDH<float, SubdomainSolver::MINRES> *>(ddh.get()))
+        return ddh_ptr->op().ndof();
+    else if (auto ddh_ptr = dynamic_cast<DDH<float> *>(ddh.get()))
+        return ddh_ptr->op().ndof();
+    return 0;
+}
+
+std::string get_kernel_str(const std::unique_ptr<Solver<double>> &ddh)
+{
+    if (auto ddh_ptr = dynamic_cast<DDH<float, SubdomainSolver::MINRES> *>(ddh.get()))
+        return ddh_ptr->op().kernel_str();
+    else if (auto ddh_ptr = dynamic_cast<DDH<float> *>(ddh.get()))
+        return ddh_ptr->op().kernel_str();
+    return std::string("unknown");
 }
