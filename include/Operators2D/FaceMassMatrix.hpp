@@ -1,7 +1,7 @@
 #ifndef CUDDH_FACE_MASS_MATRIX_HPP
 #define CUDDH_FACE_MASS_MATRIX_HPP
 
-#include "H1Space2D.hpp"
+#include "FEM2D/H1Space2D.hpp"
 #include "HostDeviceArray.hpp"
 #include "Operator.hpp"
 #include "forall.hpp"

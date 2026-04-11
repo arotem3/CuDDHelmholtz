@@ -4,7 +4,7 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-#include "H1Space2D.hpp"
+#include "FEM2D/H1Space2D.hpp"
 #include "Operator.hpp"
 #include "SmallMatrix.hpp"
 #include "linalg.hpp"

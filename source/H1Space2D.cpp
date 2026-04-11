@@ -1,43 +1,37 @@
-#include "H1Space2D.hpp"
+#include "FEM2D/H1Space2D.hpp"
 
 template <typename Map, typename Key>
-static bool contains(const Map & map, Key key)
+static bool contains(const Map &map, Key key)
 {
     return map.find(key) != map.end();
 }
 
 namespace cuddh
 {
-    H1Space2D::H1Space2D(const Mesh2D& mesh_, const Basis& basis_)
-        : n_elem{mesh_.n_elem()},
-          n_basis{basis_.size()},
-          _mesh{mesh_},
-          _basis{basis_},
-          _I(n_basis * n_basis * n_elem)
+    H1Space2D::H1Space2D(const Mesh2D &mesh_, const Basis &basis_)
+        : n_elem{mesh_.n_elem()}, n_basis{basis_.size()}, _mesh{mesh_}, _basis{basis_}, _I(n_basis * n_basis * n_elem)
     {
         icube_wrapper I(_I.host_write(), n_basis, n_basis, n_elem);
 
         std::unordered_map<int, int> mask;
-        
+
         const int n_edges = _mesh.n_edges(FaceType::INTERIOR);
         const int n_nodes = _mesh.n_nodes();
 
         // map edge index to volume index
         const int nc = n_basis;
-        auto E2V = [nc](int i, int f, int el) -> int
-        {
-            const int m = (f == 0 || f == 2) ? i : (f == 1) ? (nc-1) : 0;
-            const int n = (f == 1 || f == 3) ? i : (f == 2) ? (nc-1) : 0;
+        auto E2V = [nc](int i, int f, int el) -> int {
+            const int m = (f == 0 || f == 2) ? i : (f == 1) ? (nc - 1) : 0;
+            const int n = (f == 1 || f == 3) ? i : (f == 2) ? (nc - 1) : 0;
 
             return m + nc * (n + nc * el);
         };
 
         // map node to volume index
-        auto N2V = [nc](int c, int el) -> int
-        {
-            const int m = (c == 0 || c == 3) ? 0 : (nc-1);
-            const int n = (c == 0 || c == 1) ? 0 : (nc-1);
-            
+        auto N2V = [nc](int c, int el) -> int {
+            const int m = (c == 0 || c == 3) ? 0 : (nc - 1);
+            const int n = (c == 0 || c == 1) ? 0 : (nc - 1);
+
             return m + nc * (n + nc * el);
         };
 
@@ -56,9 +50,9 @@ namespace cuddh
 
                 const bool reversed = edge->delta < 0;
 
-                for (int i = 1; i < n_basis-1; ++i)
+                for (int i = 1; i < n_basis - 1; ++i)
                 {
-                    const int j = (reversed) ? (n_basis-1-i) : i;
+                    const int j = (reversed) ? (n_basis - 1 - i) : i;
 
                     const int v0 = E2V(i, s0, el0);
                     const int v1 = E2V(j, s1, el1);
@@ -70,8 +64,8 @@ namespace cuddh
         // iterate over nodes to identify duplicate DOFs
         for (int k = 0; k < n_nodes; ++k)
         {
-            auto& node = _mesh.node(k);
-            
+            auto &node = _mesh.node(k);
+
             const int nel = node.connected_elements.size();
             const int el0 = node.connected_elements.at(0).id;
             const int c0 = node.connected_elements.at(0).i;
@@ -110,7 +104,7 @@ namespace cuddh
 
         for (int el = 0; el < n_elem; ++el)
         {
-            const Element * elem = _mesh.element(el);
+            const Element *elem = _mesh.element(el);
             for (int j = 0; j < n_basis; ++j)
             {
                 for (int i = 0; i < n_basis; ++i)
@@ -126,12 +120,8 @@ namespace cuddh
         }
     }
 
-    TraceSpace2D::TraceSpace2D(const H1Space2D& fem_, int nf, const int * faces_)
-        : fem{fem_},
-          _n_faces{nf},
-          n_basis{fem.basis().size()},
-          _I(n_basis * nf),
-          _faces(nf)
+    TraceSpace2D::TraceSpace2D(const H1Space2D &fem_, int nf, const int *faces_)
+        : fem{fem_}, _n_faces{nf}, n_basis{fem.basis().size()}, _I(n_basis * nf), _faces(nf)
     {
         auto F = reshape(_faces.host_write(), nf);
         auto I = reshape(_I.host_write(), n_basis, nf);
@@ -139,7 +129,7 @@ namespace cuddh
         for (int i = 0; i < nf; ++i)
             F(i) = faces_[i];
 
-        const Mesh2D& mesh = fem.mesh();
+        const Mesh2D &mesh = fem.mesh();
         const int n_elem = mesh.n_elem();
         auto K = reshape(fem.global_indices(MemorySpace::HOST), n_basis, n_basis, n_elem);
 
@@ -148,18 +138,17 @@ namespace cuddh
 
         // map edge index to volume index
         const int nc = n_basis;
-        auto E2V = [nc](int i, int f, int el) -> int
-        {
-            const int m = (f == 0 || f == 2) ? i : (f == 1) ? (nc-1) : 0;
-            const int n = (f == 1 || f == 3) ? i : (f == 2) ? (nc-1) : 0;
+        auto E2V = [nc](int i, int f, int el) -> int {
+            const int m = (f == 0 || f == 2) ? i : (f == 1) ? (nc - 1) : 0;
+            const int n = (f == 1 || f == 3) ? i : (f == 2) ? (nc - 1) : 0;
 
             return m + nc * (n + nc * el);
         };
-        
+
         int l = 0;
         for (int f = 0; f < nf; ++f)
         {
-            const Edge * edge = mesh.edge(F(f));
+            const Edge *edge = mesh.edge(F(f));
             const int el = edge->elements[0];
             const int s = edge->sides[0];
 
@@ -186,39 +175,30 @@ namespace cuddh
             proj(i) = P.at(i);
     }
 
-    void TraceSpace2D::restrict(const double * __restrict__ x, double * __restrict__ y) const
+    void TraceSpace2D::restrict(const double *__restrict__ x, double *__restrict__ y) const
     {
         const int n = ndof;
         auto proj = global_indices(MemorySpace::DEVICE);
 
-        forall(n, [=] __device__ (int i) -> void
-        {
-            y[i] = x[proj(i)];
-        });
+        forall(n, [=] __device__(int i) -> void { y[i] = x[proj(i)]; });
     }
 
-    void TraceSpace2D::prolong(const double * __restrict__ x, double * __restrict__ y) const
+    void TraceSpace2D::prolong(const double *__restrict__ x, double *__restrict__ y) const
     {
         const int n = ndof;
         auto proj = global_indices(MemorySpace::DEVICE);
 
-        forall(n, [=] __device__ (int i) -> void
-        {
-            y[proj(i)] += x[i];
-        });
+        forall(n, [=] __device__(int i) -> void { y[proj(i)] += x[i]; });
     }
 
-    void TraceSpace2D::orth(double * x) const
+    void TraceSpace2D::orth(double *x) const
     {
         auto proj = global_indices(MemorySpace::DEVICE);
 
-        forall(ndof, [=] __device__ (int i) -> void
-        {
-            x[proj(i)] = 0.0;
-        });
+        forall(ndof, [=] __device__(int i) -> void { x[proj(i)] = 0.0; });
     }
 
-    const Mesh2D::EdgeMetricCollection& TraceSpace2D::metrics(const QuadratureRule& quad) const
+    const Mesh2D::EdgeMetricCollection &TraceSpace2D::metrics(const QuadratureRule &quad) const
     {
         auto key = quad.name();
         if (not contains(_metrics, key))

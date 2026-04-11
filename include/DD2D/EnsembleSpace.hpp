@@ -5,7 +5,7 @@
 #include <utility>
 
 #include "DD2D.hpp"
-#include "H1Space2D.hpp"
+#include "FEM2D/H1Space2D.hpp"
 #include "LambdaDof.hpp"
 #include "Tensor.hpp"
 
