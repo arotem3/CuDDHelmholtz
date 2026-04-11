@@ -42,12 +42,12 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, int 
     DDSubstructuredOperator<scalar_t, SubdomainSolver::WaveHoltz> F_wh(omega, d_a, fem, efem, config);
     DDSubstructuredOperator<scalar_t, SubdomainSolver::MINRES> F_mr(omega, d_a, fem, efem, config);
 
-    if (F_wh.size() != F_mr.size())
+    if (F_wh.ndof() != F_mr.ndof())
         throw std::runtime_error("internal error: solver variants produced different lambda dimensions");
 
-    thrust::universal_vector<scalar_t> lambda_a(F_wh.size(), scalar_t(0));
-    thrust::universal_vector<scalar_t> lambda_wh_out(F_wh.size(), scalar_t(0));
-    thrust::universal_vector<scalar_t> lambda_mr_out(F_wh.size(), scalar_t(0));
+    thrust::universal_vector<scalar_t> lambda_a(F_wh.ndof(), scalar_t(0));
+    thrust::universal_vector<scalar_t> lambda_wh_out(F_wh.ndof(), scalar_t(0));
+    thrust::universal_vector<scalar_t> lambda_mr_out(F_wh.ndof(), scalar_t(0));
 
     for (auto &value : lambda_a)
         value = dist(gen);
@@ -126,7 +126,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, int 
               << "  MINRES kernel:           " << F_mr.kernel_str() << "\n"
               << "  #subdomains:             " << efem.size() << "\n"
               << "  #dof:                    " << 2 * fem.size() << "\n"
-              << "  #lambda dof:             " << F_wh.size() << "\n"
+              << "  #lambda dof:             " << F_wh.ndof() << "\n"
               << "  warmup:                  " << warmup << "\n"
               << "  iterations:              " << iterations << "\n";
 
@@ -154,7 +154,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, int 
     {
         const bool ok = write_csv_row(
             output_file, precision, degree, nx, ny, omega, sx, sy, static_cast<int>(config.block_size), config.tdof,
-            warmup, iterations, efem.size(), 2 * fem.size(), F_wh.size(), *waveholtz_min_it, *waveholtz_max_it,
+            warmup, iterations, efem.size(), 2 * fem.size(), F_wh.ndof(), *waveholtz_min_it, *waveholtz_max_it,
             waveholtz_avg_ms, waveholtz_total_ms, waveholtz_p10_ms, waveholtz_p50_ms, waveholtz_p90_ms, *minres_min_it,
             *minres_max_it, minres_avg_ms, minres_total_ms, minres_p10_ms, minres_p50_ms, minres_p90_ms);
         if (!ok)

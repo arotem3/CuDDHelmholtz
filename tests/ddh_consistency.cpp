@@ -26,7 +26,7 @@ static void test_operator_consistency(TestLogger &summary, std::string_view prec
     DDSubstructuredOperator<scalar_t, SubdomainSolver::WaveHoltz> F_wh(omega, d_a, fem, efem);
     DDSubstructuredOperator<scalar_t, SubdomainSolver::MINRES> F_mr(omega, d_a, fem, efem);
 
-    const int n = F_wh.size();
+    const int n = F_wh.ndof();
 
     thrust::universal_vector<scalar_t> lambda(n);
     std::srand(42);
@@ -77,7 +77,7 @@ static void test_rhs_evaluation(TestLogger &summary, std::string_view precision,
     DDSubstructuredOperator<scalar_t, SubdomainSolver::MINRES> F_mr(omega, d_a, fem, efem);
 
     int n_dof = fem.size();
-    int n_lambda = F_wh.size();
+    int n_lambda = F_wh.ndof();
 
     thrust::universal_vector<double> f(2 * n_dof, 0.0);
     for (auto &value : f)
@@ -128,7 +128,7 @@ static void test_postprocessing(TestLogger &summary, std::string_view precision,
     DDSubstructuredOperator<scalar_t, SubdomainSolver::MINRES> F_mr(omega, d_a, fem, efem);
 
     int n_dof = fem.size();
-    int n_lambda = F_wh.size();
+    int n_lambda = F_wh.ndof();
 
     thrust::universal_vector<double> f(2 * n_dof);
     for (auto &value : f)

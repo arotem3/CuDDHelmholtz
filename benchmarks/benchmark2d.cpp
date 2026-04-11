@@ -41,8 +41,8 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
     double *d_ax = thrust::raw_pointer_cast(ax.data());
     Helmholtz H(omega, d_a, d_ax, fem, fs);
 
-    thrust::universal_vector<scalar_t> lambda_a(F.size(), scalar_t(0));
-    thrust::universal_vector<scalar_t> lambda_b(F.size(), scalar_t(0));
+    thrust::universal_vector<scalar_t> lambda_a(F.ndof(), scalar_t(0));
+    thrust::universal_vector<scalar_t> lambda_b(F.ndof(), scalar_t(0));
 
     for (auto &value : lambda_a)
         value = dist(gen);
@@ -125,7 +125,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
               << "  kernel:           " << F.kernel_str() << "\n"
               << "  #subdomains:      " << efem.size() << "\n"
               << "  #dof:             " << n_fem << "\n"
-              << "  #lambda dof:      " << F.size() << "\n"
+              << "  #lambda dof:      " << F.ndof() << "\n"
               << "  warmup:           " << warmup << "\n"
               << "  iterations:       " << iterations << "\n"
               << std::fixed << std::setprecision(3) << "  Helmholtz avg time: " << helmholtz_avg_ms << " [ms]\n";
@@ -140,7 +140,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
     {
         const bool ok = write_csv_row(output_file, precision, degree, nx, ny, omega, sx, sy,
                                       static_cast<int>(config.block_size), config.tdof, warmup, iterations, efem.size(),
-                                      n_fem, F.size(), helmholtz_avg_ms, *min_it, *max_it, avg_ms, total_ms);
+                                      n_fem, F.ndof(), helmholtz_avg_ms, *min_it, *max_it, avg_ms, total_ms);
         if (!ok)
             throw std::runtime_error("failed to write output file: " + output_file);
     }
