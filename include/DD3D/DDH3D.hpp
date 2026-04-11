@@ -103,6 +103,7 @@ namespace cuddh
     };
 
     extern template class DDSubstructuredOperator3D<float>;
+    extern template class DDSubstructuredOperator3D<double>;
 
     /**
      * @brief Domain decomposition Helmholtz solver in 3D.
@@ -147,4 +148,5 @@ namespace cuddh
     };
 
     extern template class DDH3D<float>;
+    extern template class DDH3D<double>;
 } // namespace cuddh

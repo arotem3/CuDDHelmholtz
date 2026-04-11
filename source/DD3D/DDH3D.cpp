@@ -580,5 +580,7 @@ void DDSubstructuredOperator3D<scalar_t>::postprocess(const scalar_t *lambda, co
 namespace cuddh
 {
     template class DDSubstructuredOperator3D<float>;
+    template class DDSubstructuredOperator3D<double>;
     template class DDH3D<float>;
+    template class DDH3D<double>;
 } // namespace cuddh
