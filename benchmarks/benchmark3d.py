@@ -11,22 +11,18 @@ import matplotlib.ticker as ticker
 import pandas as pd
 
 
-MESHES: list[tuple[int, int]] = [
-    (32, 32),
-    (64, 64),
-    (96, 96),
-    (128, 128),
-    (192, 192),
-    (256, 256),
-    (384, 384),
-    (512, 512),
-    (768, 768),
-    (1024, 1024),
+MESHES: list[tuple[int, int, int]] = [
+    (16, 16, 16),
+    (32, 32, 32),
+    (48, 48, 48),
+    (64, 64, 64),
+    (96, 96, 96),
+    (128, 128, 128),
 ]
-DEGREES: list[int] = [1, 2, 3, 4, 7]
+DEGREES: list[int] = [1, 2, 3, 4]
 
 KERNEL_BLOCK_SIZES: list[int] = [256, 512, 1024]
-KERNEL_TDOFS: list[int] = [1, 2, 4]
+KERNEL_TDOFS: list[int] = [1, 2]
 KERNEL_CONFIGS: list[tuple[int, int]] = [
     (b, k) for b in KERNEL_BLOCK_SIZES for k in KERNEL_TDOFS
 ]
@@ -44,51 +40,58 @@ SCALING_KERNEL_CONFIGS: list[tuple[int, int]] = KERNEL_CONFIGS
 
 def kernel_capacity_elements(degree: int, block_size: int, tdof: int) -> int:
     """
-    Return target per-subdomain element capacity E = sx*sy implied by kernel:
-    E = floor(B / P^2) * K.
+    Return target per-subdomain element capacity E = sx*sy*sz implied by kernel:
+    E = floor(B / P^3) * K.
     """
-    p2 = (degree + 1) * (degree + 1)
+    p3 = (degree + 1) * (degree + 1) * (degree + 1)
 
-    return (block_size // p2) * tdof
+    return (block_size // p3) * tdof
 
 
-def choose_subdomain_dims(nx: int, ny: int, target_elems: int) -> tuple[int, int]:
+def choose_subdomain_dims(
+    nx: int, ny: int, nz: int, target_elems: int
+) -> tuple[int, int, int]:
     """
-    Choose sx,sy (subdomain element dimensions) so that sx*sy <= target_elems,
+    Choose sx,sy,sz (subdomain element dimensions) so that sx*sy*sz <= target_elems,
     maximizing fill while preserving the mesh aspect ratio as much as possible.
     """
     if target_elems <= 1:
-        return 1, 1
+        return 1, 1, 1
 
-    max_elems = min(target_elems, nx * ny)
-    target_aspect = nx / ny
+    max_elems = min(target_elems, nx * ny * nz)
+    target_aspect_xy = nx / ny
+    target_aspect_xz = nx / nz
 
-    best_sx, best_sy = 1, 1
+    best_sx, best_sy, best_sz = 1, 1, 1
     best_fill = 1
     best_aspect_err = float("inf")
 
     for sx in range(1, min(nx, max_elems) + 1):
-        sy = min(ny, max_elems // sx)
-        if sy < 1:
-            continue
-        fill = sx * sy
-        if fill < best_fill:
-            continue
+        for sy in range(1, min(ny, max_elems // sx) + 1):
+            sz = min(nz, max_elems // (sx * sy))
+            if sz < 1:
+                continue
+            fill = sx * sy * sz
+            if fill < best_fill:
+                continue
 
-        aspect = sx / sy
-        aspect_err = abs(math.log(aspect / target_aspect))
+            aspect_xy = sx / sy
+            aspect_xz = sx / sz
+            aspect_err = abs(math.log(aspect_xy / target_aspect_xy)) + abs(
+                math.log(aspect_xz / target_aspect_xz)
+            )
 
-        if fill > best_fill or aspect_err < best_aspect_err:
-            best_sx, best_sy = sx, sy
-            best_fill = fill
-            best_aspect_err = aspect_err
+            if fill > best_fill or aspect_err < best_aspect_err:
+                best_sx, best_sy, best_sz = sx, sy, sz
+                best_fill = fill
+                best_aspect_err = aspect_err
 
-    return best_sx, best_sy
+    return best_sx, best_sy, best_sz
 
 
 def subdomains_for_kernel(
-    nx: int, ny: int, degree: int, block_size: int, tdof: int
-) -> tuple[int, int] | None:
+    nx: int, ny: int, nz: int, degree: int, block_size: int, tdof: int
+) -> tuple[int, int, int] | None:
     """
     Choose subdomain dimensions from kernel configuration.
     Returns None only when a fixed kernel cannot represent even one element.
@@ -96,7 +99,7 @@ def subdomains_for_kernel(
     target_elems = kernel_capacity_elements(degree, block_size, tdof)
     if target_elems <= 0:
         return None
-    return choose_subdomain_dims(nx, ny, target_elems)
+    return choose_subdomain_dims(nx, ny, nz, target_elems)
 
 
 # ---------------------------------------------------------------------------
@@ -132,16 +135,16 @@ def configure_plot_style() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run a 2D DDH operator benchmark study and produce plots."
+        description="Run a 3D DDH operator benchmark study and produce plots."
     )
     parser.add_argument(
         "--exe",
-        default=str(Path("build") / "benchmarks" / "benchmark2d"),
-        help="Path to benchmark2d executable.",
+        default=str(Path("build") / "benchmarks" / "benchmark3d"),
+        help="Path to benchmark3d executable.",
     )
     parser.add_argument(
         "--output-dir",
-        default=str(Path("benchmarks") / "results" / "ddh2d_study"),
+        default=str(Path("benchmarks") / "results" / "ddh3d_study"),
         help="Directory where combined data and figures will be written.",
     )
     parser.add_argument(
@@ -173,30 +176,32 @@ def nearest_divisor(n: int, target: int) -> int:
     return min(ds, key=lambda d: abs(d - target))
 
 
-def default_subdomains(nx: int, ny: int) -> tuple[int, int]:
-    sx = nearest_divisor(nx, max(2, nx // 8))
-    sy = nearest_divisor(ny, max(2, ny // 8))
-    return sx, sy
+def default_subdomains(nx: int, ny: int, nz: int) -> tuple[int, int, int]:
+    sx = nearest_divisor(nx, max(2, nx // 4))
+    sy = nearest_divisor(ny, max(2, ny // 4))
+    sz = nearest_divisor(nz, max(2, nz // 4))
+    return sx, sy, sz
 
 
-def candidate_subdomains(nx: int, ny: int) -> list[tuple[int, int]]:
+def candidate_subdomains(nx: int, ny: int, nz: int) -> list[tuple[int, int, int]]:
     targets = [
-        (max(2, nx // 4), max(2, ny // 4)),
-        (max(2, nx // 8), max(2, ny // 8)),
-        (max(2, nx // 16), max(2, ny // 16)),
+        (max(2, nx // 2), max(2, ny // 2), max(2, nz // 2)),
+        (max(2, nx // 4), max(2, ny // 4), max(2, nz // 4)),
+        (max(2, nx // 8), max(2, ny // 8), max(2, nz // 8)),
     ]
-    result: list[tuple[int, int]] = []
-    for tx, ty in targets:
+    result: list[tuple[int, int, int]] = []
+    for tx, ty, tz in targets:
         sx = nearest_divisor(nx, tx)
         sy = nearest_divisor(ny, ty)
-        key = (sx, sy)
+        sz = nearest_divisor(nz, tz)
+        key = (sx, sy, sz)
         if key not in result:
             result.append(key)
     return result
 
 
-def scaling_omega(degree: int, nx: int, ny: int) -> float:
-    return 0.1 * degree * max(nx, ny)
+def scaling_omega(degree: int, nx: int, ny: int, nz: int) -> float:
+    return 0.1 * degree * max(nx, ny, nz)
 
 
 def build_plan(precision_mode: str) -> list[dict]:
@@ -205,13 +210,13 @@ def build_plan(precision_mode: str) -> list[dict]:
     precisions = ["float", "double"] if precision_mode == "both" else [precision_mode]
 
     # --- Study: degree & mesh scaling under fixed kernel configs ---
-    for nx, ny in MESHES:
+    for nx, ny, nz in MESHES:
         for degree in DEGREES:
             for block_size, tdof in SCALING_KERNEL_CONFIGS:
-                sub_dims = subdomains_for_kernel(nx, ny, degree, block_size, tdof)
+                sub_dims = subdomains_for_kernel(nx, ny, nz, degree, block_size, tdof)
                 if sub_dims is None:
                     continue
-                sx, sy = sub_dims
+                sx, sy, sz = sub_dims
                 for precision in precisions:
                     plan.append(
                         {
@@ -221,11 +226,13 @@ def build_plan(precision_mode: str) -> list[dict]:
                             "degree": degree,
                             "nx": nx,
                             "ny": ny,
+                            "nz": nz,
                             "sx": sx,
                             "sy": sy,
+                            "sz": sz,
                             "block_size": block_size,
                             "tdof": tdof,
-                            "omega": scaling_omega(degree, nx, ny),
+                            "omega": scaling_omega(degree, nx, ny, nz),
                         }
                     )
                     run_id += 1
@@ -245,11 +252,11 @@ def run_benchmark(
         "--mesh",
         str(run["nx"]),
         str(run["ny"]),
+        str(run["nz"]),
         "--subdomains",
         str(run["sx"]),
         str(run["sy"]),
-        "--omega",
-        str(run["omega"]),
+        str(run["sz"]),
         "--block-size",
         str(run["block_size"]),
         "--tdof",
@@ -265,7 +272,7 @@ def run_benchmark(
     completed = subprocess.run(cmd, capture_output=True, text=True)
     if completed.returncode != 0:
         raise RuntimeError(
-            f"benchmark2d failed for run_id={run['run_id']}\n"
+            f"benchmark3d failed for run_id={run['run_id']}\n"
             f"command: {' '.join(cmd)}\n"
             f"stdout:\n{completed.stdout}\n"
             f"stderr:\n{completed.stderr}"
@@ -310,7 +317,7 @@ def run_study(
 
         print(
             f"[{idx:03d}/{len(plan):03d}] study={run['study']}, precision={run['precision']}, "
-            f"degree={run['degree']}, mesh={run['nx']}x{run['ny']}, sub={run['sx']}x{run['sy']}, "
+            f"degree={run['degree']}, mesh={run['nx']}x{run['ny']}x{run['nz']}, sub={run['sx']}x{run['sy']}x{run['sz']}, "
             f"block={run['block_size']}, tdof={run['tdof']}, omega={run['omega']}"
         )
         try:
@@ -329,7 +336,7 @@ def run_study(
     if failures:
         print(f"Failed runs: {len(failures)}")
         pd.DataFrame(failures).to_csv(
-            output_dir / "benchmark2d_failures.csv", index=False
+            output_dir / "benchmark3d_failures.csv", index=False
         )
 
     df = pd.DataFrame(rows).sort_values("run_id").reset_index(drop=True)
@@ -337,7 +344,7 @@ def run_study(
 
 
 def save_combined_data(df: pd.DataFrame, output_dir: Path) -> Path:
-    combined_csv = output_dir / "benchmark2d_combined.csv"
+    combined_csv = output_dir / "benchmark3d_combined.csv"
     df.to_csv(combined_csv, index=False)
     return combined_csv
 
@@ -403,9 +410,9 @@ def plot_scaling_per_kernel(df: pd.DataFrame, plot_dir: Path) -> None:
     Produce per-kernel scaling figures (single precision):
       1) absolute runtime [ms]
       2) runtime / helmholtz runtime (log y-axis)
-            3) throughput [MDOF/s]
+      3) throughput [MDOF/s]
 
-        x-axis: number of degrees of freedom (log-10 scale).
+    x-axis: number of degrees of freedom (log-10 scale).
     lines: polynomial degree.
     """
     sub = df[df["study"] == "degree_mesh_scaling"].copy()
@@ -488,7 +495,7 @@ def plot_fixed_degree_kernel_comparison(df: pd.DataFrame, plot_dir: Path) -> Non
     sub = _single_precision(sub)
     sub["throughput"] = sub["n_dof"] / sub["avg_ms"] * 1e-3  # MDOF/s
 
-    degree_targets = [1, 3, 7]
+    degree_targets = [1, 3]
     palette = [plt.get_cmap("tab10")(i) for i in range(len(KERNEL_CONFIGS))]
     kernel_colors = dict(zip(KERNEL_CONFIGS, palette))
 
@@ -549,12 +556,14 @@ def plot_precision_ratio(df: pd.DataFrame, plot_dir: Path) -> None:
     sub = sub[(sub["req_bs"] == 1024) & (sub["req_td"] == 1)]
 
     pivot = (
-        sub.groupby(["nx", "ny", "degree", "n_dof", "precision"], as_index=False)[
+        sub.groupby(["nx", "ny", "nz", "degree", "n_dof", "precision"], as_index=False)[
             "avg_ms"
         ]
         .mean()
         .pivot(
-            index=["nx", "ny", "degree", "n_dof"], columns="precision", values="avg_ms"
+            index=["nx", "ny", "nz", "degree", "n_dof"],
+            columns="precision",
+            values="avg_ms",
         )
         .dropna()
         .reset_index()
@@ -618,7 +627,7 @@ def plot_helmholtz_throughput(df: pd.DataFrame, plot_dir: Path) -> None:
     sub = _single_precision(sub)
 
     # Average over kernel configs (Helmholtz is kernel-independent)
-    agg = sub.groupby(["nx", "ny", "degree", "n_dof"], as_index=False)[
+    agg = sub.groupby(["nx", "ny", "nz", "degree", "n_dof"], as_index=False)[
         "helmholtz_avg_ms"
     ].mean()
     agg["throughput"] = agg["n_dof"] / agg["helmholtz_avg_ms"] * 1e-3  # MDOF/s
@@ -657,7 +666,7 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    combined_csv = output_dir / "benchmark2d_combined.csv"
+    combined_csv = output_dir / "benchmark3d_combined.csv"
     if args.skip_runs:
         if not combined_csv.exists():
             raise FileNotFoundError(f"combined CSV not found: {combined_csv}")

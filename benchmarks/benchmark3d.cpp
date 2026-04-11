@@ -2,6 +2,7 @@
 #include <fstream>
 #include <iomanip>
 #include <numeric>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -13,36 +14,45 @@ using namespace cuddh;
 
 static DDKernelConfig::BlockSize parse_block_size(int block_size);
 static bool write_csv_row(const std::string &output_file, const std::string &precision, int degree, int nx, int ny,
-                          double omega, int sx, int sy, int kernel_block_size, int kernel_tdof, int warmup,
-                          int iterations, int n_subdomains, int n_dof, int n_lambda_dof, float helmholtz_avg_ms,
-                          float min_ms, float max_ms, float avg_ms, float total_ms);
+                          int nz, double omega, int sx, int sy, int sz, int kernel_block_size, int kernel_tdof,
+                          int warmup, int iterations, int n_subdomains, int n_dof, int n_lambda_dof,
+                          float helmholtz_avg_ms, float min_ms, float max_ms, float avg_ms, float total_ms);
 
 template <typename scalar_t>
-static int run_benchmark(const char *precision, int degree, int nx, int ny, double omega, int sx, int sy,
-                         DDKernelConfig config, int block_size, int tdof, int waveholtz_iterations, int warmup,
-                         int iterations, const std::string &output_file)
+static int run_benchmark(const char *precision, int degree, int nx, int ny, int nz, double omega, int sx, int sy,
+                         int sz, DDKernelConfig config, int waveholtz_iterations, int warmup, int iterations,
+                         const std::string &output_file)
 {
     std::mt19937 gen(42);
     std::uniform_real_distribution<scalar_t> dist(-1, 1);
 
-    Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, ny, -1.0, 1.0);
+    Mesh3D mesh = Mesh3D::uniform_cube(nx, -1.0, 1.0, ny, -1.0, 1.0, nz, -1.0, 1.0);
     Basis basis(degree + 1);
-    H1Space2D fem(mesh, basis);
-    EnsembleSpace efem = partition_uniform_rect(fem, {nx, ny}, {sx, sy});
+    H1Space3D fem(mesh, basis);
+    EnsembleSpace3D efem = partition_uniform_cube(fem, {(unsigned int)nx, (unsigned int)ny, (unsigned int)nz},
+                                                  {(unsigned int)sx, (unsigned int)sy, (unsigned int)sz});
 
-    auto a = gridfunc(fem, [] __device__(const double X[2]) -> double { return 1.0; });
+    thrust::universal_vector<double> a(fem.size());
     double *d_a = thrust::raw_pointer_cast(a.data());
+    gridfunc(fem, [] __device__(double3 X) -> double {
+        (void)X;
+        return 1.0;
+    }, d_a);
 
-    DDSubstructuredOperator<scalar_t> F(omega, d_a, fem, efem, config, waveholtz_iterations);
+    DDSubstructuredOperator3D<scalar_t> F(omega, d_a, fem, efem, config, waveholtz_iterations);
 
-    ivec boundary_faces = mesh.boundary_edges();
-    TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
-    auto ax = trace(fs, [] __device__(const double X[2]) -> double { return 1.0; });
+    auto boundary_faces = mesh.get_boundary_faces();
+    TraceSpace3D fs(fem, boundary_faces.size(), boundary_faces);
+    thrust::universal_vector<double> ax(fs.size());
     double *d_ax = thrust::raw_pointer_cast(ax.data());
-    Helmholtz H(omega, d_a, d_ax, fem, fs);
+    trace(fs, [] __device__(double3 X) -> double {
+        (void)X;
+        return 1.0;
+    }, d_ax);
+    Helmholtz3D H(omega, d_a, d_ax, fem, fs);
 
-    thrust::universal_vector<scalar_t> lambda_a(F.size(), scalar_t(0));
-    thrust::universal_vector<scalar_t> lambda_b(F.size(), scalar_t(0));
+    thrust::universal_vector<scalar_t> lambda_a(F.ndof(), scalar_t(0));
+    thrust::universal_vector<scalar_t> lambda_b(F.ndof(), scalar_t(0));
 
     for (auto &value : lambda_a)
         value = dist(gen);
@@ -61,7 +71,7 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
     thrust::universal_vector<double> helm_in(n_fem, 0.0);
     thrust::universal_vector<double> helm_out(n_fem, 0.0);
     for (auto &value : helm_in)
-        value = dist(gen);
+        value = static_cast<double>(dist(gen));
 
     double *helm_x = thrust::raw_pointer_cast(helm_in.data());
     double *helm_y = thrust::raw_pointer_cast(helm_out.data());
@@ -116,16 +126,16 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
                   << t_ms << " [ms] " << std::setprecision(1) << "(x" << relative_to_helmholtz(t_ms) << ")\n";
     };
 
-    std::cout << "Benchmarking DDSubstructuredOperator<" << precision << ">::action\n"
+    std::cout << "Benchmarking DDSubstructuredOperator3D<" << precision << ">::action\n"
               << "  precision:        " << precision << "\n"
               << "  degree:           " << degree << "\n"
-              << "  mesh:             " << nx << " x " << ny << "\n"
+              << "  mesh:             " << nx << " x " << ny << " x " << nz << "\n"
               << "  omega:            " << omega << "\n"
-              << "  subdomains dims:  " << sx << " x " << sy << "\n"
+              << "  subdomains dims:  " << sx << " x " << sy << " x " << sz << "\n"
               << "  kernel:           " << F.kernel_str() << "\n"
               << "  #subdomains:      " << efem.size() << "\n"
               << "  #dof:             " << n_fem << "\n"
-              << "  #lambda dof:      " << F.size() << "\n"
+              << "  #lambda dof:      " << F.ndof() << "\n"
               << "  warmup:           " << warmup << "\n"
               << "  iterations:       " << iterations << "\n"
               << std::fixed << std::setprecision(3) << "  Helmholtz avg time: " << helmholtz_avg_ms << " [ms]\n";
@@ -138,9 +148,9 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
 
     if (!output_file.empty())
     {
-        const bool ok = write_csv_row(output_file, precision, degree, nx, ny, omega, sx, sy,
+        const bool ok = write_csv_row(output_file, precision, degree, nx, ny, nz, omega, sx, sy, sz,
                                       static_cast<int>(config.block_size), config.tdof, warmup, iterations, efem.size(),
-                                      n_fem, F.size(), helmholtz_avg_ms, *min_it, *max_it, avg_ms, total_ms);
+                                      n_fem, F.ndof(), helmholtz_avg_ms, *min_it, *max_it, avg_ms, total_ms);
         if (!ok)
             throw std::runtime_error("failed to write output file: " + output_file);
     }
@@ -150,13 +160,12 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, doub
 
 int main(int argc, char **argv)
 {
-    CLI::App app{"Benchmark DDSubstructuredOperator::action in 2D"};
+    CLI::App app{"Benchmark DDSubstructuredOperator3D::action in 3D"};
 
     std::string precision = "float";
     int degree = 3;
-    std::vector<int> mesh_dims{64, 64};
-    double omega = 1.0;
-    std::vector<int> subdomain_dims{8, 8};
+    std::vector<int> mesh_dims{32, 32, 32};
+    std::vector<int> subdomain_dims{4, 4, 2};
     int block_size = 0;
     int tdof = 0;
     int waveholtz_iterations = 2;
@@ -166,9 +175,8 @@ int main(int argc, char **argv)
 
     app.add_option("-p,--precision", precision, "Scalar type: float or double");
     app.add_option("-d,--degree", degree, "Polynomial degree")->required();
-    app.add_option("--mesh", mesh_dims, "Mesh dimensions: nx ny")->expected(2)->required();
-    app.add_option("--subdomains", subdomain_dims, "Desired subdomain dimensions: sx sy")->expected(2)->required();
-    app.add_option("--omega", omega, "Helmholtz frequency");
+    app.add_option("--mesh", mesh_dims, "Mesh dimensions: nx ny nz")->expected(3)->required();
+    app.add_option("--subdomains", subdomain_dims, "Desired subdomain dimensions: sx sy sz")->expected(3)->required();
     app.add_option("--block-size", block_size, "Kernel block size: 0, 256, 512, or 1024");
     app.add_option("--tdof", tdof, "Kernel tdof value");
     app.add_option("--waveholtz-iterations", waveholtz_iterations,
@@ -182,17 +190,17 @@ int main(int argc, char **argv)
 
     const int nx = mesh_dims[0];
     const int ny = mesh_dims[1];
+    const int nz = mesh_dims[2];
     const int sx = subdomain_dims[0];
     const int sy = subdomain_dims[1];
+    const int sz = subdomain_dims[2];
 
     if (degree < 1)
         throw std::runtime_error("--degree must be positive");
-    if (nx < 1 || ny < 1)
+    if (nx < 1 || ny < 1 || nz < 1)
         throw std::runtime_error("--mesh entries must be positive");
-    if (sx < 1 || sy < 1)
+    if (sx < 1 || sy < 1 || sz < 1)
         throw std::runtime_error("--subdomains entries must be positive");
-    if (omega <= 0.0)
-        throw std::runtime_error("--omega must be positive");
     if (precision != "float" && precision != "double")
         throw std::runtime_error("--precision must be either 'float' or 'double'");
     if (tdof < 0 || tdof > 4)
@@ -204,17 +212,19 @@ int main(int argc, char **argv)
     if (iterations < 1)
         throw std::runtime_error("--iterations must be positive");
 
+    const double omega = 0.1 * static_cast<double>(std::max(nx, ny)) * static_cast<double>(degree);
+
     const DDKernelConfig config = {
         .block_size = parse_block_size(block_size),
         .tdof = tdof,
     };
 
     if (precision == "float")
-        return run_benchmark<float>("float", degree, nx, ny, omega, sx, sy, config, block_size, tdof,
-                                    waveholtz_iterations, warmup, iterations, output_file);
+        return run_benchmark<float>("float", degree, nx, ny, nz, omega, sx, sy, sz, config, waveholtz_iterations,
+                                    warmup, iterations, output_file);
 
-    return run_benchmark<double>("double", degree, nx, ny, omega, sx, sy, config, block_size, tdof,
-                                 waveholtz_iterations, warmup, iterations, output_file);
+    return run_benchmark<double>("double", degree, nx, ny, nz, omega, sx, sy, sz, config, waveholtz_iterations, warmup,
+                                 iterations, output_file);
 }
 
 static DDKernelConfig::BlockSize parse_block_size(int block_size)
@@ -235,9 +245,9 @@ static DDKernelConfig::BlockSize parse_block_size(int block_size)
 }
 
 static bool write_csv_row(const std::string &output_file, const std::string &precision, int degree, int nx, int ny,
-                          double omega, int sx, int sy, int kernel_block_size, int kernel_tdof, int warmup,
-                          int iterations, int n_subdomains, int n_dof, int n_lambda_dof, float helmholtz_avg_ms,
-                          float min_ms, float max_ms, float avg_ms, float total_ms)
+                          int nz, double omega, int sx, int sy, int sz, int kernel_block_size, int kernel_tdof,
+                          int warmup, int iterations, int n_subdomains, int n_dof, int n_lambda_dof,
+                          float helmholtz_avg_ms, float min_ms, float max_ms, float avg_ms, float total_ms)
 {
     std::ofstream out(output_file, std::ios::app);
     if (!out)
@@ -248,7 +258,7 @@ static bool write_csv_row(const std::string &output_file, const std::string &pre
 
     if (empty_file)
     {
-        out << "precision,degree,nx,ny,omega,sx,sy,kernel_block_size,kernel_tdof,warmup,iterations,"
+        out << "precision,degree,nx,ny,nz,omega,sx,sy,sz,kernel_block_size,kernel_tdof,warmup,iterations,"
             << "n_subdomains,n_dof,n_lambda_dof,helmholtz_avg_ms,min_ms,max_ms,avg_ms,total_ms,"
             << "min_rel_to_helmholtz,max_rel_to_helmholtz,avg_rel_to_helmholtz\n";
     }
@@ -259,10 +269,11 @@ static bool write_csv_row(const std::string &output_file, const std::string &pre
         return t / helmholtz_avg_ms;
     };
 
-    out << precision << ',' << degree << ',' << nx << ',' << ny << ',' << omega << ',' << sx << ',' << sy << ','
-        << kernel_block_size << ',' << kernel_tdof << ',' << warmup << ',' << iterations << ',' << n_subdomains << ','
-        << n_dof << ',' << n_lambda_dof << ',' << helmholtz_avg_ms << ',' << min_ms << ',' << max_ms << ',' << avg_ms
-        << ',' << total_ms << ',' << rel(min_ms) << ',' << rel(max_ms) << ',' << rel(avg_ms) << '\n';
+    out << precision << ',' << degree << ',' << nx << ',' << ny << ',' << nz << ',' << omega << ',' << sx << ',' << sy
+        << ',' << sz << ',' << kernel_block_size << ',' << kernel_tdof << ',' << warmup << ',' << iterations << ','
+        << n_subdomains << ',' << n_dof << ',' << n_lambda_dof << ',' << helmholtz_avg_ms << ',' << min_ms << ','
+        << max_ms << ',' << avg_ms << ',' << total_ms << ',' << rel(min_ms) << ',' << rel(max_ms) << ',' << rel(avg_ms)
+        << '\n';
 
     return static_cast<bool>(out);
 }

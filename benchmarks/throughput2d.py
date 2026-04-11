@@ -167,6 +167,8 @@ def build_ncu_cmd(
         str(WARMUP),
         "--iterations",
         str(ITERATIONS),
+        "--waveholtz-iterations",
+        "5",
     ]
 
 
