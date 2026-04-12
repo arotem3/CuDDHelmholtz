@@ -159,55 +159,28 @@ namespace cuddh
 
         /// @brief implicit conversion to scalar* where the returned pointer is
         /// the one managed by the tensor.
-        __host__ __device__ inline operator scalar *()
-        {
-            return ptr;
-        }
+        __host__ __device__ inline operator scalar *() { return ptr; }
 
         /// @brief implicit conversion to scalar* where the returned pointer is
         /// the one managed by the tensor.
-        __host__ __device__ inline operator const scalar *() const
-        {
-            return ptr;
-        }
+        __host__ __device__ inline operator const scalar *() const { return ptr; }
 
         /// @brief returns the externally managed array
-        __host__ __device__ inline scalar *data()
-        {
-            return ptr;
-        }
+        __host__ __device__ inline scalar *data() { return ptr; }
 
         /// @brief returns read-only pointer to the externally managed array
-        __host__ __device__ inline const scalar *data() const
-        {
-            return ptr;
-        }
+        __host__ __device__ inline const scalar *data() const { return ptr; }
 
-        __host__ __device__ inline scalar *begin()
-        {
-            return ptr;
-        }
+        __host__ __device__ inline scalar *begin() { return ptr; }
 
-        __host__ __device__ inline scalar *end()
-        {
-            return ptr + len;
-        }
+        __host__ __device__ inline scalar *end() { return ptr + len; }
 
-        __host__ __device__ inline const scalar *begin() const
-        {
-            return ptr;
-        }
+        __host__ __device__ inline const scalar *begin() const { return ptr; }
 
-        __host__ __device__ inline const scalar *end() const
-        {
-            return ptr + len;
-        }
+        __host__ __device__ inline const scalar *end() const { return ptr + len; }
 
         /// @brief returns the shape of the tensor. Has length `Dim`
-        __host__ __device__ inline const int *shape() const
-        {
-            return _shape;
-        }
+        __host__ __device__ inline const int *shape() const { return _shape; }
 
         __host__ __device__ inline int shape(int d) const
         {
@@ -217,10 +190,11 @@ namespace cuddh
         }
 
         /// @brief returns total size of tensor. The product of shape.
-        __host__ __device__ inline int size() const
-        {
-            return len;
-        }
+        __host__ __device__ inline int size() const { return len; }
+
+        __host__ __device__ inline bool empty() const { return ptr == nullptr || len == 0; }
+
+        __host__ __device__ inline operator bool() const { return !empty(); }
     };
 
     /// @brief wraps an array in a `TensorWrapper`. Same as declaring a new
