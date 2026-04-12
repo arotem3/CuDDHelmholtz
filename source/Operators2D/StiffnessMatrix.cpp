@@ -7,15 +7,8 @@ namespace cuddh
         const int n_elem = mesh.n_elem();
         const int n = quad.size();
 
-        thrust::host_vector<double> h_w(n), h_q(n);
-        for (int i = 0; i < n; ++i)
-        {
-            h_w[i] = quad.w(i);
-            h_q[i] = quad.x(i);
-        }
-        thrust::device_vector<double> d_w = h_w, d_q = h_q;
-        auto w = reshape(thrust::raw_pointer_cast(d_w.data()), n);
-        auto q = reshape(thrust::raw_pointer_cast(d_q.data()), n);
+        auto w = quad.w(MemorySpace::DEVICE);
+        auto x = quad.x(MemorySpace::DEVICE);
 
         auto d_mesh = mesh.to_device();
 
@@ -30,7 +23,7 @@ namespace cuddh
                 element = d_mesh.element(el);
             __syncthreads();
 
-            const double2x2 J = element.jacobian({q(i), q(j)});
+            const double2x2 J = element.jacobian({x(i), x(j)});
             const double W = w(i) * w(j) / det(J);
 
             dsym2x2 gij;
@@ -53,7 +46,7 @@ namespace cuddh
     {
         const auto &basis = fem.basis();
         const auto &quad = basis.quadrature();
-        basis.deriv(n_basis, quad.x(), _D.host_write());
+        basis.deriv(n_basis, quad.x(MemorySpace::HOST), _D.write(MemorySpace::HOST));
 
         _G = setup_geometric_factors(fem.mesh(), quad);
     }

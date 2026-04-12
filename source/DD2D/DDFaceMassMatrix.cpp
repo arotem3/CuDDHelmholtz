@@ -3,36 +3,51 @@
 using namespace cuddh;
 
 template <typename scalar_t>
-DDFaceMassMatrix<scalar_t>::DDFaceMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
-    : mx_fdof(efem.max_fsize()), n_domains(efem.size()), m(mx_fdof * n_domains)
+static HostDeviceArray<scalar_t> init_mass(const H1Space2D &fem, const EnsembleSpace &efem)
 {
-    const Mesh2D &mesh = fem.mesh();
-    const Basis &basis = fem.basis();
-    const QuadratureRule &q = basis.quadrature();
+    const int mx_fdof = efem.max_fsize();
+    const int n_domains = efem.size();
 
-    const int n_basis = basis.size();
+    HostDeviceArray<scalar_t> _m(mx_fdof * n_domains);
+    auto m = reshape(_m.device_write(), mx_fdof, n_domains);
 
-    auto n_faces = efem.n_faces(MemorySpace::HOST);
-    auto faces = efem.faces(MemorySpace::HOST);
-    auto f_inds = efem.face_indices(MemorySpace::HOST);
+    auto mesh = fem.mesh().to_device();
+    auto w = fem.basis().quadrature().w(MemorySpace::DEVICE);
 
-    auto H = reshape(m.host_write(), mx_fdof, n_domains);
+    const int nb = w.size();
 
-    for (int subsp = 0; subsp < n_domains; ++subsp)
-    {
-        const int s_nf = n_faces(subsp);
-        for (int f = 0; f < s_nf; ++f)
-        {
-            const Edge edge = mesh.edge(faces(f, subsp));
-            const double ds = edge.measure();
+    auto n_faces = efem.n_faces(MemorySpace::DEVICE);
+    auto faces = efem.faces(MemorySpace::DEVICE);
+    auto f_inds = efem.face_indices(MemorySpace::DEVICE);
 
-            for (int i = 0; i < n_basis; ++i)
-            {
-                const int l = f_inds(i, f, subsp);
-                H(l, subsp) += static_cast<scalar_t>(ds * q.w(i));
-            }
-        }
-    }
+    forall_1d(nb, mx_fdof * n_domains, [=] __device__(int b) mutable {
+        const int i = threadIdx.x;
+        const int f = b % mx_fdof;
+        const int subsp = b / mx_fdof;
+
+        if (f >= n_faces(subsp))
+            return;
+
+        __shared__ Edge edge;
+        if (i == 0)
+            edge = mesh.edge(faces(f, subsp));
+        __syncthreads();
+
+        const double ds = edge.measure();
+
+        const int l = f_inds(i, f, subsp);
+        scalar_t ml = ds * w(i);
+        atomicAdd(&m(l, subsp), ml);
+    });
+
+    return _m;
+}
+
+template <typename scalar_t>
+DDFaceMassMatrix<scalar_t>::DDFaceMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
+    : mx_fdof(efem.max_fsize()), n_domains(efem.size())
+{
+    m = init_mass<scalar_t>(fem, efem);
 }
 
 namespace cuddh

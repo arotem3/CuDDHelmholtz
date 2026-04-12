@@ -367,6 +367,9 @@ int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &c
     const Mesh3D &mesh = fem.mesh();
     auto &q = fem.basis().quadrature();
 
+    auto w = q.w(MemorySpace::HOST);
+    auto x = q.x(MemorySpace::HOST);
+
     const int n_basis = fem.basis().size();
     const int n_spaces = E.size();
 
@@ -406,7 +409,7 @@ int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &c
                     dofs[lkey] = dof;
                 }
 
-                dofs.at(lkey).face_mass += q.w(i) * q.w(j) * face.measure({q.x(i), q.x(j)});
+                dofs.at(lkey).face_mass += w(i) * w(j) * face.measure({x(i), x(j)});
             }
         }
     }

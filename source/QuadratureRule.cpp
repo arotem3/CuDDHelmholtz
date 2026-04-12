@@ -217,9 +217,9 @@ namespace cuddh
     QuadratureRule::QuadratureRule(int n, QuadratureType type) : _n{n}, _type{type}, _x(n), _w(n)
     {
         if (type == GaussLegendre)
-            gauss_legendre(n, _x, _w);
+            gauss_legendre(n, _x.host_write(), _w.host_write());
         else // (type == GaussLobatto)
-            gauss_lobatto(n, _x, _w);
+            gauss_lobatto(n, _x.host_write(), _w.host_write());
     }
 
     std::string QuadratureRule::name() const

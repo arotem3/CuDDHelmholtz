@@ -9,17 +9,8 @@ static void init_face_mass(const TraceSpace3D &tr, const double *d_a, double *d_
 
     auto &quad = tr.h1_space().basis().quadrature();
 
-    host_device_dvec _w(n_basis);
-    double *h_w = _w.host_write();
-    for (int i = 0; i < n_basis; ++i)
-        h_w[i] = quad.w(i);
-    auto w = reshape(_w.device_read(), n_basis);
-
-    host_device_dvec _x(n_basis);
-    double *h_x = _x.host_write();
-    for (int i = 0; i < n_basis; ++i)
-        h_x[i] = quad.x(i);
-    auto x = reshape(_x.device_read(), n_basis);
+    auto w = quad.w(MemorySpace::DEVICE);
+    auto x = quad.x(MemorySpace::DEVICE);
 
     DeviceMesh3D mesh = tr.h1_space().mesh().to_device();
 

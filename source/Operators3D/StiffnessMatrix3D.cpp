@@ -6,17 +6,8 @@ static void setup_geometric_factors(int n_elem, const QuadratureRule &quad, cons
 {
     int nx = quad.size();
 
-    host_device_dvec _w(nx);
-    double *h_w = _w.host_write();
-    for (int i = 0; i < nx; ++i)
-        h_w[i] = quad.w(i);
-    auto w = reshape(_w.device_read(), nx);
-
-    host_device_dvec _x(nx);
-    double *h_x = _x.host_write();
-    for (int i = 0; i < nx; ++i)
-        h_x[i] = quad.x(i);
-    auto x = reshape(_x.device_read(), nx);
+    auto w = quad.w(MemorySpace::DEVICE);
+    auto x = quad.x(MemorySpace::DEVICE);
 
     auto G = reshape(d_G, nx, nx, nx, n_elem);
 
@@ -61,8 +52,7 @@ static void setup_geometric_factors(int n_elem, const QuadratureRule &quad, cons
     });
 }
 
-StiffnessMatrix3D::StiffnessMatrix3D(const H1Space3D &fem)
-    : Operator<double>(fem.size()), fem{fem}
+StiffnessMatrix3D::StiffnessMatrix3D(const H1Space3D &fem) : Operator<double>(fem.size()), fem{fem}
 {
     const int n_elem = fem.mesh().n_elem();
     const int n_basis = fem.basis().size();

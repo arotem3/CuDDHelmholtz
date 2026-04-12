@@ -49,8 +49,9 @@ static void run_basis_tests(TestLogger &summary)
         Basis b(n);
 
         dvec y(n);
+        auto q = b.quadrature().x(MemorySpace::HOST);
         for (int i = 0; i < n; ++i)
-            y(i) = jacobiP(n - 1, 0, 0, b.quadrature().x(i));
+            y(i) = jacobiP(n - 1, 0, 0, q(i));
 
         const int m = 10;
         dvec x(m);

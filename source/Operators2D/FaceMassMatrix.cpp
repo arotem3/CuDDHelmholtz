@@ -7,17 +7,12 @@ static thrust::universal_vector<double> construct_face_mass(const TraceSpace2D &
     const int n_faces = fs.n_faces();
     const int n_basis = fs.h1_space().basis().size();
 
-    auto &q = fs.h1_space().basis().quadrature();
+    auto w = fs.h1_space().basis().quadrature().w(MemorySpace::DEVICE);
 
     auto face_indices = fs.faces(MemorySpace::DEVICE);
     auto d_mesh = fs.h1_space().mesh().to_device();
     auto I = fs.subspace_indices(MemorySpace::DEVICE);
     auto K = fs.global_indices(MemorySpace::DEVICE);
-
-    thrust::universal_vector<double> _w(n_basis);
-    for (int i = 0; i < n_basis; ++i)
-        _w[i] = q.w(i);
-    auto w = reshape(_w, n_basis);
 
     thrust::universal_vector<double> _m(fs.h1_space().size(), 0.0);
     double *d_m = thrust::raw_pointer_cast(_m.data());

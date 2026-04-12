@@ -1,9 +1,11 @@
 #ifndef DDH_DD_STIFFNESS_MATRIX_3D_HPP
 #define DDH_DD_STIFFNESS_MATRIX_3D_HPP
 
-#include <cuda/std/array>
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 #include <thrust/universal_vector.h>
+
+#include <cuda/std/array>
 #include <type_traits>
 
 #include "EnsembleSpace3D.hpp"
@@ -195,8 +197,7 @@ namespace cuddh
                     values[t] = 0;
                     for (int i = 0; i < NB; ++i)
                     {
-                        values[t] += smem.D[i][x] * smem.grad[el][i][y][z].x +
-                                     smem.D[i][y] * smem.grad[el][x][i][z].y +
+                        values[t] += smem.D[i][x] * smem.grad[el][i][y][z].x + smem.D[i][y] * smem.grad[el][x][i][z].y +
                                      smem.D[i][z] * smem.grad[el][x][y][i].z;
                     }
                 }

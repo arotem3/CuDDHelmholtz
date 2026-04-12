@@ -68,6 +68,8 @@ H1Space3D::H1Space3D(const Mesh3D &mesh, const Basis &basis)
     _xyz.resize(ndof);
     auto xyz = reshape(_xyz.host_write(), ndof);
 
+    auto q = _basis.quadrature().x(MemorySpace::HOST);
+
     for (int el = 0; el < n_elem; ++el)
     {
         const HexElement elem = mesh.element(el);
@@ -78,7 +80,7 @@ H1Space3D::H1Space3D(const Mesh3D &mesh, const Basis &basis)
             {
                 for (int k = 0; k < n_basis; ++k)
                 {
-                    const double3 r{_basis.quadrature().x(i), _basis.quadrature().x(j), _basis.quadrature().x(k)};
+                    const double3 r{q(i), q(j), q(k)};
                     const int idx = I(i, j, k, el);
                     xyz(idx) = elem.physical_coordinates(r);
                 }

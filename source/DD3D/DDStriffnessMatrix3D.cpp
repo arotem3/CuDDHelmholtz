@@ -7,12 +7,11 @@ static thrust::device_vector<scalar_t> make_diffmat(const Basis &basis)
 {
     const int n_basis = basis.size();
 
-    thrust::universal_vector<double> u_D(n_basis * n_basis);
-    auto D = reshape(u_D, n_basis, n_basis);
+    thrust::host_vector<double> D(n_basis * n_basis);
+    double *Dptr = thrust::raw_pointer_cast(D.data());
+    basis.deriv(n_basis, basis.quadrature().x(MemorySpace::HOST), Dptr);
 
-    basis.deriv(n_basis, basis.quadrature().x(), D);
-
-    return u_D;
+    return D;
 }
 
 template <typename scalar_t>
@@ -29,15 +28,8 @@ static thrust::device_vector<SmallSymmetricMatrix<scalar_t, 3>> geom_factors(con
     const int n_domains = efem.size();
     const int mx_elem = efem.max_n_elem();
 
-    thrust::universal_vector<double> u_w(n_basis);
-    for (int i = 0; i < n_basis; ++i)
-        u_w[i] = q.w(i);
-    auto w = reshape(u_w, n_basis);
-
-    thrust::universal_vector<double> u_x(n_basis);
-    for (int i = 0; i < n_basis; ++i)
-        u_x[i] = q.x(i);
-    auto x = reshape(u_x, n_basis);
+    auto w = q.w(MemorySpace::DEVICE);
+    auto x = q.x(MemorySpace::DEVICE);
 
     auto n_elems = efem.n_elems(MemorySpace::DEVICE);
     auto elems = efem.elements(MemorySpace::DEVICE);

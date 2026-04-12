@@ -56,6 +56,8 @@ namespace cuddh
         _xy.resize(ndof);
         auto xy = reshape(_xy.host_write(), ndof);
 
+        auto q = _basis.quadrature().x(MemorySpace::HOST);
+
         for (int el = 0; el < n_elem; ++el)
         {
             const QuadElement elem = _mesh.element(el);
@@ -64,7 +66,7 @@ namespace cuddh
             {
                 for (int i = 0; i < n_basis; ++i)
                 {
-                    const double2 xi{_basis.quadrature().x(i), _basis.quadrature().x(j)};
+                    const double2 xi{q(i), q(j)};
                     xy(I(i, j, el)) = elem.physical_coordinates(xi);
                 }
             }

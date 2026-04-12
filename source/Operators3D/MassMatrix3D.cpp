@@ -13,17 +13,8 @@ static void init_mass(const H1Space3D &fem, const double *d_a, double *d_M)
 
     auto I = reshape(fem.global_indices(MemorySpace::DEVICE), n_basis, n_basis, n_basis, n_elem);
 
-    host_device_dvec _w(n_basis);
-    double *h_w = _w.host_write();
-    for (int i = 0; i < n_basis; ++i)
-        h_w[i] = quad.w(i);
-    auto w = reshape(_w.device_read(), n_basis);
-
-    host_device_dvec _x(n_basis);
-    double *h_x = _x.host_write();
-    for (int i = 0; i < n_basis; ++i)
-        h_x[i] = quad.x(i);
-    auto x = reshape(_x.device_read(), n_basis);
+    auto w = quad.w(MemorySpace::DEVICE);
+    auto x = quad.x(MemorySpace::DEVICE);
 
     forall_3d(n_basis, n_basis, n_basis, n_elem, [=] __device__(int el) mutable -> void {
         const int i = threadIdx.x;
@@ -48,8 +39,7 @@ static void init_mass(const H1Space3D &fem, const double *d_a, double *d_M)
     });
 }
 
-MassMatrix3D::MassMatrix3D(const H1Space3D &fem)
-    : Operator<double>(fem.size()), fem{fem}, _m(fem.size())
+MassMatrix3D::MassMatrix3D(const H1Space3D &fem) : Operator<double>(fem.size()), fem{fem}, _m(fem.size())
 {
     init_mass(fem, nullptr, _m.device_write());
 }
@@ -92,8 +82,7 @@ static void inv_mass(int n, double *d_m)
     forall(n, [=] __device__(int i) -> void { d_m[i] = 1.0 / d_m[i]; });
 }
 
-InvMassMatrix3D::InvMassMatrix3D(const H1Space3D &fem)
-    : Operator<double>(fem.size()), fem{fem}, _mi(fem.size())
+InvMassMatrix3D::InvMassMatrix3D(const H1Space3D &fem) : Operator<double>(fem.size()), fem{fem}, _mi(fem.size())
 {
     init_mass(fem, nullptr, _mi.device_write());
     inv_mass(fem.size(), _mi.device_write());
@@ -106,8 +95,7 @@ InvMassMatrix3D::InvMassMatrix3D(const double *d_a, const H1Space3D &fem)
     inv_mass(fem.size(), _mi.device_write());
 }
 
-InvMassMatrix3D::InvMassMatrix3D(const MassMatrix3D &M)
-    : Operator<double>(M.fem.size()), fem{M.fem}, _mi(fem.size())
+InvMassMatrix3D::InvMassMatrix3D(const MassMatrix3D &M) : Operator<double>(M.fem.size()), fem{M.fem}, _mi(fem.size())
 {
     const double *d_m = M._m.device_read();
     double *d_mi = _mi.device_write();

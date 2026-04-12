@@ -16,15 +16,8 @@ static thrust::universal_vector<float> init_face_mass(const H1Space3D &fem, cons
     thrust::universal_vector<float> m(mx_fdofs * n_domains, 0.0f);
     auto H = reshape(m, mx_fdofs, n_domains);
 
-    thrust::universal_vector<float> u_w(n_basis);
-    for (int i = 0; i < n_basis; ++i)
-        u_w[i] = quad.w(i);
-    auto w = reshape(u_w, n_basis);
-
-    thrust::universal_vector<float> u_x(n_basis);
-    for (int i = 0; i < n_basis; ++i)
-        u_x[i] = quad.x(i);
-    auto x = reshape(u_x, n_basis);
+    auto w = quad.w(MemorySpace::DEVICE);
+    auto x = quad.x(MemorySpace::DEVICE);
 
     auto n_faces = efem.n_faces(MemorySpace::DEVICE);
     auto faces = efem.faces(MemorySpace::DEVICE);

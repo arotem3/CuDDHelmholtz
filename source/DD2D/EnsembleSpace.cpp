@@ -388,7 +388,7 @@ int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &c
                                                    const TensorWrapper<3, int> &h_fI) const
 {
     const Mesh2D &mesh = fem.mesh();
-    auto &q = fem.basis().quadrature();
+    auto w = fem.basis().quadrature().w(MemorySpace::HOST);
 
     const int n_shared = shared_faces.size(); // total number of faces shared between subdomains
     const int n_basis = fem.basis().size();
@@ -428,7 +428,7 @@ int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &c
                 dofs[lkey] = dof;
             }
 
-            dofs.at(lkey).face_mass += q.w(i) * edge.measure();
+            dofs.at(lkey).face_mass += w(i) * edge.measure();
         }
     }
 

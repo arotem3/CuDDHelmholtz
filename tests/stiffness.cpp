@@ -23,7 +23,7 @@ __device__ static double L(double2 X)
     return -6.0 * y * (x5 - 5 * x) - 20.0 * x3 * (y3 - 3.0 * y);
 }
 
-static void accuracy_test(TestLogger &summary, const Mesh2D &mesh, Basis basis, const std::string &test_name)
+static void accuracy_test(TestLogger &summary, const Mesh2D &mesh, const Basis &basis, const std::string &test_name)
 {
     constexpr double tol = 1e-6;
 
@@ -52,7 +52,7 @@ static void accuracy_test(TestLogger &summary, const Mesh2D &mesh, Basis basis, 
                      std::format("relative error {} exceeds tolerance {}", err, tol));
 }
 
-static void symmetry_test(TestLogger &summary, const Mesh2D &mesh, Basis basis, std::string test_name)
+static void symmetry_test(TestLogger &summary, const Mesh2D &mesh, const Basis &basis, std::string test_name)
 {
     constexpr double tol = 1e-10;
 

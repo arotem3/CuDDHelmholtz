@@ -13,15 +13,8 @@ static thrust::universal_vector<float> mass(const H1Space3D &fem, const Ensemble
     const int n_domains = efem.size();
     const int mx_dofs = efem.max_size();
 
-    thrust::universal_vector<float> u_w(n_basis);
-    for (int i = 0; i < n_basis; ++i)
-        u_w[i] = q.w(i);
-    auto w = reshape(u_w, n_basis);
-
-    thrust::universal_vector<float> u_x(n_basis);
-    for (int i = 0; i < n_basis; ++i)
-        u_x[i] = q.x(i);
-    auto x = reshape(u_x, n_basis);
+    auto w = q.w(MemorySpace::DEVICE);
+    auto x = q.x(MemorySpace::DEVICE);
 
     auto d_n_elems = efem.n_elems(MemorySpace::DEVICE);
     auto d_elems = efem.elements(MemorySpace::DEVICE);

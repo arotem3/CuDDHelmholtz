@@ -27,9 +27,11 @@ static void run_quadrature_rule_tests(TestLogger &summary)
         const int p = 2 * n - 1;
 
         double I = 0.0;
+        auto w = q.w(MemorySpace::HOST);
+        auto x = q.x(MemorySpace::HOST);
         for (int i = 0; i < n; ++i)
         {
-            I += q.w(i) * f(q.x(i), p);
+            I += w(i) * f(x(i), p);
         }
 
         const double error = std::abs(I - 2.0);
@@ -47,9 +49,11 @@ static void run_quadrature_rule_tests(TestLogger &summary)
         const int p = 2 * n - 3;
 
         double I = 0.0;
+        auto w = q.w(MemorySpace::HOST);
+        auto x = q.x(MemorySpace::HOST);
         for (int i = 0; i < n; ++i)
         {
-            I += q.w(i) * f(q.x(i), p);
+            I += w(i) * f(x(i), p);
         }
 
         const double error = std::abs(I - 2.0);

@@ -5,10 +5,8 @@ using namespace cuddh;
 template <typename scalar_t>
 static void make_diffmat(scalar_t *h_D, const Basis &basis)
 {
-    const int n_basis = basis.size();
-    dmat D(n_basis, n_basis);
-    basis.deriv(n_basis, basis.quadrature().x(), D);
-    for (int i = 0; i < n_basis * n_basis; ++i)
+    auto D = basis.derivative_matrix();
+    for (int i = 0; i < D.size(); ++i)
         h_D[i] = scalar_t(D[i]);
 }
 
@@ -23,17 +21,8 @@ static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D
     const int n_domains = efem.size();
     const int mx_elem = efem.max_n_elem();
 
-    host_device_dvec _w(n_basis);
-    double *h_w = _w.host_write();
-    for (int i = 0; i < n_basis; ++i)
-        h_w[i] = q.w(i);
-    auto w = reshape(_w.device_read(), n_basis);
-
-    host_device_dvec _q_pts(n_basis);
-    double *h_q = _q_pts.host_write();
-    for (int i = 0; i < n_basis; ++i)
-        h_q[i] = q.x(i);
-    auto q_pts = reshape(_q_pts.device_read(), n_basis);
+    auto w = q.w(MemorySpace::DEVICE);
+    auto x = q.x(MemorySpace::DEVICE);
 
     auto d_mesh = mesh.to_device();
 
@@ -55,7 +44,7 @@ static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D
             element = d_mesh.element(elems(el, subsp));
         __syncthreads();
 
-        const double2x2 J = element.jacobian({q_pts(i), q_pts(j)});
+        const double2x2 J = element.jacobian({x(i), x(j)});
         const double W = w(i) * w(j) / det(J);
 
         SmallSymmetricMatrix<scalar_t, 2> gij;

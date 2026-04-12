@@ -14,17 +14,8 @@ static void mass(scalar_t *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
     const int n_domains = efem.size();
     const int mx_dofs = efem.max_size();
 
-    host_device_dvec _w(n_basis);
-    double *h_w = _w.host_write();
-    for (int i = 0; i < n_basis; ++i)
-        h_w[i] = q.w(i);
-    auto w = reshape(_w.device_read(), n_basis);
-
-    host_device_dvec _q_pts(n_basis);
-    double *h_q = _q_pts.host_write();
-    for (int i = 0; i < n_basis; ++i)
-        h_q[i] = q.x(i);
-    auto q_pts = reshape(_q_pts.device_read(), n_basis);
+    auto w = q.w(MemorySpace::DEVICE);
+    auto x = q.x(MemorySpace::DEVICE);
 
     auto d_mesh = mesh.to_device();
 
@@ -47,7 +38,7 @@ static void mass(scalar_t *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
             element = d_mesh.element(d_elems(el, subsp));
         __syncthreads();
 
-        scalar_t val = w(i) * w(j) * element.measure({q_pts(i), q_pts(j)});
+        scalar_t val = w(i) * w(j) * element.measure({x(i), x(j)});
 
         int l = sI(i, j, el, subsp);
         atomicAdd(&M(l, subsp), val);
