@@ -6,17 +6,17 @@
 using namespace cuddh;
 
 // Function with zero normal derivative on the boundary of [-1,1]x[-1,1].
-__device__ static double func(const double X[2])
+__device__ static double func(double2 X)
 {
-    const double x = X[0], y = X[1];
+    const auto [x, y] = X;
     const double x5 = std::pow(x, 5);
     const double y3 = std::pow(y, 3);
     return (x5 - 5.0 * x) * (y3 - 3.0 * y);
 }
 
-__device__ static double L(const double X[2])
+__device__ static double L(double2 X)
 {
-    const double x = X[0], y = X[1];
+    const auto [x, y] = X;
     const double x3 = std::pow(x, 3);
     const double x5 = std::pow(x, 5);
     const double y3 = std::pow(y, 3);
@@ -36,10 +36,10 @@ static void accuracy_test(TestLogger &summary, const Mesh2D &mesh, Basis basis, 
     double *Af = _Af.device_write();
     double *Lf = _Lf.device_write();
 
-    auto _f = gridfunc(fem, [=] __device__(const double X[2]) { return func(X); });
+    auto _f = gridfunc(fem, [=] __device__(double2 x) { return func(x); });
     double *f = thrust::raw_pointer_cast(_f.data());
 
-    l2_project(Lf, MassMatrix(fem), [=] __device__(const double X[2]) { return L(X); });
+    l2_project(Lf, MassMatrix(fem), [=] __device__(double2 x) { return L(x); });
 
     StiffnessMatrix A(fem);
     A.action(f, Af);

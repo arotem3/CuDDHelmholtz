@@ -275,7 +275,7 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
             {
                 for (int i = 0; i < n_basis; ++i)
                 {
-                    const auto [ip, jp] = permute(n_basis, i, j, connectivity.permutation);
+                    const auto [ip, jp] = permute_face_index(n_basis, i, j, connectivity.permutation);
                     const auto vol_idx = face2vol(n_basis, ip, jp, connectivity.label[side]);
                     const int idx = unique.at(g_inds(vol_idx[0], vol_idx[1], vol_idx[2], connectivity.elements[side]));
 
@@ -457,7 +457,7 @@ void ::EnsembleSpaceBuilder::compute_fdof_indices(TensorWrapper<4, int> &h_fI, c
             {
                 for (int i = 0; i < n_basis; ++i)
                 {
-                    const auto [ip, jp] = permute(n_basis, i, j, connectivity.permutation);
+                    const auto [ip, jp] = permute_face_index(n_basis, i, j, connectivity.permutation);
                     const auto [x, y, z] = face2vol(n_basis, ip, jp, connectivity.label[side]);
                     const int idx = h_sI(x, y, z, subsp_element, p);
 

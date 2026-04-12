@@ -50,9 +50,9 @@
 using namespace cuddh;
 
 // forcing
-__device__ static double f(const double X[2], double omega)
+__device__ static double f(const double2 X, double omega)
 {
-    const double x = X[0], y = X[1];
+    const auto [x, y] = X;
     double s = omega * omega;
 
     double r = (x + 0.5) * (x + 0.5) + y * y;
@@ -64,9 +64,10 @@ __device__ static double f(const double X[2], double omega)
 }
 
 // variable coefficient
-__device__ static double alpha(const double X[2])
+__device__ static double alpha(const double2 X)
 {
-    const double r = X[0] * X[0] + X[1] * X[1];
+    const auto [x, y] = X;
+    const double r = x * x + y * y;
 
     if (r < 0.0625)
         return 0.2;
@@ -155,7 +156,7 @@ int main(int argc, char *argv[])
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
 
     auto ddh = [&]() -> std::unique_ptr<Solver<double>> {
-        auto a = gridfunc(fem, [] __device__(const double X[2]) -> double { return alpha(X); });
+        auto a = gridfunc(fem, [] __device__(const double2 X) -> double { return alpha(X); });
         double *d_a = thrust::raw_pointer_cast(a.data());
         if (subsolver == "minres")
             return std::make_unique<DDH<float, SubdomainSolver::MINRES>>(omega, d_a, fem, efem, config);
@@ -169,7 +170,7 @@ int main(int argc, char *argv[])
     double *u = thrust::raw_pointer_cast(U.data()); // the solution vector [u; v]
     double *b = thrust::raw_pointer_cast(B.data()); // the right hand side b(phi)
 
-    l2_project(b, MassMatrix(fem), [=] __device__(const double X[2]) -> double {
+    l2_project(b, MassMatrix(fem), [=] __device__(const double2 X) -> double {
         return f(X, omega);
     }); // compute the right hand side b(phi) = (f, phi)
 
@@ -190,13 +191,13 @@ int main(int argc, char *argv[])
         ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
         TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
 
-        auto a2 = gridfunc(fem, [] __device__(const double X[2]) -> double {
+        auto a2 = gridfunc(fem, [] __device__(const double2 X) -> double {
             double ax = alpha(X);
             return ax * ax;
         });
         double *d_a2 = thrust::raw_pointer_cast(a2.data()); // variable coefficient projected onto H1Space2D
 
-        auto a = trace(fs, [] __device__(const double X[2]) -> double { return alpha(X); });
+        auto a = trace(fs, [] __device__(const double2 X) -> double { return alpha(X); });
         double *d_a = thrust::raw_pointer_cast(a.data()); // variable coefficient projected onto TraceSpace2D
 
         Helmholtz A(omega, d_a2, d_a, fem, fs);
@@ -219,7 +220,7 @@ int main(int argc, char *argv[])
     const char sol_file[] = "solution/uv.0000";
     const char res_file[] = "solution/residuals.0000";
 
-    if (to_file(xy_file, N, xy.data()))
+    if (to_file(xy_file, xy.size(), xy.data()))
         std::cout << "\ncoordinates written to: " << xy_file << "\n";
     if (to_file(sol_file, N, u))
         std::cout << "Solution written to: " << sol_file << "\n";

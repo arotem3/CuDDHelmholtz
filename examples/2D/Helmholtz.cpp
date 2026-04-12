@@ -46,9 +46,9 @@
 using namespace cuddh;
 
 /// @brief forcing term, approximate point source
-__device__ static double f(const double X[2], double omega)
+__device__ static double f(const double2 X, double omega)
 {
-    const double x = X[0], y = X[1];
+    const auto [x, y] = X;
     double s = omega * omega;
 
     double r = (x + 0.5) * (x + 0.5) + y * y;
@@ -60,9 +60,10 @@ __device__ static double f(const double X[2], double omega)
 }
 
 /// @brief a(x) = 1/c(x) where c(x) is the wave-speed.
-__device__ static double a(const double X[2])
+__device__ static double a(const double2 X)
 {
-    const double r = X[0] * X[0] + X[1] * X[1];
+    const auto [x, y] = X;
+    const double r = x * x + y * y;
 
     if (r < 0.0625)
         return 0.2;
@@ -134,12 +135,12 @@ int main(int argc, char *argv[])
         // of freedom needed in the computation of trace terms: <u, phi>
         TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
 
-        auto a2x = gridfunc(fem, [] __device__(const double X[2]) -> double {
+        auto a2x = gridfunc(fem, [] __device__(const double2 X) -> double {
             double aX = a(X);
             return aX * aX;
         });
 
-        auto ax = trace(fs, [] __device__(const double X[2]) -> double { return a(X); });
+        auto ax = trace(fs, [] __device__(const double2 X) -> double { return a(X); });
 
         double *d_a2 = thrust::raw_pointer_cast(a2x.data()); // a^2(x) projected onto H1Space2D
         double *d_a = thrust::raw_pointer_cast(ax.data());   // a(x) projected onto TraceSpace2D
@@ -155,7 +156,7 @@ int main(int argc, char *argv[])
     double *u = thrust::raw_pointer_cast(U.data()); // the solution vector [u; v]
     double *b = thrust::raw_pointer_cast(B.data()); // the right hand side b(phi)
 
-    l2_project(b, MassMatrix(fem), [=] __device__(const double X[2]) -> double { return f(X, omega); });
+    l2_project(b, MassMatrix(fem), [=] __device__(const double2 X) -> double { return f(X, omega); });
 
     // solve a([u, v], phi) = b(phi)
     std::cout << "\nsolving with MINRES ... \n";
@@ -169,7 +170,7 @@ int main(int argc, char *argv[])
     const char sol_file[] = "solution/uv.0000";
     const char res_file[] = "solution/residuals.0000";
 
-    if (to_file(xy_file, 2 * ndof, xy.data()))
+    if (to_file(xy_file, xy.size(), xy.data()))
         std::cout << "Saved collocation points to " << xy_file << std::endl;
     else
         std::cerr << "Failed to save collocation points to " << xy_file << std::endl;

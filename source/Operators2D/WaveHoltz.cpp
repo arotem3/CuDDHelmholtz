@@ -14,7 +14,7 @@ WaveHoltz::WaveHoltz(double omega, double maxvel, const double *a2x, const doubl
 {
     double T = 2.0 * M_PI / omega;
     double p = fem.basis().size();
-    double dt = 2.0 * fem.mesh().min_h() / (p * p * maxvel); // CFL condition
+    double dt = 2.0 * fem.mesh().h() / (p * p * maxvel); // CFL condition
 
     nt = std::max(std::ceil(T / dt), 5.0);
     dt = T / nt;

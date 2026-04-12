@@ -12,24 +12,6 @@ static void make_diffmat(scalar_t *h_D, const Basis &basis)
         h_D[i] = scalar_t(D[i]);
 }
 
-static constexpr __device__ int4 get_indices(int t, int4 dims)
-{
-    int4 i;
-
-    int bw = dims.x * dims.y * dims.z;
-    i.w = t / bw;
-    t = t % bw;
-
-    int bz = dims.x * dims.y;
-    i.z = t / bz;
-    t = t % bz;
-
-    i.y = t / dims.x;
-    i.x = t % dims.x;
-
-    return i;
-}
-
 template <typename scalar_t>
 static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D &fem, const EnsembleSpace &efem)
 {
@@ -47,34 +29,39 @@ static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D
         h_w[i] = q.w(i);
     auto w = reshape(_w.device_read(), n_basis);
 
-    const double *d_J = mesh.element_metrics(q).jacobians(MemorySpace::DEVICE);
-    auto J = reshape(d_J, 2, 2, n_basis, n_basis, mesh.n_elem());
+    host_device_dvec _q_pts(n_basis);
+    double *h_q = _q_pts.host_write();
+    for (int i = 0; i < n_basis; ++i)
+        h_q[i] = q.x(i);
+    auto q_pts = reshape(_q_pts.device_read(), n_basis);
+
+    auto d_mesh = mesh.to_device();
 
     auto n_elems = efem.n_elems(MemorySpace::DEVICE);
     auto elems = efem.elements(MemorySpace::DEVICE);
 
     auto G = reshape(d_G, n_basis, n_basis, mx_elem, n_domains);
 
-    forall(n_basis * n_basis * mx_elem * n_domains, [=] __device__(int tid) mutable -> void {
-        const auto [i, j, el, subsp] = get_indices(tid, {n_basis, n_basis, mx_elem, n_domains});
+    forall_2d(n_basis, n_basis, mx_elem * n_domains, [=] __device__(int index) mutable -> void {
+        const auto [i, j, _] = threadIdx;
+        const int el = index % mx_elem;
+        const int subsp = index / mx_elem;
 
         if (el >= n_elems[subsp])
             return;
 
-        const int g_el = elems(el, subsp);
+        __shared__ QuadElement element;
+        if (i == 0 && j == 0)
+            element = d_mesh.element(elems(el, subsp));
+        __syncthreads();
 
-        const double W = w(i) * w(j);
-        const double Y_eta = J(1, 1, i, j, g_el);
-        const double X_eta = J(0, 1, i, j, g_el);
-        const double Y_xi = J(1, 0, i, j, g_el);
-        const double X_xi = J(0, 0, i, j, g_el);
-
-        const double detJ = X_xi * Y_eta - X_eta * Y_xi;
+        const double2x2 J = element.jacobian({q_pts(i), q_pts(j)});
+        const double W = w(i) * w(j) / det(J);
 
         SmallSymmetricMatrix<scalar_t, 2> gij;
-        gij(0, 0) = W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
-        gij(1, 0) = -W * (Y_xi * Y_eta + X_xi * X_eta) / detJ;
-        gij(1, 1) = W * (Y_xi * Y_xi + X_xi * X_xi) / detJ;
+        gij(0, 0) = W * (J(1, 1) * J(1, 1) + J(0, 1) * J(0, 1));
+        gij(1, 0) = -W * (J(1, 0) * J(1, 1) + J(0, 0) * J(0, 1));
+        gij(1, 1) = W * (J(1, 0) * J(1, 0) + J(0, 0) * J(0, 0));
 
         G(i, j, el, subsp) = gij;
     });

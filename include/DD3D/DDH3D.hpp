@@ -46,7 +46,7 @@ namespace cuddh
         /// @param waveholtz_iterations Fixed number of WaveHoltz iterations;
         ///                             -1 = residual-based stopping.
         DDSubstructuredOperator3D(double omega, const double *h_a, const H1Space3D &fem, const EnsembleSpace3D &efem,
-                      DDKernelConfig config = {}, int waveholtz_iterations = -1);
+                                  DDKernelConfig config = {}, int waveholtz_iterations = -1);
 
         ~DDSubstructuredOperator3D() = default;
 
@@ -63,7 +63,7 @@ namespace cuddh
         /// Helmholtz equation estimated by the domain decomposition method.
         void action(const scalar_t *x, scalar_t *y) const override;
 
-        void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
+        void action(scalar_t, const scalar_t *, scalar_t *) const override
         {
             cuddh_verify(false, printf("DDSubstructuredOperator3D::action(c, x, y) not implemented\n"));
         }
@@ -115,9 +115,9 @@ namespace cuddh
     {
     public:
         DDH3D(double omega, const double *h_a, const H1Space3D &fem, const EnsembleSpace3D &efem,
-                            DDKernelConfig kernel_config = {}, int waveholtz_iterations = -1)
+              DDKernelConfig kernel_config = {}, int waveholtz_iterations = -1)
             : Solver<double>(2 * fem.size()),
-                            F(omega, h_a, fem, efem, kernel_config, waveholtz_iterations),
+              F(omega, h_a, fem, efem, kernel_config, waveholtz_iterations),
               solver(F),
               lambda(F.ndof()),
               Y(F.ndof())

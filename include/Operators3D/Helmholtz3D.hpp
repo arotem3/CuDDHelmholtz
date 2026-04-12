@@ -18,8 +18,7 @@ namespace cuddh
         /// @param y on exit y[i] <- a(x, v[i]) for each v
         void action(const double *x, double *y) const override;
 
-        /// @brief y[i] <- y[i] + c * a(x, phi[i]) where a(u,v) = (grad u, grad v) - omega^2 (u, v) - i*omega <u, v>
-        void action(double c, const double *x, double *y) const override
+        void action(double, const double *, double *) const override
         {
             cuddh_verify(false, printf("Helmholtz3D::action(c, x, y) not implemented\n"));
         }

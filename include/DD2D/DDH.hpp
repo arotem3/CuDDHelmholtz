@@ -99,7 +99,7 @@ namespace cuddh
         /// @brief y <- F * x  (substructured operator action)
         void action(const scalar_t *x, scalar_t *y) const override;
 
-        void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
+        void action(scalar_t, const scalar_t *, scalar_t *) const override
         {
             cuddh_verify(false, printf("DDSubstructuredOperator::action(c, x, y) not implemented\n"));
         }

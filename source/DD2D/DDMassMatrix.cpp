@@ -2,24 +2,6 @@
 
 using namespace cuddh;
 
-static constexpr __device__ int4 get_indices(int t, int4 dims)
-{
-    int4 i;
-
-    int bw = dims.x * dims.y * dims.z;
-    i.w = t / bw;
-    t = t % bw;
-
-    int bz = dims.x * dims.y;
-    i.z = t / bz;
-    t = t % bz;
-
-    i.y = t / dims.x;
-    i.x = t % dims.x;
-
-    return i;
-}
-
 template <typename scalar_t>
 static void mass(scalar_t *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
 {
@@ -38,24 +20,36 @@ static void mass(scalar_t *d_m, const H1Space2D &fem, const EnsembleSpace &efem)
         h_w[i] = q.w(i);
     auto w = reshape(_w.device_read(), n_basis);
 
+    host_device_dvec _q_pts(n_basis);
+    double *h_q = _q_pts.host_write();
+    for (int i = 0; i < n_basis; ++i)
+        h_q[i] = q.x(i);
+    auto q_pts = reshape(_q_pts.device_read(), n_basis);
+
+    auto d_mesh = mesh.to_device();
+
     auto d_n_elems = efem.n_elems(MemorySpace::DEVICE);
     auto d_elems = efem.elements(MemorySpace::DEVICE);
     auto sI = efem.subspace_indices(MemorySpace::DEVICE);
 
-    const double *d_detJ = mesh.element_metrics(q).measures(MemorySpace::DEVICE);
-    auto detJ = reshape(d_detJ, n_basis, n_basis, mesh.n_elem());
-
     auto M = reshape(d_m, mx_dofs, n_domains);
 
-    forall(n_basis * n_basis * mx_elem_per_dom * n_domains, [=] __device__(int tid) mutable {
-        const auto [i, j, el, subsp] = get_indices(tid, {n_basis, n_basis, mx_elem_per_dom, n_domains});
+    forall_2d(n_basis, n_basis, mx_elem_per_dom * n_domains, [=] __device__(int index) mutable {
+        const auto [i, j, _] = threadIdx;
+        const int el = index % mx_elem_per_dom;
+        const int subsp = index / mx_elem_per_dom;
 
         if (el >= d_n_elems(subsp))
             return;
 
-        const int g_el = d_elems(el, subsp);
+        __shared__ QuadElement element;
+        if (i == 0 && j == 0)
+            element = d_mesh.element(d_elems(el, subsp));
+        __syncthreads();
+
+        scalar_t val = w(i) * w(j) * element.measure({q_pts(i), q_pts(j)});
+
         int l = sI(i, j, el, subsp);
-        scalar_t val = w(i) * w(j) * detJ(i, j, g_el);
         atomicAdd(&M(l, subsp), val);
     });
 }

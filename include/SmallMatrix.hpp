@@ -26,7 +26,7 @@ namespace cuddh
         constexpr SmallMatrix &operator=(const SmallMatrix &other) = default;
         constexpr SmallMatrix &operator=(SmallMatrix &&other) = default;
 
-        inline __host__ __device__ SmallMatrix(const SmallSymmetricMatrix<T, Rows> &other)
+        constexpr SmallMatrix(const SmallSymmetricMatrix<T, Rows> &other)
             requires(Rows == Cols)
         {
             for (size_t i = 0; i < Rows; i++)
@@ -34,7 +34,7 @@ namespace cuddh
                     data[i][j] = other(i, j);
         }
 
-        inline __host__ __device__ SmallMatrix &operator=(const SmallSymmetricMatrix<T, Rows> &other)
+        constexpr SmallMatrix &operator=(const SmallSymmetricMatrix<T, Rows> &other)
             requires(Rows == Cols)
         {
             for (size_t i = 0; i < Rows; i++)
@@ -43,10 +43,10 @@ namespace cuddh
             return *this;
         }
 
-        __host__ __device__ static size_t n_rows() { return Rows; }
-        __host__ __device__ static size_t n_cols() { return Cols; }
+        static constexpr size_t n_rows() { return Rows; }
+        static constexpr size_t n_cols() { return Cols; }
 
-        __host__ __device__ inline T &operator()(size_t i, size_t j)
+        constexpr inline T &operator()(size_t i, size_t j)
         {
             cuddh_assert(i < Rows && j < Cols,
                          printf("SmallMatrix::operator() error: index out of range. i=%zu, j=%zu, Rows=%zu, Cols=%zu\n",
@@ -54,7 +54,7 @@ namespace cuddh
             return data[i][j];
         }
 
-        __host__ __device__ inline const T &operator()(size_t i, size_t j) const
+        constexpr const T &operator()(size_t i, size_t j) const
         {
             cuddh_assert(i < Rows && j < Cols,
                          printf("SmallMatrix::operator() error: index out of range. i=%zu, j=%zu, Rows=%zu, Cols=%zu\n",
@@ -62,7 +62,7 @@ namespace cuddh
             return data[i][j];
         }
 
-        __host__ __device__ inline void zeros()
+        constexpr void zeros()
         {
             for (size_t i = 0; i < Rows; i++)
                 for (size_t j = 0; j < Cols; j++)
@@ -98,14 +98,14 @@ namespace cuddh
             return *this;
         }
 
-        __host__ __device__ static size_t n_rows() { return Rows; }
-        __host__ __device__ static size_t n_cols() { return Rows; }
+        static constexpr size_t n_rows() { return Rows; }
+        static constexpr size_t n_cols() { return Rows; }
 
-        __host__ __device__ inline T &operator()(size_t i, size_t j) { return data[index(i, j)]; }
+        constexpr T &operator()(size_t i, size_t j) { return data[index(i, j)]; }
 
-        __host__ __device__ inline const T &operator()(size_t i, size_t j) const { return data[index(i, j)]; }
+        constexpr const T &operator()(size_t i, size_t j) const { return data[index(i, j)]; }
 
-        __host__ __device__ inline void zeros()
+        constexpr void zeros()
         {
             for (size_t i = 0; i < Rows * (Rows + 1) / 2; i++)
                 data[i] = T();
@@ -114,7 +114,7 @@ namespace cuddh
     private:
         T data[Rows * (Rows + 1) / 2];
 
-        __host__ __device__ static inline size_t index(size_t i, size_t j)
+        static constexpr size_t index(size_t i, size_t j)
         {
             cuddh_assert(i < Rows && j < Rows,
                          printf("SmallSymmetricMatrix::index() error: index out of range. i=%zu, j=%zu, Rows=%zu\n", i,
@@ -148,7 +148,7 @@ namespace cuddh
     template <typename T>
     using scalar3 = std::conditional_t<std::is_same_v<T, float>, float3, double3>;
 
-    __host__ __device__ inline double2 operator*(const double2x2 &A, const double2 &x)
+    constexpr double2 operator*(const double2x2 &A, const double2 &x)
     {
         double2 y;
         y.x = A(0, 0) * x.x + A(0, 1) * x.y;
@@ -156,7 +156,7 @@ namespace cuddh
         return y;
     }
 
-    __host__ __device__ inline double3 operator*(const double3x3 &A, const double3 &x)
+    constexpr double3 operator*(const double3x3 &A, const double3 &x)
     {
         double3 y;
         y.x = A(0, 0) * x.x + A(0, 1) * x.y + A(0, 2) * x.z;
@@ -165,7 +165,7 @@ namespace cuddh
         return y;
     }
 
-    __host__ __device__ inline double2 operator*(const dsym2x2 &A, const double2 &x)
+    constexpr double2 operator*(const dsym2x2 &A, const double2 &x)
     {
         double2 y;
         y.x = A(0, 0) * x.x + A(0, 1) * x.y;
@@ -173,7 +173,7 @@ namespace cuddh
         return y;
     }
 
-    __host__ __device__ inline double3 operator*(const dsym3x3 &A, const double3 &x)
+    constexpr double3 operator*(const dsym3x3 &A, const double3 &x)
     {
         double3 y;
         y.x = A(0, 0) * x.x + A(0, 1) * x.y + A(0, 2) * x.z;
@@ -182,7 +182,7 @@ namespace cuddh
         return y;
     }
 
-    __host__ __device__ inline float2 operator*(const float2x2 &A, const float2 &x)
+    constexpr float2 operator*(const float2x2 &A, const float2 &x)
     {
         float2 y;
         y.x = A(0, 0) * x.x + A(0, 1) * x.y;
@@ -190,7 +190,7 @@ namespace cuddh
         return y;
     }
 
-    __host__ __device__ inline float3 operator*(const float3x3 &A, const float3 &x)
+    constexpr float3 operator*(const float3x3 &A, const float3 &x)
     {
         float3 y;
         y.x = A(0, 0) * x.x + A(0, 1) * x.y + A(0, 2) * x.z;
@@ -199,7 +199,7 @@ namespace cuddh
         return y;
     }
 
-    __host__ __device__ inline float2 operator*(const fsym2x2 &A, const float2 &x)
+    constexpr float2 operator*(const fsym2x2 &A, const float2 &x)
     {
         float2 y;
         y.x = A(0, 0) * x.x + A(0, 1) * x.y;
@@ -207,7 +207,7 @@ namespace cuddh
         return y;
     }
 
-    __host__ __device__ inline float3 operator*(const fsym3x3 &A, const float3 &x)
+    constexpr float3 operator*(const fsym3x3 &A, const float3 &x)
     {
         float3 y;
         y.x = A(0, 0) * x.x + A(0, 1) * x.y + A(0, 2) * x.z;
@@ -216,51 +216,51 @@ namespace cuddh
         return y;
     }
 
-    __host__ __device__ inline double det(const double2x2 &A)
+    constexpr double det(const double2x2 &A)
     {
         return A(0, 0) * A(1, 1) - A(0, 1) * A(1, 0);
     }
 
-    __host__ __device__ inline double det(const double3x3 &A)
+    constexpr double det(const double3x3 &A)
     {
         return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(2, 0)) +
                A(0, 2) * (A(1, 0) * A(2, 1) - A(1, 1) * A(2, 0));
     }
 
-    __host__ __device__ inline double det(const dsym2x2 &A)
+    constexpr double det(const dsym2x2 &A)
     {
         return A(0, 0) * A(1, 1) - A(0, 1) * A(0, 1);
     }
 
-    __host__ __device__ inline double det(const dsym3x3 &A)
+    constexpr double det(const dsym3x3 &A)
     {
         return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(1, 2)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(0, 2)) +
                A(0, 2) * (A(1, 0) * A(1, 1) - A(0, 1) * A(0, 2));
     }
 
-    __host__ __device__ inline float det(const float2x2 &A)
+    constexpr float det(const float2x2 &A)
     {
         return A(0, 0) * A(1, 1) - A(0, 1) * A(1, 0);
     }
 
-    __host__ __device__ inline float det(const float3x3 &A)
+    constexpr float det(const float3x3 &A)
     {
         return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(2, 0)) +
                A(0, 2) * (A(1, 0) * A(2, 1) - A(1, 1) * A(2, 0));
     }
 
-    __host__ __device__ inline float det(const fsym2x2 &A)
+    constexpr float det(const fsym2x2 &A)
     {
         return A(0, 0) * A(1, 1) - A(0, 1) * A(0, 1);
     }
 
-    __host__ __device__ inline float det(const fsym3x3 &A)
+    constexpr float det(const fsym3x3 &A)
     {
         return A(0, 0) * (A(1, 1) * A(2, 2) - A(1, 2) * A(1, 2)) - A(0, 1) * (A(1, 0) * A(2, 2) - A(1, 2) * A(0, 2)) +
                A(0, 2) * (A(1, 0) * A(1, 1) - A(0, 1) * A(0, 2));
     }
 
-    __host__ __device__ inline double2x2 adjugate(const double2x2 &A)
+    constexpr double2x2 adjugate(const double2x2 &A)
     {
         double2x2 B;
         B(0, 0) = A(1, 1);
@@ -270,7 +270,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline float2x2 adjugate(const float2x2 &A)
+    constexpr float2x2 adjugate(const float2x2 &A)
     {
         float2x2 B;
         B(0, 0) = A(1, 1);
@@ -280,7 +280,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline dsym2x2 adjugate(const dsym2x2 &A)
+    constexpr dsym2x2 adjugate(const dsym2x2 &A)
     {
         dsym2x2 B;
         B(0, 0) = A(1, 1);
@@ -289,7 +289,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline fsym2x2 adjugate(const fsym2x2 &A)
+    constexpr fsym2x2 adjugate(const fsym2x2 &A)
     {
         fsym2x2 B;
         B(0, 0) = A(1, 1);
@@ -298,7 +298,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline double3x3 adjugate(const double3x3 &A)
+    constexpr double3x3 adjugate(const double3x3 &A)
     {
         double3x3 B;
         B(0, 0) = A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1);
@@ -313,7 +313,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline float3x3 adjugate(const float3x3 &A)
+    constexpr float3x3 adjugate(const float3x3 &A)
     {
         float3x3 B;
         B(0, 0) = A(1, 1) * A(2, 2) - A(1, 2) * A(2, 1);
@@ -328,7 +328,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline dsym3x3 adjugate(const dsym3x3 &A)
+    constexpr dsym3x3 adjugate(const dsym3x3 &A)
     {
         dsym3x3 B;
         B(0, 0) = A(1, 1) * A(2, 2) - A(1, 2) * A(1, 2);
@@ -340,7 +340,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline fsym3x3 adjugate(const fsym3x3 &A)
+    constexpr fsym3x3 adjugate(const fsym3x3 &A)
     {
         fsym3x3 B;
         B(0, 0) = A(1, 1) * A(2, 2) - A(1, 2) * A(1, 2);
@@ -352,7 +352,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline double2x2 transpose(const double2x2 &A)
+    constexpr double2x2 transpose(const double2x2 &A)
     {
         double2x2 B;
         B(0, 0) = A(0, 0);
@@ -362,7 +362,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline double3x3 transpose(const double3x3 &A)
+    constexpr double3x3 transpose(const double3x3 &A)
     {
         double3x3 B;
         B(0, 0) = A(0, 0);
@@ -377,7 +377,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline float2x2 transpose(const float2x2 &A)
+    constexpr float2x2 transpose(const float2x2 &A)
     {
         float2x2 B;
         B(0, 0) = A(0, 0);
@@ -387,7 +387,7 @@ namespace cuddh
         return B;
     }
 
-    __host__ __device__ inline float3x3 transpose(const float3x3 &A)
+    constexpr float3x3 transpose(const float3x3 &A)
     {
         float3x3 B;
         B(0, 0) = A(0, 0);

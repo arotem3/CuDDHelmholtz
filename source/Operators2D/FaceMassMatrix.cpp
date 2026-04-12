@@ -8,9 +8,9 @@ static thrust::universal_vector<double> construct_face_mass(const TraceSpace2D &
     const int n_basis = fs.h1_space().basis().size();
 
     auto &q = fs.h1_space().basis().quadrature();
-    auto &metrics = fs.metrics(q);
-    auto detJ = reshape(metrics.measures(MemorySpace::DEVICE), n_basis, n_faces);
 
+    auto face_indices = fs.faces(MemorySpace::DEVICE);
+    auto d_mesh = fs.h1_space().mesh().to_device();
     auto I = fs.subspace_indices(MemorySpace::DEVICE);
     auto K = fs.global_indices(MemorySpace::DEVICE);
 
@@ -27,7 +27,8 @@ static thrust::universal_vector<double> construct_face_mass(const TraceSpace2D &
         const int fs_idx = I(k, f);
         const int fem_idx = K(fs_idx);
 
-        double a = w(k) * detJ(k, f);
+        const double ds = d_mesh.edge(face_indices(f)).measure();
+        double a = w(k) * ds;
         if (d_a)
             a *= d_a[fs_idx];
 

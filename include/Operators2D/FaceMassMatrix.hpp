@@ -44,8 +44,7 @@ namespace cuddh
         double *d_F = thrust::raw_pointer_cast(F.data());
 
         forall(fdof, [=] __device__(int i) {
-            int gi = gI[i];
-            double xi[] = {x(0, gi), x(1, gi)};
+            double2 xi = x(gI[i]);
             d_F[i] = f(xi);
         });
 

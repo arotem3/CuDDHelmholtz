@@ -1,116 +1,72 @@
 #ifndef CUDDH_ELEMENT_HPP
 #define CUDDH_ELEMENT_HPP
 
+#include "SmallMatrix.hpp"
 #include "cuddh_config.hpp"
-#include "Tensor.hpp"
 
 namespace cuddh
 {
-    /// @brief Abstract representation of a finite element.
-    class Element
-    {
-    public:
-        int id; ///< @brief global index of element in the mesh.
-                ///<
-                ///< The existing mesh constructors always assign this value, and
-                ///< it is used by some functions.
-        int nodes[4];
-
-        /// @brief maps the reference coordinates `xi` to the physical coordinates `x`.
-        ///
-        /// @param[in] xi coordinates in the reference element. Shape (2,)
-        /// @param[out] x on exit, coordinates in physical space. Shape (2,)
-        virtual void physical_coordinates(const double * xi, double * x) const = 0;
-        
-        /// @brief computes the Jacobian of the element mapping from reference
-        /// coordinates to physical coordinates.
-        /// 
-        /// The Jacobian is defined as 
-        /// $$J_{ij} = \frac{\partial x_j}{\partial \xi_i},$$
-        /// so that \f$\nabla_x = J^{-1}\nabla_{\xi}\f$ where \f$x\f$ is the physical
-        /// coordinate and \f$\xi\f$ is the reference coordinate. We define the
-        /// Jacobian this way because it is more natural to compute
-        /// \f$\frac{\partial x_j}{\partial \xi_i}\f$ than
-        /// \f$\frac{\partial\xi_j}{\partial x_i}\f$. However,
-        /// \f$\frac{\partial\xi_j}{\partial x_i}\f$ can be computed by inverting
-        /// this \f$2\times 2\f$ matrix.
-        ///
-        /// @param[in] xi coordinates in the reference element. Shape (2,)
-        /// @param[out] J on exit, Jacobian matrix. Shape (2, 2)
-        virtual void jacobian(const double * xi, double * J) const = 0;
-
-        /// @brief computes the determinant of the jacobian of element mapping
-        /// from reference coordinates to physical coordinates.
-        ///
-        /// The output is returns \f$\mu(\xi) := \det(J)\f$ the determinant of the
-        /// Jacobian of element mapping from reference coordinates to physical
-        /// coordinates. Then \f$dx = \mu(\xi) d\xi\f$. If this function is not
-        /// overloaded, then `measure` will call `jacobian` and return the
-        /// determinant of the result.
-        ///
-        /// @param[in] xi coordinates in the reference element. Shape (2,)
-        /// @return The measure weight at `xi`
-        virtual double measure(const double * xi) const = 0;
-
-        virtual ~Element() = default;
-    };
-
-    /// @brief The `QuadElement` is a straight sides quadrilateral element. It
-    /// is defined by the coordinates of its four corners. The reference element
-    /// for this type is \f$[-1, 1]^2\f$.
-    class QuadElement : public Element
+    /// @brief Bilinear quadrilateral element.
+    ///
+    /// The reference element is [-1,1]^2. Corner ordering (counter-clockwise):
+    ///   0 = (-,-),  1 = (+,-),  2 = (+,+),  3 = (-,+).
+    class QuadElement
     {
     private:
-        double x[4][2];
+        double2 x[4];
 
     public:
-        /// @brief maps the reference coordinates `xi` to the physical coordinates `x`.
-        ///
-        /// @param[in] xi coordinates in the reference element. Shape (2,)
-        /// @param[out] x on exit, coordinates in physical space. Shape (2,)
-        void physical_coordinates(const double * xi, double * x) const override;
-
-        /// @brief computes the Jacobian of the element mapping from reference
-        /// coordinates to physical coordinates.
-        /// 
-        /// The Jacobian is defined as 
-        /// $$J_{ij} = \frac{\partial x_j}{\partial \xi_i},$$
-        /// so that \f$\nabla_x = J^{-1}\nabla_{\xi}\f$ where \f$x\f$ is the physical
-        /// coordinate and \f$\xi\f$ is the reference coordinate. We define the
-        /// Jacobian this way because it is more natural to compute
-        /// \f$\frac{\partial x_j}{\partial \xi_i}\f$ than
-        /// \f$\frac{\partial\xi_j}{\partial x_i}\f$. However,
-        /// \f$\frac{\partial\xi_j}{\partial x_i}\f$ can be computed by inverting
-        /// this \f$2\times 2\f$ matrix.
-        ///
-        /// @param[in] xi coordinates in the reference element. Shape (2,)
-        /// @param[out] J on exit, Jacobian matrix. Shape (2, 2)
-        void jacobian(const double * xi, double * J) const override;
-
-        double measure(const double * xi) const override;
-
-        /// @brief initialize `QuadElement` by providing the coordinates of its
-        /// corners (in counter clockwise order).
-        /// 
-        /// The input array `X` should have shape (2, 4) so that \f$X_{0,i} = x_i\f$
-        /// and \f$X_{1,i} = y_i\f$ for \f$i=1,...,4\f$. The input `X` is copied.
-        /// @param[in] X physical coordinates of element corners. Shape (2, 4).
-        QuadElement(const double * X);
-
+        QuadElement() = default;
         ~QuadElement() = default;
 
-        /// @brief returns a pointer to the coordinates of the `i`-th corner of
-        /// the element as ordered on construction.
-        ///
-        /// @param[in] i index of corner
-        /// @return A pointer to the physical coordinates. They are an array of
-        /// length 2. It should not be assumed that `corner(i+1) = corner(i) +
-        /// 2`.
-        inline const double * corner(int i) const
+        constexpr explicit QuadElement(const double2 *X) : x{}
         {
-            return x[i];
+            for (int i = 0; i < 4; ++i)
+                x[i] = X[i];
         }
+
+        /// @brief Maps reference coordinates to physical coordinates.
+        /// @param xi Reference point in [-1,1]^2.
+        /// @return Physical coordinates.
+        constexpr double2 physical_coordinates(double2 xi) const
+        {
+            const double b[] = {0.25 * (1.0 - xi.x) * (1.0 - xi.y), 0.25 * (1.0 + xi.x) * (1.0 - xi.y),
+                                0.25 * (1.0 + xi.x) * (1.0 + xi.y), 0.25 * (1.0 - xi.x) * (1.0 + xi.y)};
+
+            double2 p{};
+
+            for (int i = 0; i < 4; ++i)
+            {
+                p.x += x[i].x * b[i];
+                p.y += x[i].y * b[i];
+            }
+
+            return p;
+        }
+
+        /// @brief Computes the Jacobian of the element mapping.
+        ///
+        /// Returns J where J(row, col) = dx_row / dxi_col, i.e.
+        ///   J(0,0) = dx/dxi0,  J(1,0) = dy/dxi0,
+        ///   J(0,1) = dx/dxi1,  J(1,1) = dy/dxi1.
+        /// @param xi Reference point in [-1,1]^2.
+        /// @return 2x2 Jacobian matrix.
+        constexpr double2x2 jacobian(double2 xi) const
+        {
+            double2x2 J{};
+
+            J(0, 0) = 0.25 * ((1.0 - xi.y) * (x[1].x - x[0].x) + (1.0 + xi.y) * (x[2].x - x[3].x)); // dx/d(xi)
+            J(1, 0) = 0.25 * ((1.0 - xi.y) * (x[1].y - x[0].y) + (1.0 + xi.y) * (x[2].y - x[3].y)); // dy/d(xi)
+            J(0, 1) = 0.25 * ((1.0 - xi.x) * (x[3].x - x[0].x) + (1.0 + xi.x) * (x[2].x - x[1].x)); // dx/d(eta)
+            J(1, 1) = 0.25 * ((1.0 - xi.x) * (x[3].y - x[0].y) + (1.0 + xi.x) * (x[2].y - x[1].y)); // dy/d(eta)
+
+            return J;
+        }
+
+        /// @brief Returns det(J(xi)), the measure weight at the reference point xi.
+        constexpr double measure(double2 xi) const { return det(jacobian(xi)); }
     };
-} // namespace dg
+
+} // namespace cuddh
 
 #endif

@@ -127,7 +127,7 @@ public:
         });
     }
 
-    void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
+    void action(scalar_t, const scalar_t *, scalar_t *) const override
     {
         cuddh_verify(false, printf("Not Implemented."));
     }
@@ -162,7 +162,7 @@ public:
         gmres(y, *A, x, 5, nullptr, {.maxit = 5, .rtol = 1e-2, .atol = 0.0, .verbose = SolverParams::Silent});
     }
 
-    void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
+    void action(scalar_t, const scalar_t *, scalar_t *) const override
     {
         cuddh_verify(false, printf("Not Implemented."));
     }

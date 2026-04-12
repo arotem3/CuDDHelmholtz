@@ -1,5 +1,4 @@
-#ifndef CUDDH_H1_SPACE_HPP
-#define CUDDH_H1_SPACE_HPP
+#pragma once
 
 #include <unordered_set>
 
@@ -40,7 +39,7 @@ namespace cuddh
 
         /// @brief returns the physical coordinates corresponding to collocation
         /// point of each nodal DOF. The output has shape (2, ndof).
-        const_dmat_wrapper physical_coordinates(MemorySpace m) const { return reshape(_xy.read(m), 2, ndof); }
+        VectorWrapper<const double2> physical_coordinates(MemorySpace m) const { return reshape(_xy.read(m), ndof); }
 
     private:
         const int n_elem;
@@ -50,7 +49,7 @@ namespace cuddh
         int ndof;
 
         host_device_ivec _I;
-        host_device_dvec _xy;
+        HostDeviceArray<double2> _xy;
     };
 
     template <typename Func>
@@ -64,7 +63,7 @@ namespace cuddh
         double *d_F = thrust::raw_pointer_cast(F.data());
 
         forall(ndof, [=] __device__(int i) {
-            double xi[] = {x(0, i), x(1, i)};
+            double2 xi = x(i);
             d_F[i] = f(xi);
         });
 
@@ -120,9 +119,6 @@ namespace cuddh
         /// @brief returns the global H1Space2D
         const H1Space2D &h1_space() const { return fem; }
 
-        /// @brief returns the edge metrics for the faces in the TraceSpace2D
-        const Mesh2D::EdgeMetricCollection &metrics(const QuadratureRule &quad) const;
-
     private:
         const H1Space2D &fem;
         const int _n_faces;
@@ -132,9 +128,5 @@ namespace cuddh
         host_device_ivec _I;
         host_device_ivec _faces;
         host_device_ivec _proj;
-
-        mutable std::unordered_map<std::string, Mesh2D::EdgeMetricCollection> _metrics;
     };
 } // namespace cuddh
-
-#endif

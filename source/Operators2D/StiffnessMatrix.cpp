@@ -7,14 +7,17 @@ namespace cuddh
         const int n_elem = mesh.n_elem();
         const int n = quad.size();
 
-        thrust::host_vector<double> h_w(n);
+        thrust::host_vector<double> h_w(n), h_q(n);
         for (int i = 0; i < n; ++i)
+        {
             h_w[i] = quad.w(i);
-        thrust::device_vector<double> d_w = h_w;
+            h_q[i] = quad.x(i);
+        }
+        thrust::device_vector<double> d_w = h_w, d_q = h_q;
         auto w = reshape(thrust::raw_pointer_cast(d_w.data()), n);
+        auto q = reshape(thrust::raw_pointer_cast(d_q.data()), n);
 
-        const double *_J = mesh.element_metrics(quad).jacobians(MemorySpace::DEVICE);
-        auto J = reshape(_J, 2, 2, n, n, n_elem);
+        auto d_mesh = mesh.to_device();
 
         HostDeviceArray<dsym2x2> g(n * n * n_elem);
         auto G = reshape(g.device_write(), n, n, n_elem);
@@ -22,20 +25,20 @@ namespace cuddh
         forall_2d(n, n, n_elem, [=] __device__(int el) mutable -> void {
             const auto [i, j, _] = threadIdx;
 
-            const double W = w(i) * w(j);
-            const double Y_eta = J(1, 1, i, j, el);
-            const double X_eta = J(0, 1, i, j, el);
-            const double Y_xi = J(1, 0, i, j, el);
-            const double X_xi = J(0, 0, i, j, el);
+            __shared__ QuadElement element;
+            if (i == 0 && j == 0)
+                element = d_mesh.element(el);
+            __syncthreads();
 
-            const double detJ = X_xi * Y_eta - X_eta * Y_xi;
+            const double2x2 J = element.jacobian({q(i), q(j)});
+            const double W = w(i) * w(j) / det(J);
 
-            dsym2x2 g_el;
-            g_el(0, 0) = W * (Y_eta * Y_eta + X_eta * X_eta) / detJ;
-            g_el(1, 0) = -W * (Y_xi * Y_eta + X_xi * X_eta) / detJ;
-            g_el(1, 1) = W * (Y_xi * Y_xi + X_xi * X_xi) / detJ;
+            dsym2x2 gij;
+            gij(0, 0) = W * (J(1, 1) * J(1, 1) + J(0, 1) * J(0, 1));
+            gij(1, 0) = -W * (J(1, 0) * J(1, 1) + J(0, 0) * J(0, 1));
+            gij(1, 1) = W * (J(1, 0) * J(1, 0) + J(0, 0) * J(0, 0));
 
-            G(i, j, el) = g_el;
+            G(i, j, el) = gij;
         });
 
         return g;

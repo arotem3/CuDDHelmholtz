@@ -1,283 +1,148 @@
 #ifndef CUDDH_MESH_2D_HPP
 #define CUDDH_MESH_2D_HPP
 
-#include <unordered_map>
+#include <vector>
 
-#include "Tensor.hpp"
-#include "Node.hpp"
 #include "Edge.hpp"
 #include "Element.hpp"
-#include "QuadratureRule.hpp"
-
 #include "HostDeviceArray.hpp"
+#include "Tensor.hpp"
 
 namespace cuddh
 {
+    class DeviceMesh2D;
+
     /// @brief The 2D mesh.
     class Mesh2D
     {
     public:
-        /// @brief manages arrays of element metric information
-        class ElementMetricCollection
-        {
-        public:
-            /// @brief initialize collection of metrics on elements
-            /// @param mesh the mesh
-            /// @param quad 1D quadrature rule to evaluate metrics on
-            ElementMetricCollection(const Mesh2D &mesh, const QuadratureRule &quad);
-
-            ElementMetricCollection(ElementMetricCollection &&);
-
-            /// returns an array of the element jacobians evaluated on a quadrature rule.
-            /// The output J has shape (2, 2, n, n, n_elem).
-            const double *jacobians(MemorySpace m) const;
-
-            /// returns an array of the element measures ie the determinant of the
-            /// jacobians evaluated on a quadrature rule. The output detJ has shape (n, n, n_elem).
-            const double *measures(MemorySpace m) const;
-
-            /// returns an array of the physical coordinates of the quadrature rule on
-            /// every element. The output x has shape (2, n, n, n_elem).
-            const double *physical_coordinates(MemorySpace m) const;
-
-        private:
-            const Mesh2D &mesh;
-            QuadratureRule quad;
-
-            mutable host_device_dvec J;
-            mutable host_device_dvec detJ;
-            mutable host_device_dvec x;
-        };
-
-        /// @brief manages arrays of element metric information
-        class EdgeMetricCollection
-        {
-        public:
-            /// @brief initialize collection of metrics on edges
-            /// @param mesh the 2d mesh
-            /// @param edge_type interior or boundary
-            /// @param quad the quadrature rule to evaluate metrics on
-            EdgeMetricCollection(const Mesh2D &mesh, const FaceType edge_type, const QuadratureRule &quad);
-
-            EdgeMetricCollection(const Mesh2D &mesh, int n_faces, const int *faces, const QuadratureRule &quad);
-
-            EdgeMetricCollection(EdgeMetricCollection &&);
-
-            /// return an array of the edge measures on the quadrature rule for edges of
-            /// the requested types. The output has shape (n, n_edges).
-            const double *measures(MemorySpace m) const;
-
-            /// returns an array of the physical coordinates of the quadrature rule on
-            /// every edge of the requested type. The output has shape (2, n, n_edges)
-            const double *physical_coordinates(MemorySpace m) const;
-
-            /// returns an array of the normal derivatives of all of the edges of the
-            /// requested FaceType evaluated on the quadrature rule. The output has shape
-            /// (2, n, n_edges).
-            const double *normals(MemorySpace m) const;
-
-        private:
-            const Mesh2D &mesh;
-            QuadratureRule quad;
-            const FaceType edge_type;
-
-            const bool face_subset;
-            const_ivec_wrapper _faces;
-
-            mutable host_device_dvec detJ;
-            mutable host_device_dvec x;
-            mutable host_device_dvec n;
-        };
-
         /// @brief constructs empty mesh
-        Mesh2D() {}
+        Mesh2D() = default;
         ~Mesh2D() = default;
 
-        /// @brief DELETED: mesh maintains unique pointers to abstract types. Copies are non-trivial.
-        Mesh2D(const Mesh2D &mesh) = delete;
-
-        /// @brief move mesh
-        Mesh2D(Mesh2D &&) = default;
-
-        /// @brief DELETED: mesh maintains unique pointers to abstract types. Copies are non-trivial.
+        Mesh2D(const Mesh2D &) = delete;
         Mesh2D &operator=(const Mesh2D &) = delete;
 
-        /// @brief move mesh
+        Mesh2D(Mesh2D &&) = default;
         Mesh2D &operator=(Mesh2D &&) = default;
 
-        /// number of elements in mesh. If mesh is distributed (MPI), then
-        /// returns the number of elements on this processor.
-        int n_elem() const
-        {
-            return _elements.size();
-        }
+        /// @brief number of elements in mesh.
+        int n_elem() const { return _elem_nodes.size() / 4; }
 
-        /// @brief return number of edges in mesh.
-        int n_edges() const
-        {
-            return _edges.size();
-        }
+        /// @brief number of mesh vertices.
+        int n_nodes() const { return _node_coords.size(); }
 
-        /// number of edges of specified type in mesh.
+        /// @brief total number of edges in mesh.
+        int n_edges() const { return _edge_nodes.size() / 2; }
+
+        /// @brief number of edges of the specified type.
         int n_edges(FaceType type) const
         {
-            if (type == FaceType::BOUNDARY)
-            {
-                return _boundary_edges.size();
-            }
-            else
-            {
-                return _interior_edges.size();
-            }
+            return (type == FaceType::BOUNDARY) ? _boundary_edges_d.size() : _interior_edges_d.size();
         }
 
-        /// @brief  return the number of nodes in mesh.
-        int n_nodes() const
-        {
-            return _nodes.size();
-        }
+        /// @brief returns the shortest edge length in the mesh.
+        double h() const;
 
-        /// @brief number of node of specified type in mesh.
-        int n_nodes(NodeType type) const
-        {
-            if (type == NodeType::BOUNDARY)
-                return _boundary_nodes.size();
-            else
-                return _interior_nodes.size();
-        }
+        /// @brief Returns the geometry of edge i (by global edge index).
+        Edge edge(int i) const;
 
-        /// @brief returns the maximum polynomial degree of all element mappings.
-        int max_element_order() const
-        {
-            // only bilinear elements supported so far
-            return 1;
-        }
+        /// @brief Returns the geometry of the i-th edge of the specified type.
+        Edge edge(int i, FaceType type) const;
 
-        /// @brief returns the minimum polynomial degree of all element mappings.
-        int min_element_order() const
-        {
-            // only bilinear elements supported so far
-            return 1;
-        }
+        /// @brief Returns the connectivity of edge i (by global edge index).
+        EdgeConnectivity edge_connectivity(int i) const;
 
-        /// @brief returns the shortest length scale (edge length) of the mesh.
-        double min_h() const;
+        /// @brief Returns the connectivity of the i-th edge of the specified type.
+        EdgeConnectivity edge_connectivity(int i, FaceType type) const;
 
-        /// @brief returns the longest length scale (edge length) of the mesh.
-        double max_h() const;
-
-        const Node &node(int i) const
-        {
-            cuddh_assert(0 <= i && i < (int)_nodes.size(), printf("Mesh2D error: node i = %d out of range (#nodes = %d)\n", i, (int)_nodes.size()));
-            return _nodes[i];
-        }
-
-        const Node &node(int i, NodeType type) const
-        {
-            if (type == NodeType::BOUNDARY)
-            {
-                cuddh_assert(0 <= i && i < (int)_boundary_nodes.size(), printf("Mesh2D error: boundary node i = %d out of range (#boundary nodes = %d)\n", i, (int)_boundary_nodes.size()));
-                return _nodes[_boundary_nodes[i]];
-            }
-            else
-            {
-                cuddh_assert(0 <= i && i < (int)_interior_nodes.size(), printf("Mesh2D error: interior node i = %d out of range (#interior nodes = %d)\n", i, (int)_interior_nodes.size()));
-                return _nodes[_interior_nodes[i]];
-            }
-        }
-
-        const Edge *edge(int i) const
-        {
-            cuddh_assert(0 <= i && i < (int)_edges.size(), printf("Mesh2D error: edge i = %d out of range (#edges = %d)\n", i, (int)_edges.size()));
-            return _edges[i].get();
-        }
-
-        /// returns the edge of FaceType type specified by edge index i.
-        const Edge *edge(int i, FaceType type) const
-        {
-            if (type == FaceType::BOUNDARY)
-            {
-                cuddh_assert(0 <= i && i < (int)_boundary_edges.size(), printf("Mesh2D error: boundary edge i = %d out of range (#boundary edges = %d)\n", i, (int)_boundary_edges.size()));
-                return _edges[_boundary_edges[i]].get();
-            }
-            else
-            {
-                cuddh_assert(0 <= i && i < (int)_interior_edges.size(), printf("Mesh2D error: interior edge i = %d out of range (#interior edges = %d)\n", i, (int)_interior_edges.size()));
-                return _edges[_interior_edges[i]].get();
-            }
-        }
-
-        /// @brief returns the indicies of the edges such that edge(i) is on the boundary
+        /// @brief Returns the indices of the boundary edges (global edge indices).
         ivec boundary_edges() const;
 
-        /// returns the element specified by element index el. For distributed
-        /// meshes: this index is local to the processor and should be in the
-        /// range [0, n_elem() ).
-        const Element *element(int el) const
-        {
-            cuddh_assert(0 <= el && el < (int)_elements.size(), printf("Mesh2D::element error: element index out of range. el = %d, n_elem = %d\n", el, (int)_elements.size()));
-            return _elements[el].get();
-        }
+        /// @brief Returns the geometry of element el.
+        QuadElement element(int el) const;
 
-        const ElementMetricCollection &element_metrics(const QuadratureRule &quad) const;
+        /// @brief Returns read-only host access to the element-node connectivity
+        /// array, shaped (4, n_elem()): ec(i, el) is the global node index of
+        /// corner i of element el.
+        const_imat_wrapper elem_nodes() const { return reshape(_elem_nodes.host_read(), 4, n_elem()); }
 
-        const EdgeMetricCollection &edge_metrics(const QuadratureRule &quad, FaceType edge_type) const;
+        /// @brief Returns a device-accessible view of the mesh geometry.
+        DeviceMesh2D to_device() const;
 
-        /// @brief constructs a mesh of QuadElements given a list vertices x and a
-        /// list of indices indicating the vertices of each element.
+        /// @brief Constructs a mesh of QuadElements from a list of vertices and
+        /// element corner indices.
         /// @param[in] nx number of vertices
-        /// @param[in] x shape (2, nx). The coordinates of the vertices
+        /// @param[in] x  shape (2, nx): vertex coordinates
         /// @param[in] nel number of elements
-        /// @param[in] elems shape (4, nel). The element corners. if j = elems(i, el)
-        /// then the i-th corner of element el is x(*, j).
-        /// @return mesh
+        /// @param[in] elems shape (4, nel): corner indices in CCW order
         static Mesh2D from_vertices(int nx, const double *x, int nel, const int *elems);
 
-        /// @brief construct a uniform structured mesh for the rectangle [ @a ax , @a bx ] x [ @a ay , @a by ] with @a nx by @a ny elements.
-        /// @param nx number of elements to partition [ @a ax , @a bx ]
-        /// @param ax lower bound for x
-        /// @param bx upper bound for x
-        /// @param ny number of elements to partition [ @a ay , @a by ]
-        /// @param ay lower bound for y
-        /// @param by upper bound for y
-        /// @return the mesh.
+        /// @brief Constructs a uniform structured mesh for [ax,bx] x [ay,by]
+        /// with nx * ny quadrilateral elements.
         static Mesh2D uniform_rect(int nx, double ax, double bx, int ny, double ay, double by);
 
     private:
-        // resets all data
-        inline void reset()
-        {
-            _edges.clear();
-            _elements.clear();
-            _boundary_edges.clear();
-            _interior_edges.clear();
-            elem_collections.clear();
-            interior_edge_collections.clear();
-            boundary_edge_collections.clear();
-        }
+        std::vector<EdgeConnectivity> _edge_connectivity; ///< edge topology, indexed by global edge id
 
-        std::vector<Node> _nodes;
-        std::vector<std::unique_ptr<Edge>> _edges;
-        std::vector<std::unique_ptr<Element>> _elements;
-        std::vector<int> _interior_nodes;
-        std::vector<int> _boundary_nodes;
-        std::vector<int> _boundary_edges;
-        std::vector<int> _interior_edges;
-
-        mutable std::unordered_map<std::string, ElementMetricCollection> elem_collections;
-        mutable std::unordered_map<std::string, EdgeMetricCollection> interior_edge_collections;
-        mutable std::unordered_map<std::string, EdgeMetricCollection> boundary_edge_collections;
+        HostDeviceArray<double2> _node_coords;  ///< (n_nodes,)       device-accessible node positions
+        HostDeviceArray<int> _elem_nodes;       ///< (4*n_elem,)      device-accessible element connectivity
+        HostDeviceArray<int> _edge_nodes;       ///< (2*n_edges,)     device-accessible edge node indices (pre-ordered for outward normal)
+        HostDeviceArray<int> _interior_edges_d; ///< (n_interior,)    device-accessible interior edge indices
+        HostDeviceArray<int> _boundary_edges_d; ///< (n_boundary,)    device-accessible boundary edge indices
     };
 
-    inline Mesh2D::ElementMetricCollection::ElementMetricCollection(const Mesh2D &mesh_, const QuadratureRule &quad_) : mesh(mesh_), quad{quad_} {}
+    /// @brief A 2D mesh of quadrilateral elements on the device.
+    ///
+    /// Contains device pointers to node coordinates, element and edge node
+    /// connectivity, allowing CUDA kernels to reconstruct element and edge
+    /// metrics on the fly. Obtained via `Mesh2D::to_device()`.
+    class DeviceMesh2D
+    {
+    public:
+        DeviceMesh2D() = default;
+        DeviceMesh2D(const DeviceMesh2D &) = default;
+        DeviceMesh2D(DeviceMesh2D &&) = default;
+        DeviceMesh2D &operator=(const DeviceMesh2D &) = default;
+        DeviceMesh2D &operator=(DeviceMesh2D &&) = default;
 
-    inline Mesh2D::ElementMetricCollection::ElementMetricCollection(ElementMetricCollection &&a) : mesh(a.mesh), quad(std::move(a.quad)), J(std::move(a.J)), detJ(std::move(a.detJ)), x(std::move(a.x)) {}
+        __host__ __device__ int n_elem() const { return elems.shape(1); }
+        __host__ __device__ int n_edges() const { return edge_nodes.shape(1); }
+        __host__ __device__ int n_interior_edges() const { return interior_edges.size(); }
+        __host__ __device__ int n_boundary_edges() const { return boundary_edges.size(); }
 
-    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(const Mesh2D &mesh_, const FaceType edge_type_, const QuadratureRule &quad_) : mesh(mesh_), quad{quad_}, edge_type(edge_type_), face_subset{false}, _faces() {}
+        /// @brief Reconstructs element el from device node and connectivity data.
+        __device__ QuadElement element(int el) const
+        {
+            cuddh_assert(0 <= el && el < n_elem(),
+                         printf("DeviceMesh2D error: element index %d out of range [0, %d).\n", el, n_elem()););
+            double2 corners[4];
+            for (int i = 0; i < 4; ++i)
+                corners[i] = nodes[elems(i, el)];
+            return QuadElement(corners);
+        }
 
-    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(EdgeMetricCollection &&a) : mesh(a.mesh), quad(std::move(a.quad)), edge_type(a.edge_type), face_subset{a.face_subset}, _faces(std::move(a._faces)), detJ(std::move(a.detJ)), x(std::move(a.x)), n(std::move(a.n)) {}
+        /// @brief Reconstructs the geometry of edge e (by global edge index) on the fly.
+        __device__ Edge edge(int e) const
+        {
+            return Edge(nodes[edge_nodes(0, e)], nodes[edge_nodes(1, e)]);
+        }
 
-    inline Mesh2D::EdgeMetricCollection::EdgeMetricCollection(const Mesh2D &mesh_, int n_faces, const int *faces, const QuadratureRule &quad_) : mesh{mesh_}, quad{quad_}, edge_type{FaceType::INTERIOR}, face_subset{true}, _faces(faces, n_faces) {}
+        /// @brief Returns the geometry of interior edge e.
+        __device__ Edge interior_edge(int e) const { return edge(interior_edges[e]); }
+
+        /// @brief Returns the geometry of boundary edge e.
+        __device__ Edge boundary_edge(int e) const { return edge(boundary_edges[e]); }
+
+    private:
+        friend class Mesh2D;
+
+        VectorWrapper<const double2> nodes; ///< (n_nodes,)
+        const_imat_wrapper elems;           ///< (4, n_elem)
+        const_imat_wrapper edge_nodes;      ///< (2, n_edges) — node indices per edge (pre-ordered for outward normal)
+        const_ivec_wrapper interior_edges;  ///< indices into edge_nodes
+        const_ivec_wrapper boundary_edges;  ///< indices into edge_nodes
+    };
 
 } // namespace cuddh
 

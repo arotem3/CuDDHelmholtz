@@ -38,9 +38,9 @@
 
 using namespace cuddh;
 
-__device__ static double f(const double X[2], double omega)
+__device__ static double f(const double2 X, double omega)
 {
-    const double x = X[0], y = X[1];
+    const auto [x, y] = X;
     double s = omega * omega;
 
     double r = (x + 0.5) * (x + 0.5) + y * y;
@@ -51,9 +51,10 @@ __device__ static double f(const double X[2], double omega)
     return F;
 }
 
-__device__ static double alpha(const double X[2])
+__device__ static double alpha(const double2 X)
 {
-    const double r = X[0] * X[0] + X[1] * X[1];
+    const auto [x, y] = X;
+    const double r = x * x + y * y;
 
     if (r < 0.0625)
         return 0.2;
@@ -124,12 +125,12 @@ int main(int argc, char *argv[])
         ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
         TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
 
-        auto a2 = gridfunc(fem, [] __device__(const double X[2]) -> double {
+        auto a2 = gridfunc(fem, [] __device__(const double2 X) -> double {
             double aX = alpha(X);
             return aX * aX;
         });
 
-        auto a = trace(fs, [] __device__(const double X[2]) -> double { return alpha(X); });
+        auto a = trace(fs, [] __device__(const double2 X) -> double { return alpha(X); });
 
         auto d_a2 = thrust::raw_pointer_cast(a2.data());
         auto d_a = thrust::raw_pointer_cast(a.data());
@@ -143,7 +144,7 @@ int main(int argc, char *argv[])
     double *b = thrust::raw_pointer_cast(B.data());   // device pointer to right-hand side vector
     double *Gb = thrust::raw_pointer_cast(GB.data()); // device pointer to G applied to b
 
-    l2_project(b, MassMatrix(fem), [=] __device__(const double X[2]) -> double { return f(X, omega); });
+    l2_project(b, MassMatrix(fem), [=] __device__(const double2 X) -> double { return f(X, omega); });
 
     std::cout << "Solving the Helmholtz equation...\n"
               << "\tomega = " << omega << "\n"
@@ -162,12 +163,12 @@ int main(int argc, char *argv[])
         ivec boundary_faces = mesh.boundary_edges();
         TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
 
-        auto a2 = gridfunc(fem, [] __device__(const double X[2]) -> double {
+        auto a2 = gridfunc(fem, [] __device__(const double2 X) -> double {
             double aX = alpha(X);
             return aX * aX;
         });
 
-        auto a = trace(fs, [] __device__(const double X[2]) -> double { return alpha(X); });
+        auto a = trace(fs, [] __device__(const double2 X) -> double { return alpha(X); });
 
         auto d_a2 = thrust::raw_pointer_cast(a2.data());
         auto d_a = thrust::raw_pointer_cast(a.data());
@@ -190,7 +191,7 @@ int main(int argc, char *argv[])
     auto solfile = "solution/uv.0000";
     auto resfile = "solution/residuals.0000";
 
-    if (to_file(xyfile, 2 * ndof, xy.data()))
+    if (to_file(xyfile, xy.size(), xy.data()))
         std::cout << "Saved collocation points to " << xyfile << std::endl;
     else
         std::cerr << "Failed to save collocation points to " << xyfile << std::endl;

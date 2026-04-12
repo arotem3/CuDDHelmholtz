@@ -65,7 +65,7 @@ if is_complex:
     mv = np.nanmax(np.abs(Vi))
     m = max(mu, mv)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6), dpi=300, layout="constrained")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4), dpi=300, layout="constrained")
 
     im1 = ax1.imshow(
         Ui,
@@ -95,7 +95,7 @@ if is_complex:
 else:
     m = np.nanmax(np.abs(Ui))
 
-    fig, ax = plt.subplots(figsize=(6, 6), dpi=300, layout="constrained")
+    fig, ax = plt.subplots(figsize=(4, 4), dpi=300, layout="constrained")
 
     im = ax.imshow(
         Ui,

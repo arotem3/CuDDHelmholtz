@@ -8,24 +8,33 @@ static inline thrust::universal_vector<double> compute_mass_matrix(const H1Space
     const int n_basis = fem.basis().size();
 
     auto &q = fem.basis().quadrature();
-    auto &metrics = fem.mesh().element_metrics(q);
-    auto detJ = reshape(metrics.measures(MemorySpace::DEVICE), n_basis, n_basis, n_elem);
     auto I = fem.global_indices(MemorySpace::DEVICE);
 
-    thrust::universal_vector<double> _w(n_basis);
+    thrust::universal_vector<double> _w(n_basis), _q_pts(n_basis);
     for (int i = 0; i < n_basis; ++i)
+    {
         _w[i] = q.w(i);
+        _q_pts[i] = q.x(i);
+    }
     auto w = reshape(_w, n_basis);
+    auto q_pts = reshape(thrust::raw_pointer_cast(_q_pts.data()), n_basis);
+
+    auto d_mesh = fem.mesh().to_device();
 
     thrust::universal_vector<double> _m(fem.size(), 0.0);
     double *d_m = thrust::raw_pointer_cast(_m.data());
 
-    forall_2d(n_basis, n_basis, n_elem, [=] __device__(int el) mutable -> void {
+    forall_2d(n_basis, n_basis, n_elem, [=] __device__(int el) -> void {
         const int i = threadIdx.x;
         const int j = threadIdx.y;
 
+        __shared__ QuadElement element;
+        if (i == 0 && j == 0)
+            element = d_mesh.element(el);
+        __syncthreads();
+
         const int idx = I(i, j, el);
-        double m = w(i) * w(j) * detJ(i, j, el);
+        double m = w(i) * w(j) * element.measure({q_pts(i), q_pts(j)});
         if (a)
             m *= a[idx];
 

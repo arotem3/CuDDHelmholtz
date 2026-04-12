@@ -2,22 +2,18 @@
 
 using namespace cuddh;
 
-template <typename Map, typename Key>
-static bool contains(const Map &map, Key key)
-{
-    return map.find(key) != map.end();
-}
-
 H1Space3D::H1Space3D(const Mesh3D &mesh, const Basis &basis)
-    : n_elem(mesh.n_elem()),
-      n_basis(basis.size()),
-      _mesh(mesh),
-      _basis(basis),
-      _I(n_basis * n_basis * n_basis * n_elem)
+    : n_elem(mesh.n_elem()), n_basis(basis.size()), _mesh(mesh), _basis(basis), _I(n_basis * n_basis * n_basis * n_elem)
 {
     auto I = reshape(_I.host_write(), n_basis, n_basis, n_basis, n_elem);
 
-    std::unordered_map<int, int> mask;
+    std::unordered_map<int, int> duplicate_dof_map; // maps global DOF index to unique representative DOF index
+
+    auto canonical = [&duplicate_dof_map](int x) -> int {
+        while (duplicate_dof_map.contains(x))
+            x = duplicate_dof_map.at(x);
+        return x;
+    };
 
     // iterate over faces
     const int n_faces = mesh.n_interior_faces();
@@ -35,24 +31,26 @@ H1Space3D::H1Space3D(const Mesh3D &mesh, const Basis &basis)
                 auto vol_idx = face2vol(n_basis, i, j, f0);
                 const int idx0 = vol_idx[0] + n_basis * (vol_idx[1] + n_basis * (vol_idx[2] + n_basis * el0));
 
-                const auto [i1, j1] = permute(n_basis, i, j, fc.permutation);
+                const auto [i1, j1] = permute_face_index(n_basis, i, j, fc.permutation);
                 vol_idx = face2vol(n_basis, i1, j1, f1);
                 const int idx1 = vol_idx[0] + n_basis * (vol_idx[1] + n_basis * (vol_idx[2] + n_basis * el1));
 
-                int i = contains(mask, idx0) ? mask[idx0] : idx0;
-                mask.insert({idx1, i});
+                const int c0 = canonical(idx0);
+                const int c1 = canonical(idx1);
+                if (c0 != c1)
+                    duplicate_dof_map.insert({c1, c0});
             }
         }
     }
 
     // fill the global indices
     const int N = n_basis * n_basis * n_basis * n_elem;
-    ndof = N - mask.size();
+    ndof = N - duplicate_dof_map.size();
     int l = 0;
 
     for (int i = 0; i < N; ++i)
     {
-        if (not contains(mask, i))
+        if (not duplicate_dof_map.contains(i))
         {
             I[i] = l;
             ++l;
@@ -63,22 +61,8 @@ H1Space3D::H1Space3D(const Mesh3D &mesh, const Basis &basis)
         }
     }
 
-    for (const auto [idx1, idx0] : mask)
-    {
-        int i = idx0;
-
-        const int safety_factor = 10; // Arbitrary safety factor to prevent infinite loop
-        int count = 0;
-        while (contains(mask, i))
-        {
-            if (++count > safety_factor)
-                throw std::runtime_error("H1Space3D: Infinite loop detected in connectivity graph. Possible degenerate mesh.");
-            
-            i = mask[i];
-        }
-
-        I[idx1] = I[i];
-    }
+    for (const auto [idx1, idx0] : duplicate_dof_map)
+        I[idx1] = I[canonical(idx0)];
 
     // fill the physical coordinates
     _xyz.resize(ndof);
@@ -94,9 +78,8 @@ H1Space3D::H1Space3D(const Mesh3D &mesh, const Basis &basis)
             {
                 for (int k = 0; k < n_basis; ++k)
                 {
-                    const double3 r = double3{_basis.quadrature().x(i), _basis.quadrature().x(j), _basis.quadrature().x(k)};
+                    const double3 r{_basis.quadrature().x(i), _basis.quadrature().x(j), _basis.quadrature().x(k)};
                     const int idx = I(i, j, k, el);
-
                     xyz(idx) = elem.physical_coordinates(r);
                 }
             }
@@ -105,11 +88,7 @@ H1Space3D::H1Space3D(const Mesh3D &mesh, const Basis &basis)
 }
 
 TraceSpace3D::TraceSpace3D(const H1Space3D &fem, int n_faces, const int *faces)
-    : fem{fem},
-     nf{n_faces},
-     n_basis{fem.basis().size()},
-     _I(n_basis * n_basis * n_faces),
-     _faces(n_faces)
+    : fem{fem}, nf{n_faces}, n_basis{fem.basis().size()}, _I(n_basis * n_basis * n_faces), _faces(n_faces)
 {
     auto F = reshape(_faces.host_write(), n_faces);
     auto I = reshape(_I.host_write(), n_basis, n_basis, n_faces);
@@ -123,10 +102,10 @@ TraceSpace3D::TraceSpace3D(const H1Space3D &fem, int n_faces, const int *faces)
     const int n_elem = mesh.n_elem();
     auto K = reshape(fem.global_indices(MemorySpace::HOST), n_basis, n_basis, n_basis, n_elem);
 
-    std::unordered_map<int, int> mask; // unique mapping from global DOFs to trace DOFs
-    std::vector<int> P;                // global DOFs corresponding to trace DOFs
+    std::unordered_map<int, int> global_to_trace;
+    std::vector<int> P; // global DOFs corresponding to trace DOFs
 
-    mask.reserve(n_basis * n_basis * n_faces);
+    global_to_trace.reserve(n_basis * n_basis * n_faces);
     P.reserve(n_basis * n_basis * n_faces);
 
     int l = 0;
@@ -141,19 +120,19 @@ TraceSpace3D::TraceSpace3D(const H1Space3D &fem, int n_faces, const int *faces)
                 const auto vol_idx = face2vol(n_basis, i, j, connectivity.label[0]);
                 const int idx = K(vol_idx[0], vol_idx[1], vol_idx[2], connectivity.elements[0]);
 
-                if (not contains(mask, idx))
+                if (not global_to_trace.contains(idx))
                 {
-                    mask[idx] = l;
+                    global_to_trace[idx] = l;
                     P.push_back(idx);
                     ++l;
                 }
 
-                I(i, j, f) = mask[idx];
+                I(i, j, f) = global_to_trace[idx];
             }
         }
     }
 
-    ndof = mask.size();
+    ndof = global_to_trace.size();
 
     _proj.resize(ndof);
     auto proj = _proj.host_write();
@@ -163,32 +142,23 @@ TraceSpace3D::TraceSpace3D(const H1Space3D &fem, int n_faces, const int *faces)
     }
 }
 
-void TraceSpace3D::restrict(const double * x, double * y) const
+void TraceSpace3D::restrict(const double *x, double *y) const
 {
     auto proj = global_indices(MemorySpace::DEVICE);
 
-    forall(ndof, [=] __device__ (int i) -> void
-    {
-        y[i] = x[proj[i]];
-    });
+    forall(ndof, [=] __device__(int i) -> void { y[i] = x[proj[i]]; });
 }
 
-void TraceSpace3D::prolong(const double * x, double * y) const
+void TraceSpace3D::prolong(const double *x, double *y) const
 {
     auto proj = global_indices(MemorySpace::DEVICE);
 
-    forall(ndof, [=] __device__ (int i) -> void
-    {
-        y[proj[i]] += x[i];
-    });
+    forall(ndof, [=] __device__(int i) -> void { y[proj[i]] += x[i]; });
 }
 
-void TraceSpace3D::orth(double * x) const
+void TraceSpace3D::orth(double *x) const
 {
     auto proj = global_indices(MemorySpace::DEVICE);
 
-    forall(ndof, [=] __device__ (int i) -> void
-    {
-        x[proj[i]] = 0.0;
-    });
+    forall(ndof, [=] __device__(int i) -> void { x[proj[i]] = 0.0; });
 }

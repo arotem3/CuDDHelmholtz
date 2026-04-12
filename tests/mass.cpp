@@ -1,9 +1,8 @@
 #include "test_common.hpp"
 
-__device__ static double func(const double X[2])
+__device__ static double func(double2 x)
 {
-    const double x = X[0], y = X[1];
-    return 3.0 * x * x - 2.0 * x * y + y + 1.0;
+    return 3.0 * x.x * x.x - 2.0 * x.x * x.y + x.y + 1.0;
 }
 
 using namespace cuddh;
@@ -26,13 +25,13 @@ static void run_mass_case(TestLogger &summary, const Mesh2D &mesh, Basis basis, 
     auto X = fem.physical_coordinates(MemorySpace::DEVICE);
 
     // evaluate f on nodes
-    auto _f = gridfunc(fem, [=] __device__(double X[2]) { return func(X); });
+    auto _f = gridfunc(fem, [=] __device__(double2 x) { return func(x); });
     double *f = thrust::raw_pointer_cast(_f.data());
 
     // evaluate (f, phi)
     MassMatrix m(fem);
 
-    l2_project(b, m, [=] __device__(double X[2]) { return func(X); });
+    l2_project(b, m, [=] __device__(double2 x) { return func(x); });
 
     m.action(f, Mf);
 

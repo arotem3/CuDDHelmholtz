@@ -65,7 +65,7 @@ DDWaveHoltz<scalar_t> cuddh::make_DDWaveHoltz_2d(scalar_t omega, const double *a
 
     double dt = [&]() {
         const int n_basis = fem.basis().size();
-        const double h = fem.mesh().min_h();
+        const double h = fem.mesh().h();
         auto begin = thrust::device_pointer_cast(a);
         const double reciprocal_max_vel = *thrust::min_element(begin, begin + fem.size());
         return dt = 2.0 * reciprocal_max_vel * h / (n_basis * n_basis);

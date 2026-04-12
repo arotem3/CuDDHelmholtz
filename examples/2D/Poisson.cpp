@@ -58,14 +58,14 @@ private:
     const TraceSpace2D &fs;
 };
 
-__device__ static double f(const double X[2])
+__device__ static double f(const double2)
 {
     return 1.0;
 }
 
-__device__ static double g(const double X[2])
+__device__ static double g(const double2 X)
 {
-    const double x = X[0], y = X[1];
+    const auto [x, y] = X;
     if (std::abs(x - 1.0) < 1e-12)
         return 1.0 - y * y;
     else if (std::abs(x + 1.0) < 1e-12)
@@ -146,11 +146,11 @@ int main(int argc, char *argv[])
     Poisson A(fem, fs);
 
     // set up right hand side
-    l2_project(b, MassMatrix(fem), [] __device__(const double X[2]) -> double { return f(X); }); // (f, phi)
+    l2_project(b, MassMatrix(fem), [] __device__(const double2 x) -> double { return f(x); }); // (f, phi)
     fs.orth(b); // zero out boundary terms
 
     // evaluate g on the boundary faces
-    auto _q = trace(fs, [] __device__(const double X[2]) -> double { return g(X); });
+    auto _q = trace(fs, [] __device__(const double2 x) -> double { return g(x); });
     double *q = thrust::raw_pointer_cast(_q.data());
 
     fs.prolong(q, G);     // extend q to H1
@@ -173,7 +173,7 @@ int main(int argc, char *argv[])
     const char sol_file[] = "solution/u.0000";
     const char res_file[] = "solution/residuals.0000";
 
-    if (to_file(xy_file, 2 * ndof, xy.data()))
+    if (to_file(xy_file, xy.size(), xy.data()))
         std::cout << "Coordinates written to: " << xy_file << "\n";
     else
         std::cerr << "Failed to write coordinates to: " << xy_file << "\n";

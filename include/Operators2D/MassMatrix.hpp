@@ -42,7 +42,7 @@ namespace cuddh
         auto m = M.to_device();
 
         forall(ndof, [=] __device__(int i) {
-            double xi[] = {x(0, i), x(1, i)};
+            double2 xi = x(i);
             d_F[i] = f(xi) * m[i];
         });
     }

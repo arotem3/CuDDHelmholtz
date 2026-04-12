@@ -23,14 +23,11 @@ DDFaceMassMatrix<scalar_t>::DDFaceMassMatrix(const H1Space2D &fem, const Ensembl
         const int s_nf = n_faces(subsp);
         for (int f = 0; f < s_nf; ++f)
         {
-            const int g_f = faces(f, subsp);
-            const Edge *edge = mesh.edge(g_f);
+            const Edge edge = mesh.edge(faces(f, subsp));
+            const double ds = edge.measure();
 
             for (int i = 0; i < n_basis; ++i)
             {
-                const double xi = q.x(i);
-                const double ds = edge->measure(xi);
-
                 const int l = f_inds(i, f, subsp);
                 H(l, subsp) += static_cast<scalar_t>(ds * q.w(i));
             }

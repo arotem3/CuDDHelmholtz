@@ -1,11 +1,5 @@
 #include "FEM2D/H1Space2D.hpp"
 
-template <typename Map, typename Key>
-static bool contains(const Map &map, Key key)
-{
-    return map.find(key) != map.end();
-}
-
 namespace cuddh
 {
     H1Space2D::H1Space2D(const Mesh2D &mesh_, const Basis &basis_)
@@ -13,108 +7,65 @@ namespace cuddh
     {
         icube_wrapper I(_I.host_write(), n_basis, n_basis, n_elem);
 
-        std::unordered_map<int, int> mask;
+        std::unordered_map<int, int> duplicate_dof_map; // maps global DOF index to unique representative DOF index
 
+        // follow mask chain to true canonical representative (not in mask)
+        auto canonical = [&duplicate_dof_map](int x) -> int {
+            while (duplicate_dof_map.contains(x))
+                x = duplicate_dof_map.at(x);
+            return x;
+        };
+
+        // iterate over interior edges to identify duplicate DOFs
         const int n_edges = _mesh.n_edges(FaceType::INTERIOR);
-        const int n_nodes = _mesh.n_nodes();
-
-        // map edge index to volume index
-        const int nc = n_basis;
-        auto E2V = [nc](int i, int f, int el) -> int {
-            const int m = (f == 0 || f == 2) ? i : (f == 1) ? (nc - 1) : 0;
-            const int n = (f == 1 || f == 3) ? i : (f == 2) ? (nc - 1) : 0;
-
-            return m + nc * (n + nc * el);
-        };
-
-        // map node to volume index
-        auto N2V = [nc](int c, int el) -> int {
-            const int m = (c == 0 || c == 3) ? 0 : (nc - 1);
-            const int n = (c == 0 || c == 1) ? 0 : (nc - 1);
-
-            return m + nc * (n + nc * el);
-        };
-
-        // iterate over interior edges to indentify duplicates DOFs
-        if (n_basis > 2)
+        for (int e = 0; e < n_edges; ++e)
         {
-            for (int e = 0; e < n_edges; ++e)
+            EdgeConnectivity edge = _mesh.edge_connectivity(e, FaceType::INTERIOR);
+
+            for (int i = 0; i < n_basis; ++i)
             {
-                auto edge = _mesh.edge(e, FaceType::INTERIOR);
+                const int2 v0 = edge2vol(n_basis, i, edge.labels[0]);
+                const int idx0 = v0.x + n_basis * (v0.y + n_basis * edge.elements[0]);
 
-                const int el0 = edge->elements[0];
-                const int s0 = edge->sides[0];
+                const int j = permute_edge_index(n_basis, i, edge.permutation);
+                const int2 v1 = edge2vol(n_basis, j, edge.labels[1]);
+                const int idx1 = v1.x + n_basis * (v1.y + n_basis * edge.elements[1]);
 
-                const int el1 = edge->elements[1];
-                const int s1 = edge->sides[1];
-
-                const bool reversed = edge->delta < 0;
-
-                for (int i = 1; i < n_basis - 1; ++i)
-                {
-                    const int j = (reversed) ? (n_basis - 1 - i) : i;
-
-                    const int v0 = E2V(i, s0, el0);
-                    const int v1 = E2V(j, s1, el1);
-                    mask[v1] = v0;
-                }
-            }
-        }
-
-        // iterate over nodes to identify duplicate DOFs
-        for (int k = 0; k < n_nodes; ++k)
-        {
-            auto &node = _mesh.node(k);
-
-            const int nel = node.connected_elements.size();
-            const int el0 = node.connected_elements.at(0).id;
-            const int c0 = node.connected_elements.at(0).i;
-
-            const int v0 = N2V(c0, el0);
-
-            for (int i = 1; i < nel; ++i)
-            {
-                const int el = node.connected_elements.at(i).id;
-                const int c = node.connected_elements.at(i).i;
-
-                const int vi = N2V(c, el);
-                mask[vi] = v0;
+                const int c0 = canonical(idx0);
+                const int c1 = canonical(idx1);
+                if (c0 != c1)
+                    duplicate_dof_map.insert({c1, c0});
             }
         }
 
         const int N = n_elem * n_basis * n_basis;
-        ndof = N - mask.size();
+        ndof = N - duplicate_dof_map.size();
         int l = 0;
         for (int i = 0; i < N; ++i)
         {
-            if (not contains(mask, i))
+            if (not duplicate_dof_map.contains(i))
             {
                 I[i] = l;
                 ++l;
             }
         }
 
-        for (auto [v1, v0] : mask)
-        {
-            I[v1] = I[v0];
-        }
+        for (auto [idx1, idx0] : duplicate_dof_map)
+            I[idx1] = I[canonical(idx0)];
 
-        _xy.resize(2 * ndof);
-        auto xy = reshape(_xy.host_write(), 2, ndof);
+        _xy.resize(ndof);
+        auto xy = reshape(_xy.host_write(), ndof);
 
         for (int el = 0; el < n_elem; ++el)
         {
-            const Element *elem = _mesh.element(el);
+            const QuadElement elem = _mesh.element(el);
+
             for (int j = 0; j < n_basis; ++j)
             {
                 for (int i = 0; i < n_basis; ++i)
                 {
-                    const double xi[2] = {_basis.quadrature().x(i), _basis.quadrature().x(j)};
-                    double x[2];
-                    elem->physical_coordinates(xi, x);
-                    const int idx = I(i, j, el);
-                    xy(0, idx) = x[0];
-                    xy(1, idx) = x[1];
+                    const double2 xi{_basis.quadrature().x(i), _basis.quadrature().x(j)};
+                    xy(I(i, j, el)) = elem.physical_coordinates(xi);
                 }
             }
         }
@@ -133,41 +84,35 @@ namespace cuddh
         const int n_elem = mesh.n_elem();
         auto K = reshape(fem.global_indices(MemorySpace::HOST), n_basis, n_basis, n_elem);
 
-        std::unordered_map<int, int> mask; // unique mapping from global DOFs to restricted DOFs
+        std::unordered_map<int, int> global_to_trace;
         std::vector<int> P;
 
-        // map edge index to volume index
-        const int nc = n_basis;
-        auto E2V = [nc](int i, int f, int el) -> int {
-            const int m = (f == 0 || f == 2) ? i : (f == 1) ? (nc - 1) : 0;
-            const int n = (f == 1 || f == 3) ? i : (f == 2) ? (nc - 1) : 0;
-
-            return m + nc * (n + nc * el);
-        };
+        global_to_trace.reserve(n_basis * nf);
+        P.reserve(n_basis * nf);
 
         int l = 0;
         for (int f = 0; f < nf; ++f)
         {
-            const Edge *edge = mesh.edge(F(f));
-            const int el = edge->elements[0];
-            const int s = edge->sides[0];
+            const EdgeConnectivity edge = mesh.edge_connectivity(F(f));
+            const int el = edge.elements[0];
 
             for (int i = 0; i < n_basis; ++i)
             {
-                const int idx = K[E2V(i, s, el)];
+                const auto [x, y] = edge2vol(n_basis, i, edge.labels[0]);
+                const int idx = K(x, y, el);
 
-                if (not contains(mask, idx))
+                if (not global_to_trace.contains(idx))
                 {
-                    mask[idx] = l;
+                    global_to_trace[idx] = l;
                     P.push_back(idx);
                     ++l;
                 }
 
-                I(i, f) = mask[idx];
+                I(i, f) = global_to_trace[idx];
             }
         }
 
-        ndof = mask.size();
+        ndof = global_to_trace.size();
 
         _proj.resize(ndof);
         auto proj = reshape(_proj.host_write(), ndof);
@@ -198,13 +143,4 @@ namespace cuddh
         forall(ndof, [=] __device__(int i) -> void { x[proj(i)] = 0.0; });
     }
 
-    const Mesh2D::EdgeMetricCollection &TraceSpace2D::metrics(const QuadratureRule &quad) const
-    {
-        auto key = quad.name();
-        if (not contains(_metrics, key))
-        {
-            _metrics.insert({key, Mesh2D::EdgeMetricCollection(fem.mesh(), _n_faces, _faces.host_read(), quad)});
-        }
-        return _metrics.at(key);
-    }
 } // namespace cuddh

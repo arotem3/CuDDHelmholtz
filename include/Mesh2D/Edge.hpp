@@ -1,161 +1,102 @@
 #ifndef CUDDH_EDGE_HPP
 #define CUDDH_EDGE_HPP
 
-#include <cmath>
-
 #include "cuddh_config.hpp"
+#include "cuddh_error.hpp"
 
 namespace cuddh
 {
     enum class FaceType
     {
         INTERIOR, ///< @brief Edge is on interior of mesh.
-                  ///< 
-                  ///< Edges on interior have elements on both sides, thus it
-                  ///< is expected that `elements[1]` and `sides[1]` are defined.
+                  ///<
+                  ///< Edges on interior have elements on both labels, thus it
+                  ///< is expected that `elements[1]` and `labels[1]` are defined.
         BOUNDARY  ///< @brief Edge is on boundary of mesh.
                   ///<
-                  ///< Edges on the boundary have only one elemented
-                  ///< connected, thus `element[1]` and `sides[1]` need not be
-                  ///< specified, so referencing these values will result in
-                  ///< undefined behavior.
+                  ///< Edges on the boundary have only one element connected,
+                  ///< thus `elements[1]` and `labels[1]` need not be specified.
     };
 
-    /// @brief generic representation of an edge of a finite element.
-    struct Edge
-    {
-    public:
-        FaceType type; ///< whether the variable is on the interior or boundary.
-        int id; ///< @brief global index of edge in the mesh.
-                ///<
-                ///< The existing mesh constructors always assign this value,
-                ///< and it is used by some functions. The member `id` refers to
-                ///< the global index rather than the local index, and is not
-                ///< modified when a mesh is distributed.
-
-        int nodes[2]; ///< @brief The global index of the nodes on this edge
-        int elements[2]; ///< @brief The global index of the elements on this edge.
-                         ///<
-                         ///< `elements[0]` is always specified, and
-                         ///< `elements[1]` is defined only if `type == INTERIOR`.
-
-        int sides[2]; ///< @brief Identifies the edge relative to the element, it is one of {0, 1, 2, 3}.
-                      ///<
-                      ///< `sides[0]` is always specified, and `sides[1]` is
-                      ///< defined only if `type == INTERIOR`.
-        int delta; ///< defines the direction in which to iterate through degrees of
-                   ///< freedom on the edge for the second element on the edge. This value is
-                   ///< either +1 or -1 depending on the relative orientation of the two
-                   ///< elements.
-    
-        /// @brief assigns to `n` the unit normal to the edge in the outward
-        /// direction from the first element on the edge evaluated at the
-        /// reference coordinate `xi` in the reference interval [-1, 1].
-        /// @param[in] xi coordinates in the reference interval. Shape (2,)
-        /// @param[out] n unit normal at xi. Shape (2,)
-        virtual void normal(const double xi, double * n) const = 0;
-
-        /// Returns \f$\mu(\xi) = \frac{d}{d\xi}(\mathbf{n}\cdot x)\f$ where
-        /// \f$x\f$ is the physical coordinate, \f$\xi\in[-1,1]\f$ is the reference
-        /// coordinate, and \f$\mathbf{n}\f$ is the unit normal to the edge. Then
-        /// \f$\mathbf{n}\cdot dx = \mu(\xi) d\xi\f$ on the edge.
-        /// @param[in] xi coordinates in the reference interval. Shape (2,)
-        /// @return edge measure.
-        virtual double measure(const double xi) const = 0;
-
-        /// @brief assigns to `x` the physical coordinate on the edge at point
-        /// `xi` in the reference interval [-1, 1].
-        /// @param xi coordinates in the reference interval. Shape (2,)
-        /// @param x coordinates in physical space. Shape (2,)
-        virtual void physical_coordinates(const double xi, double * x) const = 0;
-
-        virtual double length() const = 0;
-
-        Edge() : id{-1}, elements{-1, -1}, sides{-1, -1} {}
-        virtual ~Edge() = default;
-    };
-
-    /// @brief The `SraightEdge` is a line segment. It is defined by the
-    /// coordinates of its two end points. It maps the reference interval
-    /// \f$[-1, 1]\f$ to the line segment.
-    struct StraightEdge : public Edge
+    /// @brief Edge geometry.
+    ///
+    /// The edge maps the reference interval [-1,1] to the line segment
+    /// [x0, x1]. The outward unit normal is determined geometrically as the
+    /// right-hand perpendicular of the edge direction: rotating (x1 - x0) by
+    /// 90° clockwise. Edge nodes must be pre-ordered so this convention gives
+    /// the outward normal.
+    class Edge
     {
     private:
-        double n[2];
-        double meas;
-        double x[2];
-        double dx[2];
+        double2 x0;  ///< start point
+        double2 dx;  ///< full displacement x1 - x0
+        double2 n;   ///< unit outward normal
+        double meas; ///< half-length = |dx| / 2
 
     public:
-        /// @brief constructs a `StraightEdge` by specifying the coordinates of
-        /// its endpoints and the side identifier of the first element on this
-        /// edge which is needed to determine the sign of the normal vector. The
-        /// coordinates are copied. `this->sides[0]` is initialized with `side`.
-        /// @param x0 physical coordinates of start point. Shape (2,)
-        /// @param x1 physical coordinates of end point. Shape (2,)
-        /// @param side The side indentifier of this edge with respect to the
-        /// first element on this edge.
-        StraightEdge(const double * x0, const double * x1, int side)
+        Edge() = default;
+        ~Edge() = default;
+
+        /// @brief Construct from two endpoints.
+        /// Edge nodes must be ordered such that the right-hand perpendicular
+        /// of the edge direction points outward (for correct normal direction).
+        /// @param x0_ Physical coordinates of the start point.
+        /// @param x1_ Physical coordinates of the end point.
+        __host__ __device__ Edge(double2 x0_, double2 x1_)
         {
-            x[0] = x0[0];
-            x[1] = x0[1];
-
-            dx[0] = x1[0] - x0[0];
-            dx[1] = x1[1] - x0[1];
-
-            const double s = std::hypot(dx[0], dx[1]);
-            const double sgn = (side == 2 || side == 3) ? -1 : 1;
-
-            n[0] = sgn * dx[1] / s;
-            n[1] = -sgn * dx[0] / s;
-
-            meas = s / 2;
+            x0 = x0_;
+            dx = {x1_.x - x0_.x, x1_.y - x0_.y};
+            const double s = sqrt(dx.x * dx.x + dx.y * dx.y);
+            // Right-hand perpendicular: rotate (dx.x, dx.y) by 90° clockwise → (dx.y, -dx.x)
+            n = {dx.y / s, -dx.x / s};
+            meas = 0.5 * s;
         }
 
-        ~StraightEdge() = default;
-
-        /// @brief assigns to `n` the unit normal to the edge in the outward
-        /// direction from the first element on the edge evaluated at the
-        /// reference coordinate `xi` in the reference interval [-1, 1].
-        /// @param[in] xi coordinates in the reference interval. Shape (2,)
-        /// @param[out] n unit normal at xi. Shape (2,)
-        inline void normal(const double xi, double * n_) const override
-        {
-            n_[0] = n[0];
-            n_[1] = n[1];
-        }
-
-        /// Returns \f$\mu(\xi) = \frac{d}{d\xi}(\mathbf{n}\cdot x)\f$ where
-        /// \f$x\f$ is the physical coordinate, \f$\xi\in[-1,1]\f$ is the reference
-        /// coordinate, and \f$\mathbf{n}\f$ is the unit normal to the edge. Then
-        /// \f$\mathbf{n}\cdot dx = \mu(\xi) d\xi\f$ on the edge.
-        /// @param[in] xi coordinates in the reference interval. Shape (2,)
-        /// @return edge measure.
-        inline double measure(const double) const override
-        {
-            return meas;
-        }
-    
-        /// @brief assigns to `x` the physical coordinate on the edge at point
-        /// `xi` in the reference interval [-1, 1].
-        /// @param xi coordinates in the reference interval. Shape (2,)
-        /// @param x coordinates in physical space. Shape (2,)
-        inline void physical_coordinates(const double xi, double * x_) const override
+        /// @brief Maps reference coordinate xi in [-1,1] to physical coordinates.
+        constexpr double2 physical_coordinates(double xi) const
         {
             const double t = 0.5 * (xi + 1.0);
+            return {x0.x + dx.x * t, x0.y + dx.y * t};
+        }
 
-            x_[0] = x[0] + dx[0] * t;
-            x_[1] = x[1] + dx[1] * t;
-        }
-    
-        /// @brief returns the length of edge 
-        inline double length() const override
-        {
-            // meas = sqrt(dx^2 + dy^2)/2 so length = 2*meas
-            return 2.0 * meas;
-        }
+        /// @brief Returns the unit outward normal (constant along the edge).
+        constexpr double2 normal() const { return n; }
+
+        /// @brief Returns normal() * measure() — the weighted outward normal.
+        constexpr double2 weighted_normal() const { return {n.x * meas, n.y * meas}; }
+
+        /// @brief Returns the half-length of the edge (the edge measure weight).
+        ///
+        /// This is the magnitude of the Jacobian of the reference-to-physical map,
+        /// i.e. |dx/dxi| = |x1 - x0| / 2, which is constant for a straight edge.
+        constexpr double measure() const { return meas; }
+
+        /// @brief Returns the total length of the edge.
+        constexpr double length() const { return 2.0 * meas; }
     };
-} // namespace dg
 
+    /// @brief Topological connectivity of an edge in the mesh.
+    struct EdgeConnectivity
+    {
+        int elements[2]; ///< global element indices (elements[1] == -1 for boundary)
+        int labels[2];   ///< local side index {0..3} for each element
+        int permutation; ///< +1 if DOF traversal order agrees between elements, -1 otherwise
+    };
+
+    constexpr int2 edge2vol(int N, int i, int label)
+    {
+        const int m = (label == 0 || label == 2) ? i : (label == 1) ? (N - 1) : 0;
+        const int n = (label == 1 || label == 3) ? i : (label == 2) ? (N - 1) : 0;
+
+        return {m, n};
+    }
+
+    constexpr int permute_edge_index(int N, int i, int permutation)
+    {
+        cuddh_assert(permutation == 1 || permutation == -1,
+                     printf("permute_edge_index error: permutation must be one of {-1, 1}.\n"));
+        return (permutation < 0) ? (N - 1 - i) : i;
+    }
+} // namespace cuddh
 
 #endif

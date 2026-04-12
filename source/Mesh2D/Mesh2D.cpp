@@ -1,71 +1,40 @@
 #include "Mesh2D/Mesh2D.hpp"
 
-template <typename Map, typename Key>
-static bool contains(const Map & map, Key key)
-{
-    return map.find(key) != map.end();
-}
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <unordered_map>
 
 namespace cuddh
 {
-    Mesh2D Mesh2D::from_vertices(int nx, const double * x_, int nel, const int * elems_)
+    Mesh2D Mesh2D::from_vertices(int nx, const double *x_, int nel, const int *elems_)
     {
         auto coo = reshape(x_, 2, nx);
-        auto elems = reshape(elems_, 4, nel);
+        auto elem_conn = reshape(elems_, 4, nel);
 
-        constexpr int emap1[] = {0,1,3,0};
-        constexpr int emap2[] = {1,2,2,3};
+        constexpr int emap1[] = {0, 1, 3, 0};
+        constexpr int emap2[] = {1, 2, 2, 3};
 
         Mesh2D mesh;
-        mesh._elements.resize(nel);
-        mesh._nodes.resize(nx);
 
-        // construct nodes
+        // populate node coordinate array
+        mesh._node_coords.resize(nx);
+        double2 *nc = mesh._node_coords.host_write();
         for (int k = 0; k < nx; ++k)
-        {
-            auto& node = mesh._nodes[k];
-            node.x[0] = coo(0, k);
-            node.x[1] = coo(1, k);
-            node.type = NodeType::BOUNDARY;
-            node.id = k;
-        }
-        
-        dmat x(2, 4);
-        int cs[4];
+            nc[k] = {coo(0, k), coo(1, k)};
 
-        // construct elements
+        // populate elem connectivity
+        mesh._elem_nodes.resize(4 * nel);
+        auto ec = reshape(mesh._elem_nodes.host_write(), 4, nel);
         for (int el = 0; el < nel; ++el)
-        {
             for (int i = 0; i < 4; ++i)
-            {
-                const int c = elems(i, el);
-                cs[i] = c;
-                x(0, i) = coo(0, c);
-                x(1, i) = coo(1, c);
-
-                auto& node = mesh._nodes[c];
-                
-                Node::element_info info;
-                info.i = i;
-                info.id = el;
-                
-                node.connected_elements.push_back(info);
-            }
-
-            auto& elem = mesh._elements[el];
-            elem.reset(new QuadElement(x.data()));
-            elem->id = el;
-            for (int i = 0; i < 4; ++i)
-                elem->nodes[i] = cs[i];
-        }
+                ec(i, el) = elem_conn(i, el);
 
         // construct edges
         std::unordered_map<int, int> edge_map;
-        auto key = [nx](int i, int j) -> int
-        {
+        auto key = [nx](int i, int j) -> int {
             return std::min(i, j) + nx * std::max(i, j);
         };
-        int edge_id = 0;
 
         for (int el = 0; el < nel; ++el)
         {
@@ -74,293 +43,224 @@ namespace cuddh
                 const int l1 = emap1[s];
                 const int l2 = emap2[s];
 
-                const int C0 = elems(l1, el);
-                const int C1 = elems(l2, el);
+                const int C0 = elem_conn(l1, el);
+                const int C1 = elem_conn(l2, el);
 
                 const int k = key(C0, C1);
-                if (not contains(edge_map, k))
+                if (not edge_map.contains(k))
                 {
-                    const double * x0 = x_ + 2*C0;
-                    const double * x1 = x_ + 2*C1;
-                    mesh._edges.push_back(std::unique_ptr<Edge>(new StraightEdge(x0, x1, s)));
-                    Edge * edge = mesh._edges[edge_id].get();
+                    EdgeConnectivity conn;
+                    conn.elements[0] = el;
+                    conn.elements[1] = -1;
+                    conn.labels[0] = s;
+                    conn.labels[1] = -1;
+                    conn.permutation = 1;
+                    mesh._edge_connectivity.push_back(conn);
 
-                    edge->nodes[0] = C0;
-                    edge->nodes[1] = C1;
-                    edge->elements[0] = el;
-                    edge->id = edge_id;
-                    edge->sides[0] = s;
-                    edge->type = FaceType::BOUNDARY;
-                    edge->delta = 1;
-                    edge_map[k] = edge_id++;
+                    edge_map[k] = (int)mesh._edge_connectivity.size() - 1;
                 }
                 else
                 {
-                    int e = edge_map.at(k);
-                    Edge * edge = mesh._edges[e].get();
+                    const int e = edge_map.at(k);
+                    EdgeConnectivity &conn = mesh._edge_connectivity[e];
 
-                    int e0 = edge->elements[0];
-                    int s0 = edge->sides[0];
-                    int n1 = elems(emap1[s0], e0);
+                    const int e0 = conn.elements[0];
+                    const int s0 = conn.labels[0];
+                    const int n1 = elem_conn(emap1[s0], e0);
 
-                    edge->elements[1] = el;
-                    edge->sides[1] = s;
-                    edge->type = FaceType::INTERIOR;
-                    edge->delta = (C0 == n1) ? 1 : -1;
-
-                    mesh._nodes[C0].type = NodeType::INTERIOR;
-                    mesh._nodes[C1].type = NodeType::INTERIOR;
+                    conn.elements[1] = el;
+                    conn.labels[1] = s;
+                    conn.permutation = (C0 == n1) ? 1 : -1;
                 }
             }
         }
 
-        // boundary edges
-        for (const auto& edge : mesh._edges)
+        // classify edges
+        std::vector<int> boundary_edge_ids, interior_edge_ids;
+        for (int i = 0; i < (int)mesh._edge_connectivity.size(); ++i)
         {
-            if (edge->type == FaceType::BOUNDARY)
-                mesh._boundary_edges.push_back(edge->id);
+            if (mesh._edge_connectivity[i].elements[1] == -1)
+                boundary_edge_ids.push_back(i);
             else
-                mesh._interior_edges.push_back(edge->id);
+                interior_edge_ids.push_back(i);
         }
 
-        // boundary nodes
-        for (const auto& node : mesh._nodes)
+        // populate edge arrays with correct ordering:
+        // edge nodes are ordered so that the right-hand perpendicular
+        // (rotation of edge direction by 90° clockwise) points outward.
+        // For labels 2,3 (top and left edges), swap node indices for correct direction.
+        const int ne = (int)mesh._edge_connectivity.size();
+        mesh._edge_nodes.resize(2 * ne);
+        auto en = reshape(mesh._edge_nodes.host_write(), 2, ne);
+        for (int i = 0; i < ne; ++i)
         {
-            if (node.type == NodeType::BOUNDARY)
-                mesh._boundary_nodes.push_back(node.id);
+            const int side = mesh._edge_connectivity[i].labels[0];
+            const int el = mesh._edge_connectivity[i].elements[0];
+            const int n0 = elem_conn(emap1[side], el);
+            const int n1 = elem_conn(emap2[side], el);
+            // For labels 2,3 (top/left edges), swap to ensure right-perp points outward
+            if (side == 2 || side == 3)
+            {
+                en(0, i) = n1;
+                en(1, i) = n0;
+            }
             else
-                mesh._interior_nodes.push_back(node.id);
+            {
+                en(0, i) = n0;
+                en(1, i) = n1;
+            }
         }
+
+        const int n_int = (int)interior_edge_ids.size();
+        mesh._interior_edges_d.resize(n_int);
+        int *ie = mesh._interior_edges_d.host_write();
+        for (int i = 0; i < n_int; ++i)
+            ie[i] = interior_edge_ids[i];
+
+        const int n_bnd = (int)boundary_edge_ids.size();
+        mesh._boundary_edges_d.resize(n_bnd);
+        int *be = mesh._boundary_edges_d.host_write();
+        for (int i = 0; i < n_bnd; ++i)
+            be[i] = boundary_edge_ids[i];
 
         return mesh;
     }
 
     Mesh2D Mesh2D::uniform_rect(int nx, double ax, double bx, int ny, double ay, double by)
     {
-        int np = (nx+1)*(ny+1);
-        int nel = nx*ny;
-        dcube coo(2, nx+1, ny+1);
+        int np = (nx + 1) * (ny + 1);
+        int nel = nx * ny;
+        dcube coo(2, nx + 1, ny + 1);
         Cube<int> elems(4, nx, ny);
 
-        auto l = [nx,ny](int i, int j) -> int {return i + (nx+1)*j;};
+        auto l = [nx](int i, int j) -> int {
+            return i + (nx + 1) * j;
+        };
 
         double dx = (bx - ax) / nx;
         double dy = (by - ay) / ny;
-        for (int j=0; j <= ny; ++j)
+        for (int j = 0; j <= ny; ++j)
         {
             const double y = ay + dy * j;
-            for (int i=0; i <= nx; ++i)
+            for (int i = 0; i <= nx; ++i)
             {
                 coo(0, i, j) = ax + dx * i;
                 coo(1, i, j) = y;
             }
         }
-        
-        for (int j=0; j < ny; ++j)
+
+        for (int j = 0; j < ny; ++j)
         {
-            for (int i=0; i < nx; ++i)
+            for (int i = 0; i < nx; ++i)
             {
-                elems(0, i, j) = l(  i,   j);
-                elems(1, i, j) = l(i+1,   j);
-                elems(2, i, j) = l(i+1, j+1);
-                elems(3, i, j) = l(  i, j+1);
+                elems(0, i, j) = l(i, j);
+                elems(1, i, j) = l(i + 1, j);
+                elems(2, i, j) = l(i + 1, j + 1);
+                elems(3, i, j) = l(i, j + 1);
             }
         }
 
         return from_vertices(np, coo, nel, elems);
     }
 
-    template <typename EvalMetric>
-    static void set_element_metric(host_device_dvec& metric_, int dim, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
+    QuadElement Mesh2D::element(int el) const
     {
-        const int m = quad.size();
-        const int nel = mesh.n_elem();
+        cuddh_assert(0 <= el && el < n_elem(),
+                     printf("Mesh2D error: element el = %d out of range (#elements = %d)\n", el, n_elem()));
+        auto ec = reshape(_elem_nodes.host_read(), 4, n_elem());
+        const double2 *nc = _node_coords.host_read();
+        double2 corners[4];
+        for (int i = 0; i < 4; ++i)
+            corners[i] = nc[ec(i, el)];
+        return QuadElement(corners);
+    }
 
-        metric_.resize(dim * m * m * nel);
-        auto metric = reshape(metric_.host_write(), dim, m, m, nel);
+    Edge Mesh2D::edge(int i) const
+    {
+        cuddh_assert(
+            0 <= i && i < (int)_edge_connectivity.size(),
+            printf("Mesh2D error: edge i = %d out of range (#edges = %d)\n", i, (int)_edge_connectivity.size()));
+        const double2 *nc = _node_coords.host_read();
+        auto en = reshape(_edge_nodes.host_read(), 2, n_edges());
+        return Edge(nc[en(0, i)], nc[en(1, i)]);
+    }
 
-        double xi[2];
-
-        for (int el=0; el < nel; ++el)
+    Edge Mesh2D::edge(int i, FaceType type) const
+    {
+        if (type == FaceType::BOUNDARY)
         {
-            const Element * elem = mesh.element(el);
-            for (int j = 0; j < m; ++j)
-            {
-                xi[1] = quad.x(j);
-                for (int i = 0; i < m; ++i)
-                {
-                    xi[0] = quad.x(i);
-                    eval_metric(&metric(0, i, j, el), elem, xi);
-                }
-            }
+            cuddh_assert(0 <= i && i < _boundary_edges_d.size(),
+                         printf("Mesh2D error: boundary edge i = %d out of range (#boundary edges = %d)\n", i,
+                                _boundary_edges_d.size()));
+            return edge(_boundary_edges_d.host_read()[i]);
+        }
+        else
+        {
+            cuddh_assert(0 <= i && i < _interior_edges_d.size(),
+                         printf("Mesh2D error: interior edge i = %d out of range (#interior edges = %d)\n", i,
+                                _interior_edges_d.size()));
+            return edge(_interior_edges_d.host_read()[i]);
         }
     }
 
-    const double * Mesh2D::ElementMetricCollection::jacobians(MemorySpace m) const
+    EdgeConnectivity Mesh2D::edge_connectivity(int i) const
     {
-        if (J.size() == 0)
-        {
-            set_element_metric(J, 4, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {elem->jacobian(xi, metric);});
-        }
-
-        return J.read(m);
+        cuddh_assert(
+            0 <= i && i < (int)_edge_connectivity.size(),
+            printf("Mesh2D error: edge i = %d out of range (#edges = %d)\n", i, (int)_edge_connectivity.size()));
+        return _edge_connectivity[i];
     }
 
-    const double * Mesh2D::ElementMetricCollection::measures(MemorySpace m) const
+    EdgeConnectivity Mesh2D::edge_connectivity(int i, FaceType type) const
     {
-        if (detJ.size() == 0)
+        if (type == FaceType::BOUNDARY)
         {
-            set_element_metric(detJ, 1, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {*metric = elem->measure(xi);});
+            cuddh_assert(0 <= i && i < _boundary_edges_d.size(),
+                         printf("Mesh2D error: boundary edge i = %d out of range (#boundary edges = %d)\n", i,
+                                _boundary_edges_d.size()));
+            return _edge_connectivity[_boundary_edges_d.host_read()[i]];
         }
-
-        return detJ.read(m);
-    }
-
-    const double * Mesh2D::ElementMetricCollection::physical_coordinates(MemorySpace m) const
-    {
-        if (x.size() == 0)
+        else
         {
-            set_element_metric(x, 2, mesh, quad, [](double* metric, const Element * elem, const double * xi) -> void {elem->physical_coordinates(xi, metric);});
+            cuddh_assert(0 <= i && i < _interior_edges_d.size(),
+                         printf("Mesh2D error: interior edge i = %d out of range (#interior edges = %d)\n", i,
+                                _interior_edges_d.size()));
+            return _edge_connectivity[_interior_edges_d.host_read()[i]];
         }
-
-        return x.read(m);
-    }
-
-    template <typename EvalMetric>
-    static void set_edge_metric(host_device_dvec& metric_, int dim, FaceType edge_type, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
-    {
-        const int m = quad.size();
-        const int ne = mesh.n_edges(edge_type);
-
-        metric_.resize(dim * m * ne);
-        auto metric = reshape(metric_.host_write(), dim, m, ne);
-
-        for (int e = 0; e < ne; ++e)
-        {
-            const Edge * E = mesh.edge(e, edge_type);
-
-            for (int i = 0; i < m; ++i)
-            {
-                double xi = quad.x(i);
-                
-                eval_metric(&metric(0, i, e), E, xi);
-            }
-        }
-    }
-
-    template <typename EvalMetric>
-    static void set_edge_metric(host_device_dvec& metric_, int dim, const_ivec_wrapper faces, const Mesh2D& mesh, const QuadratureRule& quad, EvalMetric eval_metric)
-    {
-        const int m = quad.size();
-        const int ne = faces.size();
-
-        metric_.resize(dim * m * ne);
-        auto metric = reshape(metric_.host_write(), dim, m, ne);
-
-        for (int e = 0; e < ne; ++e)
-        {
-            const Edge * E = mesh.edge(faces(e));
-
-            for (int i = 0; i < m; ++i)
-            {
-                const double xi = quad.x(i);
-                eval_metric(&metric(0, i, e), E, xi);
-            }
-        }
-    }
-
-    const double * Mesh2D::EdgeMetricCollection::measures(MemorySpace m) const
-    {
-        if (detJ.size() == 0)
-        {
-            auto eval = [](double* metric, const Edge * E, double xi) -> void {*metric = E->measure(xi);};
-            if (face_subset)
-                set_edge_metric(detJ, 1, _faces, mesh, quad, eval);
-            else
-                set_edge_metric(detJ, 1, edge_type, mesh, quad, eval);
-        }
-
-        return detJ.read(m);
-    }
-
-    const double * Mesh2D::EdgeMetricCollection::physical_coordinates(MemorySpace m) const
-    {
-        if (x.size() == 0)
-        {
-            auto eval = [](double * metric, const Edge * E, double xi) -> void {E->physical_coordinates(xi, metric);};
-            if (face_subset)
-                set_edge_metric(x, 2, _faces, mesh, quad, eval);
-            else
-                set_edge_metric(x, 2, edge_type, mesh, quad, eval);
-        }
-
-        return x.read(m);
-    }
-
-    const double * Mesh2D::EdgeMetricCollection::normals(MemorySpace m) const
-    {
-        if (n.size() == 0)
-        {
-            auto eval = [](double * metric, const Edge * E, double xi) -> void {E->normal(xi, metric);};
-            if (face_subset)
-                set_edge_metric(n, 2, _faces, mesh, quad, eval);
-            else
-                set_edge_metric(n, 2, edge_type, mesh, quad, eval);
-        }
-
-        return n.read(m);
-    }
-
-    double Mesh2D::min_h() const
-    {
-        double h = std::numeric_limits<double>::infinity();
-        for (auto& edge : _edges)
-        {
-            h = std::min(h, edge->length());
-        }
-        return h;
-    }
-
-    double Mesh2D::max_h() const
-    {
-        double h = -1;
-        for (auto& edge : _edges)
-        {
-            h = std::max(h, edge->length());
-        }
-        return h;
     }
 
     ivec Mesh2D::boundary_edges() const
     {
-        const int ne = _boundary_edges.size();
+        const int ne = _boundary_edges_d.size();
         ivec b(ne);
+        const int *be = _boundary_edges_d.host_read();
         for (int i = 0; i < ne; ++i)
-            b(i) = _boundary_edges.at(i);
+            b(i) = be[i];
         return b;
     }
 
-    const Mesh2D::ElementMetricCollection& Mesh2D::element_metrics(const QuadratureRule& quad) const
+    DeviceMesh2D Mesh2D::to_device() const
     {
-        auto id = quad.name();
-        if (not contains(elem_collections, id))
-        {
-            elem_collections.insert({id, ElementMetricCollection(*this, quad)});
-        }
-
-        return elem_collections.at(id);
+        DeviceMesh2D d;
+        d.nodes = reshape(_node_coords.device_read(), _node_coords.size());
+        d.elems = reshape(_elem_nodes.device_read(), 4, n_elem());
+        d.edge_nodes = reshape(_edge_nodes.device_read(), 2, n_edges());
+        d.interior_edges = reshape(_interior_edges_d.device_read(), n_edges(FaceType::INTERIOR));
+        d.boundary_edges = reshape(_boundary_edges_d.device_read(), n_edges(FaceType::BOUNDARY));
+        return d;
     }
 
-    const Mesh2D::EdgeMetricCollection& Mesh2D::edge_metrics(const QuadratureRule& quad, FaceType edge_type) const
+    double Mesh2D::h() const
     {
-        auto& collection = (edge_type == FaceType::INTERIOR) ? interior_edge_collections : boundary_edge_collections;
-
-        auto id = quad.name();
-        if (not contains(collection, id))
+        double h = std::numeric_limits<double>::infinity();
+        const double2 *nc = _node_coords.host_read();
+        auto en = reshape(_edge_nodes.host_read(), 2, n_edges());
+        for (int i = 0; i < n_edges(); ++i)
         {
-            collection.insert({id, EdgeMetricCollection(*this, edge_type, quad)});
+            double2 a = nc[en(0, i)], b = nc[en(1, i)];
+            double dx = b.x - a.x, dy = b.y - a.y;
+            h = std::min(h, sqrt(dx * dx + dy * dy));
         }
-
-        return collection.at(id);
+        return h;
     }
 } // namespace cuddh

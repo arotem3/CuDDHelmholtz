@@ -161,18 +161,18 @@ static auto compute_subdomain_boundary_faces(const Mesh2D &mesh, int n_spaces, c
         // subdomain. Boundary faces are automatically on the boundary, and
         // interior faces are on the boundary only if the element[0] != element[1].
 
-        const Edge *edge = mesh.edge(face_index);
+        const EdgeConnectivity edge = mesh.edge_connectivity(face_index);
 
-        const int el0 = edge->elements[0];
+        const int el0 = edge.elements[0];
         const int domain0 = element_labels[el0];
 
-        if (edge->type == FaceType::BOUNDARY)
+        if (edge.elements[1] == -1) // boundary edge
         {
             F.at(domain0).push_back({face_index, 0});
         }
         else
         {
-            const int el1 = edge->elements[1];
+            const int el1 = edge.elements[1];
             const int domain1 = element_labels[el1];
 
             if (domain0 != domain1)
@@ -291,10 +291,10 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
         {
             const auto [g_f, side] = subdomain_faces.at(f);
 
-            const Edge *edge = mesh.edge(g_f);
-            const int g_el = edge->elements[side];
-            const int s = edge->sides[side];
-            const bool reversed = (side == 1 && edge->delta < 0);
+            const EdgeConnectivity edge = mesh.edge_connectivity(g_f);
+            const int g_el = edge.elements[side];
+            const int s = edge.labels[side];
+            const bool reversed = (side == 1 && edge.permutation < 0);
 
             for (int i = 0; i < n_basis; ++i)
             {
@@ -402,7 +402,7 @@ int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &c
         cuddh_verify(F.at(domain0).at(local_face_index0).first == F.at(domain1).at(local_face_index1).first,
                      printf("EnsembleSpace error: shared face indices do not match up."));
 
-        const Edge *edge = mesh.edge(F.at(domain0).at(local_face_index0).first);
+        const Edge edge = mesh.edge(F.at(domain0).at(local_face_index0).first);
 
         // key is same for (domain0, domain1) and (domain1, domain0) symmetric pairs
         const int key = std::min(domain0, domain1) + n_spaces * std::max(domain0, domain1);
@@ -428,7 +428,7 @@ int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &c
                 dofs[lkey] = dof;
             }
 
-            dofs.at(lkey).face_mass += q.w(i) * edge->measure(q.x(i));
+            dofs.at(lkey).face_mass += q.w(i) * edge.measure();
         }
     }
 
@@ -472,19 +472,13 @@ void ::EnsembleSpaceBuilder::compute_fdof_indices(TensorWrapper<3, int> &h_fI, c
         {
             const auto [g_f, side] = sf.at(f);
 
-            const Edge *edge = mesh.edge(g_f);
-            const int g_el = edge->elements[side];
-            const int s = edge->sides[side];
-            const bool reversed = (side == 1 && edge->delta < 0);
-
-            const int el = el2s(g_el);
+            const EdgeConnectivity edge = mesh.edge_connectivity(g_f);
+            const int el = el2s(edge.elements[side]);
 
             for (int i = 0; i < n_basis; ++i)
             {
-                // map face index to element index
-                const int j = (reversed) ? (n_basis - 1 - i) : i;
-                const int m = (s == 0 || s == 2) ? j : (s == 1) ? (n_basis - 1) : 0;
-                const int n = (s == 1 || s == 3) ? j : (s == 2) ? (n_basis - 1) : 0;
+                const int j = permute_edge_index(n_basis, i, edge.permutation);
+                const auto [m, n] = edge2vol(n_basis, j, edge.labels[side]);
 
                 const int idx = h_sI(m, n, el, p);
 
