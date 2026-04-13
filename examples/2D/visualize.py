@@ -1,7 +1,7 @@
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.interpolate import LinearNDInterpolator
+from scipy.interpolate import CloughTocher2DInterpolator
 
 parser = argparse.ArgumentParser(
     description="Visualize 2D solution (Poisson, Helmholtz, WaveHoltz, DDH)"
@@ -54,11 +54,11 @@ Xi, Yi = np.meshgrid(xi, yi)
 extent = [x.min(), x.max(), y.min(), y.max()]
 
 points = np.column_stack((x, y))
-interp_u = LinearNDInterpolator(points, u)
+interp_u = CloughTocher2DInterpolator(points, u, fill_value=np.nan)
 Ui = interp_u(Xi, Yi)
 
 if is_complex:
-    interp_v = LinearNDInterpolator(points, v)
+    interp_v = CloughTocher2DInterpolator(points, v, fill_value=np.nan)
     Vi = interp_v(Xi, Yi)
 
     mu = np.nanmax(np.abs(Ui))
