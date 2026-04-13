@@ -63,7 +63,7 @@ __device__ static double f(const double2 X, double omega)
 __device__ static double a(const double2 X)
 {
     const auto [x, y] = X;
-    const double r = std::max(std::abs(x), std::abs(y));
+    const double r = max(abs(x), abs(y));
 
     if (r < 0.5)
         return 0.5;
