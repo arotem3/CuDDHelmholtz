@@ -1,5 +1,8 @@
 #include "LinearSolvers/minres.hpp"
 
+#include "forall.hpp"
+#include "linalg.hpp"
+
 using namespace cuddh;
 
 template <typename real_t>

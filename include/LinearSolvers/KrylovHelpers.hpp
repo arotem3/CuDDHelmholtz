@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 #include <lapacke.h>
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 
 #include <algorithm>
 #include <cmath>
