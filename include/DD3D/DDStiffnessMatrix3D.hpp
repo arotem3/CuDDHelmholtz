@@ -1,5 +1,4 @@
-#ifndef DDH_DD_STIFFNESS_MATRIX_3D_HPP
-#define DDH_DD_STIFFNESS_MATRIX_3D_HPP
+#pragma once
 
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
@@ -12,7 +11,6 @@
 #include "SmallMatrix.hpp"
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
-#include "forall.hpp"
 
 namespace cuddh
 {
@@ -280,5 +278,3 @@ namespace cuddh
     extern template class DDStiffnessMatrix3D<float>;
     extern template class DDStiffnessMatrix3D<double>;
 } // namespace cuddh
-
-#endif

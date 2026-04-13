@@ -1,12 +1,10 @@
 #pragma once
 
+#include <thrust/device_vector.h>
+
 #include "FEM2D/GridFunc2D.hpp"
 #include "FEM2D/H1Space2D.hpp"
-#include "FEM2D/TraceFunc2D.hpp"
-#include "HostDeviceArray.hpp"
 #include "Operator.hpp"
-#include "forall.hpp"
-#include "linalg.hpp"
 
 namespace cuddh
 {

@@ -1,11 +1,8 @@
-#ifndef CUDDH_WAVE_EQUATION_3D_HPP
-#define CUDDH_WAVE_EQUATION_3D_HPP
+#pragma once
 
-#include "cuddh_config.hpp"
-#include "cuddh_error.hpp"
-#include "Operators3D/StiffnessMatrix3D.hpp"
-#include "Operators3D/MassMatrix3D.hpp"
 #include "Operators3D/FaceMassMatrix3D.hpp"
+#include "Operators3D/MassMatrix3D.hpp"
+#include "Operators3D/StiffnessMatrix3D.hpp"
 
 namespace cuddh
 {
@@ -48,5 +45,3 @@ namespace cuddh
         host_device_dvec H;
     };
 } // namespace cuddh
-
-#endif

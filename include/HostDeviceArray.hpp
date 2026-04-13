@@ -1,13 +1,10 @@
-#ifndef CUDDH_HOST_DEVICE_ARRAY_HPP
-#define CUDDH_HOST_DEVICE_ARRAY_HPP
+#pragma once
 
 #include <cuda_runtime.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-#include <algorithm>
-#include <stdexcept>
 #include <utility>
 
 #include "cuddh_config.hpp"
@@ -253,5 +250,3 @@ namespace cuddh
     typedef HostDeviceArray<int> host_device_ivec;
 
 } // namespace cuddh
-
-#endif

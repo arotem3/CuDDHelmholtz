@@ -1,5 +1,8 @@
 #include "Basis.hpp"
 
+#include <algorithm>
+#include <numeric>
+
 static void barycentric_weights(cuddh::const_dvec_wrapper x, cuddh::dvec &w)
 {
     const int n = x.size();

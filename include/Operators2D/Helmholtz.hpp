@@ -1,12 +1,11 @@
 #pragma once
 
-#include <thrust/universal_vector.h>
-
 #include "FEM2D/GridFunc2D.hpp"
 #include "FEM2D/H1Space2D.hpp"
 #include "Operators2D/FaceMassMatrix.hpp"
 #include "Operators2D/MassMatrix.hpp"
 #include "Operators2D/StiffnessMatrix.hpp"
+#include "cuddh_error.hpp"
 
 namespace cuddh
 {

@@ -1,6 +1,9 @@
 #pragma once
+
+#include <thrust/device_vector.h>
+
 #include "LinearSolvers/SolverBase.hpp"
-#include "cuddh_config.hpp"
+#include "Operator.hpp"
 
 namespace cuddh
 {

@@ -1,11 +1,12 @@
-#ifndef CUDDH_WAVEHOLTZ3D_HPP
-#define CUDDH_WAVEHOLTZ3D_HPP
+#pragma once
 
+#include <cmath>
+
+#include "HostDeviceArray.hpp"
 #include "Operators3D/FaceMassMatrix3D.hpp"
 #include "Operators3D/MassMatrix3D.hpp"
 #include "Operators3D/StiffnessMatrix3D.hpp"
-#include "cuddh_config.hpp"
-#include "cuddh_error.hpp"
+#include "linalg.hpp"
 
 namespace cuddh
 {
@@ -51,5 +52,3 @@ namespace cuddh
         inline double filter(double n) const { return (2.0 / nt) * (std::cos(2.0 * M_PI * n / nt) - shift); }
     };
 } // namespace cuddh
-
-#endif

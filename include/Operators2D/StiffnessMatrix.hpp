@@ -1,13 +1,9 @@
-#ifndef CUDDH_STIFFNESS_MATRIX_HPP
-#define CUDDH_STIFFNESS_MATRIX_HPP
-
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
+#pragma once
 
 #include "FEM2D/H1Space2D.hpp"
+#include "HostDeviceArray.hpp"
 #include "Operator.hpp"
 #include "SmallMatrix.hpp"
-#include "linalg.hpp"
 
 namespace cuddh
 {
@@ -37,5 +33,3 @@ namespace cuddh
         HostDeviceArray<dsym2x2> _G;
     };
 } // namespace cuddh
-
-#endif

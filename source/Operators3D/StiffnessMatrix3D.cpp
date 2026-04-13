@@ -1,5 +1,8 @@
 #include "Operators3D/StiffnessMatrix3D.hpp"
 
+#include "forall.hpp"
+#include "linalg.hpp"
+
 using namespace cuddh;
 
 static void setup_geometric_factors(int n_elem, const QuadratureRule &quad, const DeviceMesh3D &mesh, double3x3 *d_G)

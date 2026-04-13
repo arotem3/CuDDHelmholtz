@@ -1,7 +1,11 @@
 #pragma once
+
+#include <cublas_v2.h>
+#include <thrust/device_vector.h>
+
 #include "LinearSolvers/Arnoldi.hpp"
-#include "LinearSolvers/KrylovHelpers.hpp"
 #include "LinearSolvers/SolverBase.hpp"
+#include "Operator.hpp"
 
 namespace cuddh
 {

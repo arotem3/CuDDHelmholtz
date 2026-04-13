@@ -1,11 +1,11 @@
-#ifndef CUDDH_MASS_MATRIX_3D_HPP
-#define CUDDH_MASS_MATRIX_3D_HPP
+#pragma once
+
+#include <cmath>
 
 #include "H1Space3D.hpp"
 #include "HostDeviceArray.hpp"
 #include "Operator.hpp"
 #include "forall.hpp"
-#include "linalg.hpp"
 
 namespace cuddh
 {
@@ -114,5 +114,3 @@ namespace cuddh
         return reshape(M._m.read(ms), M._m.size());
     }
 } // namespace cuddh
-
-#endif

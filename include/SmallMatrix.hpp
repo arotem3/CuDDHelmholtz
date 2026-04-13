@@ -1,5 +1,4 @@
-#ifndef CUDDH_SMALL_MATRIX_HPP
-#define CUDDH_SMALL_MATRIX_HPP
+#pragma once
 
 #include <cuda_runtime.h>
 
@@ -402,5 +401,3 @@ namespace cuddh
         return B;
     }
 } // namespace cuddh
-
-#endif

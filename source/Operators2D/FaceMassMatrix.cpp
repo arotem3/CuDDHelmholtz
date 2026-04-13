@@ -1,5 +1,8 @@
 #include "Operators2D/FaceMassMatrix.hpp"
 
+#include "FEM2D/TraceFunc2D.hpp"
+#include "forall.hpp"
+
 using namespace cuddh;
 
 static thrust::device_vector<double> construct_face_mass(const TraceSpace2D &fs, const TraceFunc2D<double> *_a)

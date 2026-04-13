@@ -1,11 +1,11 @@
 #pragma once
 
+#include <cmath>
+
+#include "HostDeviceArray.hpp"
 #include "Operators2D/FaceMassMatrix.hpp"
 #include "Operators2D/MassMatrix.hpp"
 #include "Operators2D/StiffnessMatrix.hpp"
-#include "cuddh_config.hpp"
-#include "cuddh_error.hpp"
-#include "linalg.hpp"
 
 namespace cuddh
 {

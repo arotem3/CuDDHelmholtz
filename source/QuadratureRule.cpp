@@ -1,5 +1,10 @@
 #include "include/QuadratureRule.hpp"
 
+#include <cmath>
+#include <format>
+#include <unordered_map>
+#include <vector>
+
 template <typename Map, typename Key>
 static bool contains(const Map &map, Key key)
 {
@@ -56,7 +61,7 @@ static double jacobiP_derivative(unsigned int k, unsigned int n, double a, doubl
     }
 }
 
-static inline double square(double x)
+static constexpr double square(double x)
 {
     return x * x;
 }
@@ -224,12 +229,9 @@ namespace cuddh
 
     std::string QuadratureRule::name() const
     {
-        std::stringstream s;
         if (_type == GaussLegendre)
-            s << "legendre";
+            return std::format("legendre{:05d}", _n);
         else
-            s << "lobatto";
-        s << std::setw(5) << std::setfill('0') << _n;
-        return s.str();
+            return std::format("lobatto{:05d}", _n);
     }
 } // namespace cuddh

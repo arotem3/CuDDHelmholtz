@@ -1,5 +1,7 @@
 #include "Operators2D/MassMatrix.hpp"
 
+#include "forall.hpp"
+
 using namespace cuddh;
 
 static inline thrust::device_vector<double> compute_mass_matrix(const H1Space2D &fem, const GridFunc2D<double> *_a)

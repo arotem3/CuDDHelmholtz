@@ -1,12 +1,10 @@
-#ifndef TENSOR_HPP
-#define TENSOR_HPP
-
+#pragma once
 #include <cuda_runtime.h>
 #include <thrust/universal_vector.h>
 
 #include <memory>
-#include <stdexcept>
-#include <vector>
+#include <type_traits>
+#include <utility>
 
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
@@ -409,5 +407,3 @@ namespace cuddh
     /// @brief specialization of `Tensor` when `Dim == 3` and `scalar == int`.
     typedef Cube<int> icube;
 } // namespace cuddh
-
-#endif

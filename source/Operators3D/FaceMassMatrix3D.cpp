@@ -1,5 +1,7 @@
 #include "Operators3D/FaceMassMatrix3D.hpp"
 
+#include "forall.hpp"
+
 using namespace cuddh;
 
 static void init_face_mass(const TraceSpace3D &tr, const double *a, double *m)

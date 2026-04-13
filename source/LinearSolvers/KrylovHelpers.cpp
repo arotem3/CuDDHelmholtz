@@ -1,5 +1,7 @@
 #include "LinearSolvers/KrylovHelpers.hpp"
 
+#include "forall.hpp"
+
 using namespace cuddh;
 
 template <typename real_t>

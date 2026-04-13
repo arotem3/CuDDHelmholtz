@@ -1,4 +1,5 @@
 #include "DD3D/DDStiffnessMatrix3D.hpp"
+#include "forall.hpp"
 
 using namespace cuddh;
 

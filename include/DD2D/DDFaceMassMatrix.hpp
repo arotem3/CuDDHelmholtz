@@ -1,12 +1,11 @@
 #pragma once
 
-#include "DD2D/DDTraceFunc2D.hpp"
 #include "EnsembleSpace.hpp"
 #include "FEM2D/GridFunc2D.hpp"
 #include "HostDeviceArray.hpp"
+#include "Tensor.hpp"
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
-#include "forall.hpp"
 
 namespace cuddh
 {

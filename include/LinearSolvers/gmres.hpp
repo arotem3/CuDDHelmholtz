@@ -1,9 +1,10 @@
-#ifndef CUDDH_GMRES_HPP
-#define CUDDH_GMRES_HPP
+#pragma once
+
+#include <thrust/device_vector.h>
 
 #include "LinearSolvers/Arnoldi.hpp"
-#include "LinearSolvers/KrylovHelpers.hpp"
 #include "LinearSolvers/SolverBase.hpp"
+#include "Operator.hpp"
 
 namespace cuddh
 {
@@ -66,5 +67,3 @@ namespace cuddh
         return GMRES<float>(A, Precond, m, true).solve(x, b, opts);
     }
 } // namespace cuddh
-
-#endif

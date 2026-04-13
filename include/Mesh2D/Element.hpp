@@ -1,5 +1,4 @@
-#ifndef CUDDH_ELEMENT_HPP
-#define CUDDH_ELEMENT_HPP
+#pragma once
 
 #include "SmallMatrix.hpp"
 #include "cuddh_config.hpp"
@@ -68,5 +67,3 @@ namespace cuddh
     };
 
 } // namespace cuddh
-
-#endif

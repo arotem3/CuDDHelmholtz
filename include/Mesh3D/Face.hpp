@@ -1,11 +1,9 @@
-#ifndef CUDDH_MESH3D_FACE_HPP
-#define CUDDH_MESH3D_FACE_HPP
+#pragma once
 
-#include "cuddh_config.hpp"
 #include <cuda_runtime.h>
-#include <vector>
 
 #include "SmallMatrix.hpp"
+#include "cuddh_config.hpp"
 
 namespace cuddh
 {
@@ -51,5 +49,3 @@ namespace cuddh
         double3 x[4];
     };
 } // namespace cuddh
-
-#endif

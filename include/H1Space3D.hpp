@@ -1,5 +1,4 @@
-#ifndef CUDDH_H1_SPACE_3D_HPP
-#define CUDDH_H1_SPACE_3D_HPP
+#pragma once
 
 #include "Basis.hpp"
 #include "HostDeviceArray.hpp"
@@ -124,5 +123,3 @@ namespace cuddh
         host_device_ivec _proj;  // global indices (ndof)
     };
 } // namespace cuddh
-
-#endif

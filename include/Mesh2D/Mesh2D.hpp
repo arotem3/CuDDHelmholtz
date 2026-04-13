@@ -1,5 +1,4 @@
-#ifndef CUDDH_MESH_2D_HPP
-#define CUDDH_MESH_2D_HPP
+#pragma once
 
 #include <vector>
 
@@ -146,5 +145,3 @@ namespace cuddh
     };
 
 } // namespace cuddh
-
-#endif

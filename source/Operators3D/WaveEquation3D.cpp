@@ -1,5 +1,8 @@
 #include "Operators3D/WaveEquation3D.hpp"
 
+#include "forall.hpp"
+#include "linalg.hpp"
+
 using namespace cuddh;
 
 static void init_face_mass(const TraceSpace3D &tr, const double *d_a, double *d_m)

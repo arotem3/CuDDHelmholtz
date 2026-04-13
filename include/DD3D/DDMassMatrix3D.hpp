@@ -1,12 +1,11 @@
-#ifndef DDH_DD_MASS_MATRIX_3D_HPP
-#define DDH_DD_MASS_MATRIX_3D_HPP
-
-#include "cuddh_config.hpp"
-#include "cuddh_error.hpp"
-#include "EnsembleSpace3D.hpp"
+#pragma once
 
 #include <thrust/universal_vector.h>
-#include "forall.hpp"
+
+#include "EnsembleSpace3D.hpp"
+#include "Tensor.hpp"
+#include "cuddh_config.hpp"
+#include "cuddh_error.hpp"
 
 namespace cuddh
 {
@@ -15,10 +14,7 @@ namespace cuddh
     public:
         DDMassMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem);
 
-        auto to_device() const
-        {
-            return reshape(m, mx_dofs, n_domains);
-        }
+        auto to_device() const { return reshape(m, mx_dofs, n_domains); }
 
     private:
         int mx_dofs;
@@ -26,5 +22,3 @@ namespace cuddh
         thrust::universal_vector<float> m;
     };
 } // namespace cuddh
-
-#endif

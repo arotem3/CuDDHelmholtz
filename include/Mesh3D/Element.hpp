@@ -1,9 +1,7 @@
-#ifndef CUDDH_MESH_3D_ELEMENT_HPP
-#define CUDDH_MESH_3D_ELEMENT_HPP
+#pragma once
 
-#include "cuddh_config.hpp"
-#include "Tensor.hpp"
 #include "SmallMatrix.hpp"
+#include "cuddh_config.hpp"
 
 namespace cuddh
 {
@@ -35,7 +33,7 @@ namespace cuddh
         __host__ __device__ double measure(const vec &xi) const;
 
         __host__ __device__ HexElement(const vec *X);
-        
+
         HexElement() = default;
         ~HexElement() = default;
 
@@ -44,5 +42,3 @@ namespace cuddh
     };
 
 } // namespace cuddh
-
-#endif

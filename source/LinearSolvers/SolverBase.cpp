@@ -1,5 +1,8 @@
 #include "LinearSolvers/SolverBase.hpp"
 
+#include <format>
+#include <iostream>
+
 using namespace cuddh;
 
 static std::string format_time(double t)

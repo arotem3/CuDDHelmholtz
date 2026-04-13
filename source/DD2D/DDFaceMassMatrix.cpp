@@ -1,5 +1,8 @@
 #include "DD2D/DDFaceMassMatrix.hpp"
 
+#include "DD2D/DDTraceFunc2D.hpp"
+#include "forall.hpp"
+
 using namespace cuddh;
 
 template <typename scalar_t>

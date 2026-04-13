@@ -1,5 +1,4 @@
-#ifndef CUDDH_OPERATOR_HPP
-#define CUDDH_OPERATOR_HPP
+#pragma once
 
 namespace cuddh
 {
@@ -25,5 +24,3 @@ namespace cuddh
         int _n;
     };
 } // namespace cuddh
-
-#endif

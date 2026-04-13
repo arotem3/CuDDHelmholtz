@@ -1,5 +1,23 @@
 #include "linalg.hpp"
 
+#include <assert.h>
+#include <thrust/device_ptr.h>
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/fill.h>
+#include <thrust/functional.h>
+#include <thrust/host_vector.h>
+#include <thrust/inner_product.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <thrust/transform.h>
+#include <thrust/transform_reduce.h>
+
+#include <cub/cub.cuh>
+#include <random>
+
+#include "HostDeviceArray.hpp"
+#include "forall.hpp"
+
 template <typename real_t>
 struct dist_op
 {

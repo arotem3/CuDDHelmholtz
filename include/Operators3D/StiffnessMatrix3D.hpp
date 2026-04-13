@@ -1,10 +1,9 @@
-#ifndef CUDDH_STIFFNESS_MATRIX_3D_HPP
-#define CUDDH_STIFFNESS_MATRIX_3D_HPP
+#pragma once
 
 #include "H1Space3D.hpp"
+#include "HostDeviceArray.hpp"
 #include "Operator.hpp"
 #include "SmallMatrix.hpp"
-#include "linalg.hpp"
 
 namespace cuddh
 {
@@ -12,7 +11,6 @@ namespace cuddh
     {
     public:
         StiffnessMatrix3D(const H1Space3D &fem);
-        StiffnessMatrix3D(const H1Space3D &fem, const QuadratureRule &quad);
 
         ~StiffnessMatrix3D() = default;
 
@@ -30,5 +28,3 @@ namespace cuddh
         HostDeviceArray<double3x3> _G; // geometric factors
     };
 } // namespace cuddh
-
-#endif

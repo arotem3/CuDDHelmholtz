@@ -1,5 +1,8 @@
 #include "Operators2D/WaveHoltz.hpp"
 
+#include "forall.hpp"
+#include "linalg.hpp"
+
 using namespace cuddh;
 
 static int compute_nt(double omega, double h, double p, const GridFunc2D<double> *a)

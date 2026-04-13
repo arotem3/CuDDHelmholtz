@@ -1,18 +1,14 @@
-#ifndef CUDDH_MESH_3D_HPP
-#define CUDDH_MESH_3D_HPP
+#pragma once
 
-#include <unordered_map>
-#include <array>
-#include <algorithm>
-
-#include "Tensor.hpp"
-#include "QuadratureRule.hpp"
-#include "SmallMatrix.hpp"
-#include "Mesh3D/Element.hpp"
-#include "Mesh3D/Face.hpp"
-#include "Mesh3D/Connectivity.hpp"
+#include <vector>
 
 #include "HostDeviceArray.hpp"
+#include "Mesh3D/Connectivity.hpp"
+#include "Mesh3D/Element.hpp"
+#include "Mesh3D/Face.hpp"
+#include "QuadratureRule.hpp"
+#include "SmallMatrix.hpp"
+#include "Tensor.hpp"
 
 namespace cuddh
 {
@@ -47,7 +43,8 @@ namespace cuddh
          * @brief Constructs a uniform structured mesh for the
          * cube [ax, bx] x [ay, by] x [az, bz] with nx * ny * nz elements.
          */
-        static Mesh3D uniform_cube(int nx, double ax, double bx, int ny, double ay, double by, int nz, double az, double bz);
+        static Mesh3D uniform_cube(int nx, double ax, double bx, int ny, double ay, double by, int nz, double az,
+                                   double bz);
 
         Mesh3D() = default;
         ~Mesh3D() = default;
@@ -70,7 +67,8 @@ namespace cuddh
          */
         HexElement element(int el) const
         {
-            cuddh_assert(0 <= el && el < n_elem(), printf("Mesh3D error: element index %d out of range [0, %d).\n", el, n_elem()););
+            cuddh_assert(0 <= el && el < n_elem(),
+                         printf("Mesh3D error: element index %d out of range [0, %d).\n", el, n_elem()););
 
             auto elems = reshape(this->elems.host_read(), 8, nel);
             auto nodes = reshape(this->nodes.host_read(), this->nodes.size());
@@ -87,15 +85,16 @@ namespace cuddh
          */
         QuadFace face(int f) const
         {
-            cuddh_assert(0 <= f && f < n_faces(), printf("Mesh3D error: face index %d out of range [0, %d).\n", f, n_faces()););
-            
+            cuddh_assert(0 <= f && f < n_faces(),
+                         printf("Mesh3D error: face index %d out of range [0, %d).\n", f, n_faces()););
+
             auto faces = reshape(this->faces.host_read(), 4, nf);
             auto nodes = reshape(this->nodes.host_read(), this->nodes.size());
 
             double3 x[4];
             for (int i = 0; i < 4; ++i)
                 x[i] = nodes[faces(i, f)];
-            
+
             return QuadFace(x);
         }
 
@@ -104,7 +103,9 @@ namespace cuddh
          */
         QuadFace boundary_face(int f) const
         {
-            cuddh_assert(0 <= f && f < n_boundary_faces(), printf("Mesh3D error: boundary face index %d out of range [0, %d).\n", f, n_boundary_faces()););
+            cuddh_assert(
+                0 <= f && f < n_boundary_faces(),
+                printf("Mesh3D error: boundary face index %d out of range [0, %d).\n", f, n_boundary_faces()););
 
             const int *boundary_faces = this->boundary_faces.host_read();
             return face(boundary_faces[f]);
@@ -115,7 +116,9 @@ namespace cuddh
          */
         QuadFace interior_face(int f) const
         {
-            cuddh_assert(0 <= f && f < n_interior_faces(), printf("Mesh3D error: interior face index %d out of range [0, %d).\n", f, n_interior_faces()););
+            cuddh_assert(
+                0 <= f && f < n_interior_faces(),
+                printf("Mesh3D error: interior face index %d out of range [0, %d).\n", f, n_interior_faces()););
 
             const int *interior_faces = this->interior_faces.host_read();
             return face(interior_faces[f]);
@@ -126,7 +129,8 @@ namespace cuddh
          */
         FaceConnectivity face_connectivity(int f) const
         {
-            cuddh_assert(0 <= f && f < n_faces(), printf("Mesh3D error: face index %d out of range [0, %d).\n", f, n_faces()););
+            cuddh_assert(0 <= f && f < n_faces(),
+                         printf("Mesh3D error: face index %d out of range [0, %d).\n", f, n_faces()););
 
             return connectivity[f];
         }
@@ -136,7 +140,9 @@ namespace cuddh
          */
         FaceConnectivity interior_face_connectivity(int f) const
         {
-            cuddh_assert(0 <= f && f < n_interior_faces(), printf("Mesh3D error: interior face index %d out of range [0, %d).\n", f, n_interior_faces()););
+            cuddh_assert(
+                0 <= f && f < n_interior_faces(),
+                printf("Mesh3D error: interior face index %d out of range [0, %d).\n", f, n_interior_faces()););
 
             const int *interior_faces = this->interior_faces.host_read();
             return face_connectivity(interior_faces[f]);
@@ -147,7 +153,9 @@ namespace cuddh
          */
         FaceConnectivity boundary_face_connectivity(int f) const
         {
-            cuddh_assert(0 <= f && f < n_boundary_faces(), printf("Mesh3D error: boundary face index %d out of range [0, %d).\n", f, n_boundary_faces()););
+            cuddh_assert(
+                0 <= f && f < n_boundary_faces(),
+                printf("Mesh3D error: boundary face index %d out of range [0, %d).\n", f, n_boundary_faces()););
 
             const int *boundary_faces = this->boundary_faces.host_read();
             return face_connectivity(boundary_faces[f]);
@@ -156,19 +164,16 @@ namespace cuddh
         /**
          * @brief Returns a list of face indices corresponding to the boundary faces.
          */
-        const_ivec_wrapper get_boundary_faces() const
-        {
-            return reshape(boundary_faces.host_read(), nbf);
-        }
+        const_ivec_wrapper get_boundary_faces() const { return reshape(boundary_faces.host_read(), nbf); }
 
         // Get the device mesh
         DeviceMesh3D to_device() const;
 
     private:
-        int nel; // number of elements
-        int nf;  // number of faces
-        int nbf; // number of boundary faces
-        int nif; // number of interior faces
+        int nel;   // number of elements
+        int nf;    // number of faces
+        int nbf;   // number of boundary faces
+        int nif;   // number of interior faces
         double _h; // mesh size
         HostDeviceArray<double3> nodes;
         HostDeviceArray<int> elems;          // shape (8, n_elems) in canonical order
@@ -198,7 +203,8 @@ namespace cuddh
 
         __device__ HexElement element(int el) const
         {
-            cuddh_assert(0 <= el && el < n_elem(), printf("Mesh3D error: element index %d out of range [0, %d).\n", el, n_elem()););
+            cuddh_assert(0 <= el && el < n_elem(),
+                         printf("Mesh3D error: element index %d out of range [0, %d).\n", el, n_elem()););
 
             double3 x[8];
             for (int i = 0; i < 8; ++i)
@@ -209,7 +215,8 @@ namespace cuddh
 
         __device__ QuadFace face(int f) const
         {
-            cuddh_assert(0 <= f && f < n_faces(), printf("Mesh3D error: face index %d out of range [0, %d).\n", f, n_faces()););
+            cuddh_assert(0 <= f && f < n_faces(),
+                         printf("Mesh3D error: face index %d out of range [0, %d).\n", f, n_faces()););
 
             double3 x[4];
             for (int i = 0; i < 4; ++i)
@@ -220,13 +227,17 @@ namespace cuddh
 
         __device__ QuadFace boundary_face(int f) const
         {
-            cuddh_assert(0 <= f && f < n_boundary_faces(), printf("Mesh3D error: boundary face index %d out of range [0, %d).\n", f, n_boundary_faces()););
+            cuddh_assert(
+                0 <= f && f < n_boundary_faces(),
+                printf("Mesh3D error: boundary face index %d out of range [0, %d).\n", f, n_boundary_faces()););
             return face(boundary_faces[f]);
         }
 
         __device__ QuadFace interior_face(int f) const
         {
-            cuddh_assert(0 <= f && f < n_interior_faces(), printf("Mesh3D error: interior face index %d out of range [0, %d).\n", f, n_interior_faces()););
+            cuddh_assert(
+                0 <= f && f < n_interior_faces(),
+                printf("Mesh3D error: interior face index %d out of range [0, %d).\n", f, n_interior_faces()););
             return face(interior_faces[f]);
         }
 
@@ -240,5 +251,3 @@ namespace cuddh
         const_ivec_wrapper boundary_faces;
     };
 } // namespace cuddh
-
-#endif

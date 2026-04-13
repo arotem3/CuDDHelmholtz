@@ -1,5 +1,7 @@
 #include "DD3D/DDMassMatrix3D.hpp"
 
+#include "forall.hpp"
+
 using namespace cuddh;
 
 static thrust::universal_vector<float> mass(const H1Space3D &fem, const EnsembleSpace3D &efem)

@@ -1,5 +1,4 @@
-#ifndef CUDDH_EDGE_HPP
-#define CUDDH_EDGE_HPP
+#pragma once
 
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
@@ -98,5 +97,3 @@ namespace cuddh
         return (permutation < 0) ? (N - 1 - i) : i;
     }
 } // namespace cuddh
-
-#endif

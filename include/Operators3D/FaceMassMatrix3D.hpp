@@ -1,11 +1,9 @@
-#ifndef CUDDH_FACE_MASS_MATRIX_3D_HPP
-#define CUDDH_FACE_MASS_MATRIX_3D_HPP
+#pragma once
 
 #include "H1Space3D.hpp"
 #include "HostDeviceArray.hpp"
 #include "Operator.hpp"
 #include "forall.hpp"
-#include "linalg.hpp"
 
 namespace cuddh
 {
@@ -82,5 +80,3 @@ namespace cuddh
         });
     }
 } // namespace cuddh
-
-#endif

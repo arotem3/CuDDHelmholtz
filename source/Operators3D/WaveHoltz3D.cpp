@@ -2,6 +2,9 @@
 
 #include <thrust/extrema.h>
 
+#include "forall.hpp"
+#include "linalg.hpp"
+
 using namespace cuddh;
 
 static thrust::device_vector<double> make_face_mass(const TraceSpace3D &tr, const double *d_a)

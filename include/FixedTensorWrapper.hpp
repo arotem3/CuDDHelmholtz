@@ -1,5 +1,4 @@
-#ifndef FIXED_TENSOR_WRAPPER_HPP
-#define FIXED_TENSOR_WRAPPER_HPP
+#pragma once
 
 #include <cuda_runtime.h>
 
@@ -12,25 +11,16 @@ namespace cuddh
     class FixedTensorWrapper
     {
     public:
-        __host__ __device__ static inline constexpr size_t size()
-        {
-            return (Shape * ...);
-        }
+        __host__ __device__ static inline constexpr size_t size() { return (Shape * ...); }
 
         __host__ __device__ static inline constexpr size_t shape(size_t dim)
         {
             return (dim < sizeof...(Shape)) ? ((size_t[]){Shape...})[dim] : 0;
         }
 
-        __host__ __device__ inline constexpr scalar *data()
-        {
-            return ptr;
-        }
+        __host__ __device__ inline constexpr scalar *data() { return ptr; }
 
-        __host__ __device__ inline constexpr const scalar *data() const
-        {
-            return ptr;
-        }
+        __host__ __device__ inline constexpr const scalar *data() const { return ptr; }
 
         __host__ __device__ inline constexpr FixedTensorWrapper(scalar *data = nullptr) : ptr(data) {}
 
@@ -94,25 +84,16 @@ namespace cuddh
         inline constexpr FixedTensor(FixedTensor &&other) = default;
         inline constexpr FixedTensor &operator=(FixedTensor &&other) = default;
 
-        __host__ __device__ static inline constexpr size_t size()
-        {
-            return (Shape * ...);
-        }
+        __host__ __device__ static inline constexpr size_t size() { return (Shape * ...); }
 
         __host__ __device__ static inline constexpr size_t shape(size_t dim)
         {
             return (dim < sizeof...(Shape)) ? ((size_t[]){Shape...})[dim] : 0;
         }
 
-        __host__ __device__ inline constexpr scalar *data()
-        {
-            return ptr;
-        }
+        __host__ __device__ inline constexpr scalar *data() { return ptr; }
 
-        __host__ __device__ inline constexpr const scalar *data() const
-        {
-            return ptr;
-        }
+        __host__ __device__ inline constexpr const scalar *data() const { return ptr; }
 
         template <typename... Indices>
         __host__ __device__ inline constexpr scalar &at(Indices... ids)
@@ -169,5 +150,3 @@ namespace cuddh
         }
     };
 } // namespace cuddh
-
-#endif

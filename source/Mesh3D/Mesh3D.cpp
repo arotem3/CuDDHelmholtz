@@ -1,6 +1,9 @@
 #include "Mesh3D/Mesh3D.hpp"
 
+#include <algorithm>
+#include <array>
 #include <fstream>
+#include <unordered_map>
 
 using namespace cuddh;
 
@@ -15,64 +18,43 @@ static FaceConnectivity::Permutation compute_face_permutation(const face_nodes &
     }
 
     // 90-degree rotation (clockwise)
-    if ((owner[0] == neighbor[3] &&
-         owner[1] == neighbor[0] &&
-         owner[2] == neighbor[1] &&
-         owner[3] == neighbor[2]))
+    if ((owner[0] == neighbor[3] && owner[1] == neighbor[0] && owner[2] == neighbor[1] && owner[3] == neighbor[2]))
     {
         return FaceConnectivity::Permutation::Rotate90;
     }
 
     // 180-degree rotation
-    if ((owner[0] == neighbor[2] &&
-         owner[1] == neighbor[3] &&
-         owner[2] == neighbor[0] &&
-         owner[3] == neighbor[1]))
+    if ((owner[0] == neighbor[2] && owner[1] == neighbor[3] && owner[2] == neighbor[0] && owner[3] == neighbor[1]))
     {
         return FaceConnectivity::Permutation::Rotate180;
     }
 
     // 270-degree rotation (clockwise)
-    if ((owner[0] == neighbor[1] &&
-         owner[1] == neighbor[2] &&
-         owner[2] == neighbor[3] &&
-         owner[3] == neighbor[0]))
+    if ((owner[0] == neighbor[1] && owner[1] == neighbor[2] && owner[2] == neighbor[3] && owner[3] == neighbor[0]))
     {
         return FaceConnectivity::Permutation::Rotate270;
     }
 
     // Horizontal flip
-    if ((owner[0] == neighbor[1] &&
-         owner[1] == neighbor[0] &&
-         owner[2] == neighbor[3] &&
-         owner[3] == neighbor[2]))
+    if ((owner[0] == neighbor[1] && owner[1] == neighbor[0] && owner[2] == neighbor[3] && owner[3] == neighbor[2]))
     {
         return FaceConnectivity::Permutation::HorizontalFlip;
     }
 
     // Vertical flip
-    if ((owner[0] == neighbor[2] &&
-         owner[1] == neighbor[3] &&
-         owner[2] == neighbor[0] &&
-         owner[3] == neighbor[1]))
+    if ((owner[0] == neighbor[2] && owner[1] == neighbor[3] && owner[2] == neighbor[0] && owner[3] == neighbor[1]))
     {
         return FaceConnectivity::Permutation::VerticalFlip;
     }
 
     // Main diagonal flip
-    if ((owner[0] == neighbor[3] &&
-         owner[1] == neighbor[0] &&
-         owner[2] == neighbor[1] &&
-         owner[3] == neighbor[2]))
+    if ((owner[0] == neighbor[3] && owner[1] == neighbor[0] && owner[2] == neighbor[1] && owner[3] == neighbor[2]))
     {
         return FaceConnectivity::Permutation::DiagonalFlipMain;
     }
 
     // Anti-diagonal flip
-    if ((owner[0] == neighbor[2] &&
-         owner[1] == neighbor[3] &&
-         owner[2] == neighbor[0] &&
-         owner[3] == neighbor[1]))
+    if ((owner[0] == neighbor[2] && owner[1] == neighbor[3] && owner[2] == neighbor[0] && owner[3] == neighbor[1]))
     {
         return FaceConnectivity::Permutation::DiagonalFlipAnti;
     }
@@ -110,9 +92,7 @@ public:
 
 static double dist3(double3 a, double3 b)
 {
-    return std::sqrt((a.x - b.x) * (a.x - b.x) +
-                     (a.y - b.y) * (a.y - b.y) +
-                     (a.z - b.z) * (a.z - b.z));
+    return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
 }
 
 Mesh3D Mesh3D::uniform_cube(int nx, double ax, double bx, int ny, double ay, double by, int nz, double az, double bz)
@@ -123,8 +103,7 @@ Mesh3D Mesh3D::uniform_cube(int nx, double ax, double bx, int ny, double ay, dou
     Cube<double3> coo(nx + 1, ny + 1, nz + 1);
     Tensor<4, int> elems(8, nx, ny, nz);
 
-    auto index = [=](int i, int j, int k) -> int
-    {
+    auto index = [=](int i, int j, int k) -> int {
         return i + (nx + 1) * (j + (ny + 1) * k);
     };
 
@@ -217,11 +196,8 @@ Mesh3D Mesh3D::from_vertices(int nx, const double3 *nodes, int nel, const int *e
     {
         for (int f = 0; f < 6; ++f)
         {
-            face_nodes face = {
-                elem(hex_faces[f][0], el),
-                elem(hex_faces[f][1], el),
-                elem(hex_faces[f][2], el),
-                elem(hex_faces[f][3], el)};
+            face_nodes face = {elem(hex_faces[f][0], el), elem(hex_faces[f][1], el), elem(hex_faces[f][2], el),
+                               elem(hex_faces[f][3], el)};
 
             auto it = face_map.find(face);
             if (it == face_map.end())
@@ -243,7 +219,8 @@ Mesh3D Mesh3D::from_vertices(int nx, const double3 *nodes, int nel, const int *e
 
                 if (connectivity.elements[1] >= 0)
                 {
-                    throw std::runtime_error("Mesh3D::from_vertices: Invalid mesh detected. More than two elements share the same face.");
+                    throw std::runtime_error(
+                        "Mesh3D::from_vertices: Invalid mesh detected. More than two elements share the same face.");
                 }
 
                 connectivity.elements[1] = el;

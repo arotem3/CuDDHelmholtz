@@ -1,5 +1,4 @@
-#ifndef CUDDH_MESH3D_CONNECTIVITY_HPP
-#define CUDDH_MESH3D_CONNECTIVITY_HPP
+#pragma once
 
 #include "cuddh_config.hpp"
 
@@ -97,5 +96,3 @@ namespace cuddh
         return {m, n, l};
     }
 } // namespace cuddh
-
-#endif

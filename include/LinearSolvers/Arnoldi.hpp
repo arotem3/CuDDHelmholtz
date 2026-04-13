@@ -1,6 +1,12 @@
 #pragma once
+
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+
 #include "LinearSolvers/KrylovHelpers.hpp"
 #include "LinearSolvers/SolverBase.hpp"
+#include "Operator.hpp"
+#include "linalg.hpp"
 
 namespace cuddh
 {

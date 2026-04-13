@@ -1,5 +1,8 @@
 #include "Operators3D/MassMatrix3D.hpp"
 
+#include "forall.hpp"
+#include "linalg.hpp"
+
 using namespace cuddh;
 
 static void init_mass(const H1Space3D &fem, const double *d_a, double *d_M)

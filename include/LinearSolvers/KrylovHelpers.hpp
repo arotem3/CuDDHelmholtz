@@ -1,20 +1,18 @@
 #pragma once
+
 #include <cblas.h>
 #include <cublas_v2.h>
+#include <cuda_runtime.h>
 #include <lapacke.h>
 #include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
 
 #include <algorithm>
-#include <limits>
-#include <numeric>
+#include <cmath>
 #include <vector>
 
 #include "Tensor.hpp"
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
-#include "forall.hpp"
-#include "linalg.hpp"
 
 namespace cuddh
 {

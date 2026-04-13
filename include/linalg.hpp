@@ -1,29 +1,13 @@
-#ifndef CUDDH_LINALG_HPP
-#define CUDDH_LINALG_HPP
+#pragma once
 
-#include <assert.h>
 #include <cblas.h>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
-#include <thrust/device_ptr.h>
-#include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
-#include <thrust/fill.h>
-#include <thrust/functional.h>
-#include <thrust/host_vector.h>
-#include <thrust/inner_product.h>
-#include <thrust/iterator/zip_iterator.h>
-#include <thrust/transform.h>
-#include <thrust/transform_reduce.h>
 
 #include <cmath>
-#include <cub/cub.cuh>
-#include <random>
 
-#include "HostDeviceArray.hpp"
 #include "Operator.hpp"
 #include "cuddh_config.hpp"
-#include "forall.hpp"
 
 namespace cuddh
 {
@@ -205,5 +189,3 @@ namespace cuddh
     } // namespace hla
 
 } // namespace cuddh
-
-#endif

@@ -1,5 +1,7 @@
 #include "Operators2D/StiffnessMatrix.hpp"
 
+#include "linalg.hpp"
+
 namespace cuddh
 {
     static HostDeviceArray<dsym2x2> setup_geometric_factors(const Mesh2D &mesh, const QuadratureRule &quad)
