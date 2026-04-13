@@ -13,6 +13,7 @@ namespace
         void set_subdomain_elements(imat_wrapper &h_elems) const;
         int set_subdomain_num_boundary_faces(ivec_wrapper &h_s_faces) const;
         void set_subdomain_face_indices(imat_wrapper &h_faces) const;
+        void set_subdomain_face_sides(imat_wrapper &h_f_sides) const;
         int compute_shared_dof_map(HostDeviceArray<LambdaDof> &cmap, const TensorWrapper<3, int> &h_fI) const;
         void compute_fdof_indices(TensorWrapper<3, int> &h_fI, const TensorWrapper<4, int> &h_sI) const;
         int set_subdomain_num_dofs(ivec_wrapper &h_s_dof) const;
@@ -31,7 +32,8 @@ namespace
 } // namespace
 
 EnsembleSpace::EnsembleSpace(const H1Space2D &fem, int n_spaces_, const int *element_labels)
-    : n_spaces{n_spaces_},
+    : fem{fem},
+      n_spaces{n_spaces_},
       n_basis{fem.basis().size()},
       s_dof(n_spaces),
       s_elems(n_spaces),
@@ -63,6 +65,11 @@ EnsembleSpace::EnsembleSpace(const H1Space2D &fem, int n_spaces_, const int *ele
     _faces.resize(mx_faces * n_spaces);
     auto h_faces = reshape(_faces.host_write(), mx_faces, n_spaces);
     ESbuilder.set_subdomain_face_indices(h_faces);
+
+    // store which side (0 or 1) of each face belongs to each subdomain
+    f_sides.resize(mx_faces * n_spaces);
+    auto h_f_sides = reshape(f_sides.host_write(), mx_faces, n_spaces);
+    ESbuilder.set_subdomain_face_sides(h_f_sides);
 
     // determine the mapping between global and subspace indices
     sI.resize(n_basis * n_basis * mx_elems * n_spaces);
@@ -293,15 +300,12 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
 
             const EdgeConnectivity edge = mesh.edge_connectivity(g_f);
             const int g_el = edge.elements[side];
-            const int s = edge.labels[side];
-            const bool reversed = (side == 1 && edge.permutation < 0);
 
             for (int i = 0; i < n_basis; ++i)
             {
                 // map face index to element index
-                const int j = (reversed) ? (n_basis - 1 - i) : i;
-                const int m = (s == 0 || s == 2) ? j : (s == 1) ? (n_basis - 1) : 0;
-                const int n = (s == 1 || s == 3) ? j : (s == 2) ? (n_basis - 1) : 0;
+                const int j = (side == 1) ? permute_edge_index(n_basis, i, edge.permutation) : i;
+                const auto [m, n] = edge2vol(n_basis, j, edge.labels[side]);
 
                 const int idx = unique.at(g_inds(m, n, g_el));
 
@@ -380,6 +384,23 @@ void ::EnsembleSpaceBuilder::set_subdomain_face_indices(imat_wrapper &h_faces) c
         {
             auto [f, side] = sf.at(i);
             h_faces(i, p) = f;
+        }
+    }
+}
+
+void ::EnsembleSpaceBuilder::set_subdomain_face_sides(imat_wrapper &h_f_sides) const
+{
+    const int n_spaces = E.size();
+    std::fill(h_f_sides.begin(), h_f_sides.end(), -1);
+
+    for (int p = 0; p < n_spaces; ++p)
+    {
+        auto &sf = F.at(p);
+        const int nf = sf.size();
+        for (int i = 0; i < nf; ++i)
+        {
+            auto [f, side] = sf.at(i);
+            h_f_sides(i, p) = side;
         }
     }
 }

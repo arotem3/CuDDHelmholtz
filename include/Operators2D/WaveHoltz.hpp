@@ -1,5 +1,4 @@
-#ifndef CUDDH_WAVEHOLTZ_HPP
-#define CUDDH_WAVEHOLTZ_HPP
+#pragma once
 
 #include "Operators2D/FaceMassMatrix.hpp"
 #include "Operators2D/MassMatrix.hpp"
@@ -23,8 +22,8 @@ namespace cuddh
     class WaveHoltz : public Operator<double>
     {
     public:
-        WaveHoltz(double omega, double maximum_velocity, const double *a2x, const double *ax, const H1Space2D &fem_,
-                  const TraceSpace2D &fs_);
+        WaveHoltz(const H1Space2D &fem, const TraceSpace2D &fs, double omega);
+        WaveHoltz(const H1Space2D &fem, const TraceSpace2D &fs, double omega, const GridFunc2D<double> &a);
 
         /// @brief y <- y + c * S * x
         inline void S(double c, const double *x, double *y) const
@@ -63,5 +62,3 @@ namespace cuddh
         inline double filter(double n) const { return (2.0 / nt) * (std::cos(2.0 * M_PI * n / nt) - shift); }
     };
 } // namespace cuddh
-
-#endif

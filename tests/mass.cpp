@@ -24,9 +24,11 @@ static void run_mass_case(TestLogger &summary, const Mesh2D &mesh, Basis basis, 
 
     auto X = fem.physical_coordinates(MemorySpace::DEVICE);
 
-    // evaluate f on nodes
-    auto _f = gridfunc(fem, [=] __device__(double2 x) { return func(x); });
-    double *f = thrust::raw_pointer_cast(_f.data());
+    host_device_dvec _f(ndof);
+    double *f = _f.device_write();
+
+    // evaluate f at the global FEM degrees of freedom
+    forall(ndof, [=] __device__(int i) mutable { f[i] = func(X(i)); });
 
     // evaluate (f, phi)
     MassMatrix m(fem);

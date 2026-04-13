@@ -32,6 +32,7 @@ namespace cuddh
 
         // construct edges
         std::unordered_map<int, int> edge_map;
+        std::vector<EdgeConnectivity> edge_conn_vec;
         auto key = [nx](int i, int j) -> int {
             return std::min(i, j) + nx * std::max(i, j);
         };
@@ -55,14 +56,14 @@ namespace cuddh
                     conn.labels[0] = s;
                     conn.labels[1] = -1;
                     conn.permutation = 1;
-                    mesh._edge_connectivity.push_back(conn);
+                    edge_conn_vec.push_back(conn);
 
-                    edge_map[k] = (int)mesh._edge_connectivity.size() - 1;
+                    edge_map[k] = (int)edge_conn_vec.size() - 1;
                 }
                 else
                 {
                     const int e = edge_map.at(k);
-                    EdgeConnectivity &conn = mesh._edge_connectivity[e];
+                    EdgeConnectivity &conn = edge_conn_vec[e];
 
                     const int e0 = conn.elements[0];
                     const int s0 = conn.labels[0];
@@ -75,11 +76,18 @@ namespace cuddh
             }
         }
 
+        // copy edge connectivity into HostDeviceArray
+        const int ne = (int)edge_conn_vec.size();
+        mesh._edge_connectivity.resize(ne);
+        EdgeConnectivity *ec_ptr = mesh._edge_connectivity.host_write();
+        for (int i = 0; i < ne; ++i)
+            ec_ptr[i] = edge_conn_vec[i];
+
         // classify edges
         std::vector<int> boundary_edge_ids, interior_edge_ids;
-        for (int i = 0; i < (int)mesh._edge_connectivity.size(); ++i)
+        for (int i = 0; i < ne; ++i)
         {
-            if (mesh._edge_connectivity[i].elements[1] == -1)
+            if (ec_ptr[i].elements[1] == -1)
                 boundary_edge_ids.push_back(i);
             else
                 interior_edge_ids.push_back(i);
@@ -89,13 +97,12 @@ namespace cuddh
         // edge nodes are ordered so that the right-hand perpendicular
         // (rotation of edge direction by 90° clockwise) points outward.
         // For labels 2,3 (top and left edges), swap node indices for correct direction.
-        const int ne = (int)mesh._edge_connectivity.size();
         mesh._edge_nodes.resize(2 * ne);
         auto en = reshape(mesh._edge_nodes.host_write(), 2, ne);
         for (int i = 0; i < ne; ++i)
         {
-            const int side = mesh._edge_connectivity[i].labels[0];
-            const int el = mesh._edge_connectivity[i].elements[0];
+            const int side = ec_ptr[i].labels[0];
+            const int el = ec_ptr[i].elements[0];
             const int n0 = elem_conn(emap1[side], el);
             const int n1 = elem_conn(emap2[side], el);
             // For labels 2,3 (top/left edges), swap to ensure right-perp points outward
@@ -208,7 +215,7 @@ namespace cuddh
         cuddh_assert(
             0 <= i && i < (int)_edge_connectivity.size(),
             printf("Mesh2D error: edge i = %d out of range (#edges = %d)\n", i, (int)_edge_connectivity.size()));
-        return _edge_connectivity[i];
+        return _edge_connectivity.host_read()[i];
     }
 
     EdgeConnectivity Mesh2D::edge_connectivity(int i, FaceType type) const
@@ -218,14 +225,14 @@ namespace cuddh
             cuddh_assert(0 <= i && i < _boundary_edges_d.size(),
                          printf("Mesh2D error: boundary edge i = %d out of range (#boundary edges = %d)\n", i,
                                 _boundary_edges_d.size()));
-            return _edge_connectivity[_boundary_edges_d.host_read()[i]];
+            return _edge_connectivity.host_read()[_boundary_edges_d.host_read()[i]];
         }
         else
         {
             cuddh_assert(0 <= i && i < _interior_edges_d.size(),
                          printf("Mesh2D error: interior edge i = %d out of range (#interior edges = %d)\n", i,
                                 _interior_edges_d.size()));
-            return _edge_connectivity[_interior_edges_d.host_read()[i]];
+            return _edge_connectivity.host_read()[_interior_edges_d.host_read()[i]];
         }
     }
 
@@ -242,6 +249,7 @@ namespace cuddh
     DeviceMesh2D Mesh2D::to_device() const
     {
         DeviceMesh2D d;
+        d.connectivity = reshape(_edge_connectivity.device_read(), _edge_connectivity.size());
         d.nodes = reshape(_node_coords.device_read(), _node_coords.size());
         d.elems = reshape(_elem_nodes.device_read(), 4, n_elem());
         d.edge_nodes = reshape(_edge_nodes.device_read(), 2, n_edges());

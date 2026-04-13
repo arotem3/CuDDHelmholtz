@@ -83,13 +83,12 @@ namespace cuddh
         static Mesh2D uniform_rect(int nx, double ax, double bx, int ny, double ay, double by);
 
     private:
-        std::vector<EdgeConnectivity> _edge_connectivity; ///< edge topology, indexed by global edge id
-
-        HostDeviceArray<double2> _node_coords;  ///< (n_nodes,)       device-accessible node positions
-        HostDeviceArray<int> _elem_nodes;       ///< (4*n_elem,)      device-accessible element connectivity
-        HostDeviceArray<int> _edge_nodes;       ///< (2*n_edges,)     device-accessible edge node indices (pre-ordered for outward normal)
-        HostDeviceArray<int> _interior_edges_d; ///< (n_interior,)    device-accessible interior edge indices
-        HostDeviceArray<int> _boundary_edges_d; ///< (n_boundary,)    device-accessible boundary edge indices
+        HostDeviceArray<EdgeConnectivity> _edge_connectivity; ///< edge topology, indexed by global edge id
+        HostDeviceArray<double2> _node_coords;                ///< (n_nodes,) node positions
+        HostDeviceArray<int> _elem_nodes;                     ///< (4*n_elem,) element connectivity
+        HostDeviceArray<int> _edge_nodes;       ///< (2*n_edges,) edge node indices (ordered for outward normal)
+        HostDeviceArray<int> _interior_edges_d; ///< (n_interior,) interior edge indices
+        HostDeviceArray<int> _boundary_edges_d; ///< (n_boundary,) boundary edge indices
     };
 
     /// @brief A 2D mesh of quadrilateral elements on the device.
@@ -123,10 +122,7 @@ namespace cuddh
         }
 
         /// @brief Reconstructs the geometry of edge e (by global edge index) on the fly.
-        __device__ Edge edge(int e) const
-        {
-            return Edge(nodes[edge_nodes(0, e)], nodes[edge_nodes(1, e)]);
-        }
+        __device__ Edge edge(int e) const { return Edge(nodes[edge_nodes(0, e)], nodes[edge_nodes(1, e)]); }
 
         /// @brief Returns the geometry of interior edge e.
         __device__ Edge interior_edge(int e) const { return edge(interior_edges[e]); }
@@ -134,9 +130,14 @@ namespace cuddh
         /// @brief Returns the geometry of boundary edge e.
         __device__ Edge boundary_edge(int e) const { return edge(boundary_edges[e]); }
 
+        __device__ EdgeConnectivity edge_connectivity(int i) const { return connectivity[i]; }
+        __device__ EdgeConnectivity interior_connectivity(int i) const { return connectivity[interior_edges[i]]; }
+        __device__ EdgeConnectivity boundary_connectivity(int i) const { return connectivity[boundary_edges[i]]; }
+
     private:
         friend class Mesh2D;
 
+        VectorWrapper<const EdgeConnectivity> connectivity;
         VectorWrapper<const double2> nodes; ///< (n_nodes,)
         const_imat_wrapper elems;           ///< (4, n_elem)
         const_imat_wrapper edge_nodes;      ///< (2, n_edges) — node indices per edge (pre-ordered for outward normal)

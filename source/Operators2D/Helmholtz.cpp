@@ -2,6 +2,11 @@
 
 using namespace cuddh;
 
+static GridFunc2D<double> square(const GridFunc2D<double> &a)
+{
+    return a.transform([] __device__(double x) -> double { return x * x; });
+}
+
 void Helmholtz::action(const double *x, double *y) const
 {
     const int n = this->ndof() / 2;
@@ -16,20 +21,25 @@ void Helmholtz::action(const double *x, double *y) const
     S.action(v, Av);
 
     double omega = this->omega;
+    double om2 = omega * omega;
     auto m = M.to_device();
     auto h = H.to_device();
 
-    forall(n, [=] __device__(int i) -> void {
-        const double mi = m(i);
-        const double hi = h(i);
+    forall(n, [=] __device__(int i) {
+        const double mi = om2 * m(i);
+        const double hi = omega * h(i);
 
         const double U = u[i], V = v[i];
 
-        Au[i] = Au[i] - omega * omega * mi * U + omega * hi * V;
-        Av[i] = -Av[i] + omega * omega * mi * V + omega * hi * U;
+        Au[i] = Au[i] - mi * U + hi * V;
+        Av[i] = -Av[i] + mi * V + hi * U;
     });
 }
 
-Helmholtz::Helmholtz(double omega_, const double *a2x, const double *ax, const H1Space2D &fem, const TraceSpace2D &fs)
-    : Operator<double>(2 * fem.size()), omega{omega_}, S(fem), M(fem, a2x), H(fs, ax)
+Helmholtz::Helmholtz(const H1Space2D &fem, const TraceSpace2D &fs, double omega)
+    : Operator<double>(2 * fem.size()), omega{omega}, S(fem), M(fem), H(fs)
+{}
+
+Helmholtz::Helmholtz(const H1Space2D &fem, const TraceSpace2D &fs, double omega, const GridFunc2D<double> &a)
+    : Operator<double>(2 * fem.size()), omega{omega}, S(fem), M(fem, square(a)), H(fs, a)
 {}

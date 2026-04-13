@@ -1,7 +1,8 @@
-#ifndef CUDDH_FACE_MASS_MATRIX_HPP
-#define CUDDH_FACE_MASS_MATRIX_HPP
+#pragma once
 
+#include "FEM2D/GridFunc2D.hpp"
 #include "FEM2D/H1Space2D.hpp"
+#include "FEM2D/TraceFunc2D.hpp"
 #include "HostDeviceArray.hpp"
 #include "Operator.hpp"
 #include "forall.hpp"
@@ -9,47 +10,29 @@
 
 namespace cuddh
 {
-    /// @brief m(u, phi) = (a(x) * u, phi) for all phi in a TraceSpace2D
+    /// @brief m(u, phi) = <a(x) * u, phi>
     class FaceMassMatrix : public Operator<double>
     {
     public:
-        FaceMassMatrix(const TraceSpace2D &fs, const double *d_a = nullptr);
+        FaceMassMatrix(const TraceSpace2D &fs, const GridFunc2D<double> &a);
+        FaceMassMatrix(const TraceSpace2D &fs);
 
-        /// @brief y[i] <- y[i] + c * (x, phi[i]),
-        /// where phi[i] is the i-th basis function in the TraceSpace2D.
+        /// @brief y[i] <- y[i] + c * <x, phi[i]>
         /// @param c scalar coefficient
-        /// @param x a vector in the TraceSpace2D
-        /// @param y a vector in the TraceSpace2D. On exit, y[i] <- y[i] + c * (x, phi[i]).
+        /// @param x a vector in the H1Space2D
+        /// @param y a vector in the H1Space2D. On exit, y[i] <- y[i] + c * <x, phi[i]>
         void action(double c, const double *x, double *y) const override;
 
-        /// @brief y[i] = (x, phi[i])
+        /// @brief y[i] = <x, phi[i]>
         void action(const double *x, double *y) const override;
 
         /// @brief returns the (diagonal) mass matrix as VectorWrapper of managed memory
-        VectorWrapper<const double> to_device() const { return reshape(_m, _m.size()); }
+        VectorWrapper<const double> to_device() const
+        {
+            return reshape(thrust::raw_pointer_cast(_m.data()), _m.size());
+        }
 
     private:
-        thrust::universal_vector<double> _m;
+        thrust::device_vector<double> _m;
     };
-
-    template <typename Func>
-    thrust::universal_vector<double> trace(const TraceSpace2D &fs, const Func &f)
-    {
-        const int fdof = fs.size();
-
-        auto x = fs.h1_space().physical_coordinates(MemorySpace::DEVICE);
-        auto gI = fs.global_indices(MemorySpace::DEVICE);
-
-        thrust::universal_vector<double> F(fdof);
-        double *d_F = thrust::raw_pointer_cast(F.data());
-
-        forall(fdof, [=] __device__(int i) {
-            double2 xi = x(gI[i]);
-            d_F[i] = f(xi);
-        });
-
-        return F;
-    }
 } // namespace cuddh
-
-#endif

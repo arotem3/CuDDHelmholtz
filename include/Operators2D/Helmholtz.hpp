@@ -2,18 +2,21 @@
 
 #include <thrust/universal_vector.h>
 
+#include "FEM2D/GridFunc2D.hpp"
+#include "FEM2D/H1Space2D.hpp"
 #include "Operators2D/FaceMassMatrix.hpp"
 #include "Operators2D/MassMatrix.hpp"
 #include "Operators2D/StiffnessMatrix.hpp"
 
 namespace cuddh
 {
-    /// @brief FEM discretization of the Helmholtz equation -div(grad u) - omega^2 u == f
-    /// with boundary conditions: du/dn + i omega u == 0.
+    /// @brief FEM discretization of the Helmholtz equation -div(grad u) - a(x)^2 omega^2 u == f
+    /// with boundary conditions: du/dn - i omega a(x) u == 0.
     class Helmholtz : public Operator<double>
     {
     public:
-        Helmholtz(double omega_, const double *a2x, const double *ax, const H1Space2D &fem, const TraceSpace2D &fs);
+        Helmholtz(const H1Space2D &fem, const TraceSpace2D &fs, double omega);
+        Helmholtz(const H1Space2D &fem, const TraceSpace2D &fs, double omega, const GridFunc2D<double> &a);
 
         /// @brief y[i] = a(x, phi[i]) where a(u,v) = (grad u, grad v) - omega^2 (u, v) - i*omega <u, v>
         /// @param x the real and imaginary part of the solution

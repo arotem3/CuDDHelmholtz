@@ -2,7 +2,7 @@
 
 using namespace cuddh;
 
-static thrust::universal_vector<double> construct_face_mass(const TraceSpace2D &fs, const double *d_a)
+static thrust::device_vector<double> construct_face_mass(const TraceSpace2D &fs, const TraceFunc2D<double> *_a)
 {
     const int n_faces = fs.n_faces();
     const int n_basis = fs.h1_space().basis().size();
@@ -14,29 +14,39 @@ static thrust::universal_vector<double> construct_face_mass(const TraceSpace2D &
     auto I = fs.subspace_indices(MemorySpace::DEVICE);
     auto K = fs.global_indices(MemorySpace::DEVICE);
 
-    thrust::universal_vector<double> _m(fs.h1_space().size(), 0.0);
+    MatrixWrapper<const double> a;
+    if (_a)
+        a = _a->read(MemorySpace::DEVICE);
+
+    thrust::device_vector<double> _m(fs.h1_space().size(), 0.0);
     double *d_m = thrust::raw_pointer_cast(_m.data());
 
-    forall_1d(n_basis, n_faces, [=] __device__(int f) mutable -> void {
+    forall_1d(n_basis, n_faces, [=] __device__(int f) {
         const int k = threadIdx.x;
         const int fs_idx = I(k, f);
         const int fem_idx = K(fs_idx);
 
         const double ds = d_mesh.edge(face_indices(f)).measure();
-        double a = w(k) * ds;
-        if (d_a)
-            a *= d_a[fs_idx];
+        double m = w(k) * ds;
+        if (a)
+            m *= a(k, f);
 
-        atomicAdd(d_m + fem_idx, a);
+        atomicAdd(d_m + fem_idx, m);
     });
 
     return _m;
 }
 
-cuddh::FaceMassMatrix::FaceMassMatrix(const TraceSpace2D &fs, const double *d_a)
+cuddh::FaceMassMatrix::FaceMassMatrix(const TraceSpace2D &fs, const GridFunc2D<double> &a)
     : Operator<double>(fs.h1_space().size())
 {
-    _m = construct_face_mass(fs, d_a);
+    TraceFunc2D<double> tr_a = trace(fs, a);
+    _m = construct_face_mass(fs, &tr_a);
+}
+
+cuddh::FaceMassMatrix::FaceMassMatrix(const TraceSpace2D &fs) : Operator<double>(fs.h1_space().size())
+{
+    _m = construct_face_mass(fs, nullptr);
 }
 
 void cuddh::FaceMassMatrix::action(double c, const double *x, double *y) const

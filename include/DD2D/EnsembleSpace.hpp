@@ -25,6 +25,8 @@ namespace cuddh
         /// @brief returns the number of subspaces
         int size() const { return n_spaces; }
 
+        const H1Space2D &h1_space() const { return fem; }
+
         /// @brief returns the global indices of the subspace degrees of
         /// freedom. That is, global_indices(i, p) is the global index of the
         /// i-th degree of freedom of subspace p.
@@ -59,6 +61,11 @@ namespace cuddh
 
         /// @brief returns the maximum number of faces in any subspace.  That is, the maximum of n_faces.
         int max_n_faces() const { return mx_faces; }
+
+        /// @brief returns which side (0 or 1) of each boundary face belongs to each subdomain.
+        /// That is, face_sides(f, p) is 0 or 1, indicating connectivity.elements[face_sides(f,p)]
+        /// is the element in subdomain p for the f-th boundary face of subspace p.
+        const_imat_wrapper face_sides(MemorySpace m) const { return reshape(f_sides.read(m), mx_faces, n_spaces); }
 
         /// @brief returns the indices of subspace degrees of freedom
         /// corresponding to the local element degrees of freedom. Namely,
@@ -95,6 +102,8 @@ namespace cuddh
         auto connectivity_map(MemorySpace m) const { return reshape(cmap.read(m), n_shared_dofs); }
 
     private:
+        const H1Space2D &fem;
+
         const int n_spaces;
         const int n_basis;
         int mx_elems;
@@ -112,6 +121,7 @@ namespace cuddh
         host_device_ivec sI;
         host_device_ivec fI;
         host_device_ivec s_fdof;
+        host_device_ivec f_sides;
         HostDeviceArray<LambdaDof> cmap;
     };
 

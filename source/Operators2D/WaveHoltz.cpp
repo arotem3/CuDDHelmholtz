@@ -2,25 +2,54 @@
 
 using namespace cuddh;
 
-WaveHoltz::WaveHoltz(double omega, double maxvel, const double *a2x, const double *ax, const H1Space2D &fem,
-                     const TraceSpace2D &fs)
+static int compute_nt(double omega, double h, double p, const GridFunc2D<double> *a)
+{
+    double T = 2.0 * M_PI / omega;
+    double maxvel = 1.0;
+    if (a)
+    {
+        auto aview = a->read(MemorySpace::HOST);
+        maxvel = 1.0 / *std::min_element(aview.begin(), aview.end());
+    }
+    double dt = 2.0 * h / (p * p * maxvel);
+    return std::max<int>(std::ceil(T / dt), 5);
+}
+
+static double compute_shift(int nt)
+{
+    double tan = std::tan(M_PI / nt);
+    return 0.25 - 0.25 * tan * tan;
+}
+
+static GridFunc2D<double> square(const GridFunc2D<double> &a)
+{
+    return a.transform([] __device__(double x) -> double { return x * x; });
+}
+
+WaveHoltz::WaveHoltz(const H1Space2D &fem, const TraceSpace2D &fs, double omega)
     : Operator<double>(2 * fem.size()),
-      omega(omega),
+      omega{omega},
       stiffness(fem),
-      mass(fem, a2x),
-      face_mass(fs, ax),
+      mass(fem),
+      face_mass(fs),
       acc(fem.size()),
       w(this->ndof())
 {
-    double T = 2.0 * M_PI / omega;
-    double p = fem.basis().size();
-    double dt = 2.0 * fem.mesh().h() / (p * p * maxvel); // CFL condition
+    nt = compute_nt(omega, fem.mesh().h(), fem.basis().size(), nullptr);
+    shift = compute_shift(nt);
+}
 
-    nt = std::max(std::ceil(T / dt), 5.0);
-    dt = T / nt;
-
-    double tan = std::tan(M_PI / nt);
-    shift = 0.25 - 0.25 * tan * tan;
+WaveHoltz::WaveHoltz(const H1Space2D &fem, const TraceSpace2D &fs, double omega, const GridFunc2D<double> &a)
+    : Operator<double>(2 * fem.size()),
+      omega{omega},
+      stiffness(fem),
+      mass(fem, square(a)),
+      face_mass(fs, a),
+      acc(fem.size()),
+      w(this->ndof())
+{
+    nt = compute_nt(omega, fem.mesh().h(), fem.basis().size(), &a);
+    shift = compute_shift(nt);
 }
 
 void WaveHoltz::action(double c, const double *x, double *y) const

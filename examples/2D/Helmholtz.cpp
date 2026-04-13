@@ -63,10 +63,10 @@ __device__ static double f(const double2 X, double omega)
 __device__ static double a(const double2 X)
 {
     const auto [x, y] = X;
-    const double r = x * x + y * y;
+    const double r = std::max(std::abs(x), std::abs(y));
 
-    if (r < 0.0625)
-        return 0.2;
+    if (r < 0.5)
+        return 0.5;
     else
         return 1.0;
 }
@@ -120,33 +120,19 @@ int main(int argc, char *argv[])
     H1Space2D fem(mesh, basis);
     const int ndof = fem.size(); // # of degrees of freedom
 
+    // The TraceSpace2D is a subspace of the H1Space2D where we apply the boundary conditions
+    ivec boundary_faces = mesh.boundary_edges();
+    TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
+
+    auto coef = gridfunc(fem, [] __device__(double2 x) -> double { return a(x); });
+
     std::cout << "Solving the Helmholtz equation...\n"
               << "\tomega = " << omega << "\n"
               << "\t#elements = " << mesh.n_elem() << "\n"
               << "\tpolynomial degree = " << deg << "\n"
               << "\t#dof = " << 2 * ndof << "\n";
 
-    auto A = [&]() -> Helmholtz {
-        // identify the boundary faces in the mesh in order to define the TraceSpace2D
-        // and FaceMassMatrix
-        ivec boundary_faces = mesh.boundary_edges();
-
-        // The TraceSpace2D is a subspace of the H1Space2D used to identify the degrees
-        // of freedom needed in the computation of trace terms: <u, phi>
-        TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
-
-        auto a2x = gridfunc(fem, [] __device__(const double2 X) -> double {
-            double aX = a(X);
-            return aX * aX;
-        });
-
-        auto ax = trace(fs, [] __device__(const double2 X) -> double { return a(X); });
-
-        double *d_a2 = thrust::raw_pointer_cast(a2x.data()); // a^2(x) projected onto H1Space2D
-        double *d_a = thrust::raw_pointer_cast(ax.data());   // a(x) projected onto TraceSpace2D
-
-        return Helmholtz(omega, d_a2, d_a, fem, fs);
-    }();
+    Helmholtz A(fem, fs, omega, coef);
 
     const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
 

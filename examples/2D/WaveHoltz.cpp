@@ -54,15 +54,13 @@ __device__ static double f(const double2 X, double omega)
 __device__ static double alpha(const double2 X)
 {
     const auto [x, y] = X;
-    const double r = x * x + y * y;
+    const double r = std::max(std::abs(x), std::abs(y));
 
-    if (r < 0.0625)
-        return 0.2;
+    if (r < 0.5)
+        return 0.5;
     else
         return 1.0;
 }
-
-constexpr double maxvel = 5.0; // maximum reciprocal of alpha
 
 int main(int argc, char *argv[])
 {
@@ -118,25 +116,15 @@ int main(int argc, char *argv[])
     // Combine the mesh and basis functions in H1Space2D to define the total global degrees of freedom
     H1Space2D fem(mesh, basis);
 
+    ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
+    TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
+
     const int ndof = fem.size(); // number of degrees of freedom
     const int N = 2 * ndof;      // total degrees of freedom in [u, v] (U := u + i v)
 
-    auto W = [&]() -> WaveHoltz {
-        ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
-        TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
+    auto a = gridfunc(fem, [] __device__(double2 x) -> double { return alpha(x); });
 
-        auto a2 = gridfunc(fem, [] __device__(const double2 X) -> double {
-            double aX = alpha(X);
-            return aX * aX;
-        });
-
-        auto a = trace(fs, [] __device__(const double2 X) -> double { return alpha(X); });
-
-        auto d_a2 = thrust::raw_pointer_cast(a2.data());
-        auto d_a = thrust::raw_pointer_cast(a.data());
-
-        return WaveHoltz(omega, maxvel, d_a2, d_a, fem, fs);
-    }();
+    WaveHoltz W(fem, fs, omega, a);
 
     thrust::universal_vector<double> U(N, 0.0), B(N, 0.0), GB(N, 0.0);
 
@@ -160,20 +148,7 @@ int main(int argc, char *argv[])
         thrust::universal_vector<double> Res(N);
         double *res = thrust::raw_pointer_cast(Res.data());
 
-        ivec boundary_faces = mesh.boundary_edges();
-        TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
-
-        auto a2 = gridfunc(fem, [] __device__(const double2 X) -> double {
-            double aX = alpha(X);
-            return aX * aX;
-        });
-
-        auto a = trace(fs, [] __device__(const double2 X) -> double { return alpha(X); });
-
-        auto d_a2 = thrust::raw_pointer_cast(a2.data());
-        auto d_a = thrust::raw_pointer_cast(a.data());
-
-        Helmholtz A(omega, d_a2, d_a, fem, fs);
+        Helmholtz A(fem, fs, omega, a);
         A.action(u, res);                 // compute residuals
         dla::axpby(N, -1.0, b, 1.0, res); // res = A U - b
 

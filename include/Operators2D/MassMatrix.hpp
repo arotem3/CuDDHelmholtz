@@ -1,6 +1,7 @@
 #ifndef CUDDH_MASS_MATRIX_HPP
 #define CUDDH_MASS_MATRIX_HPP
 
+#include "FEM2D/GridFunc2D.hpp"
 #include "FEM2D/H1Space2D.hpp"
 #include "HostDeviceArray.hpp"
 #include "forall.hpp"
@@ -12,22 +13,29 @@ namespace cuddh
     class MassMatrix : public Operator<double>
     {
     public:
-        /// @brief initialize weighted mass matrix m(u, v) = (a(x)*u, v)
-        /// @param a DEVICE. H1Space2D vector representing the function a.
-        /// @param fem
-        MassMatrix(const H1Space2D &fem, const double *a = nullptr);
+        /**
+         * @brief Construct a new Mass Matrix m(u, v) = (a(x) * u, v)
+         *
+         * @param fem
+         * @param a variable coefficient
+         */
+        MassMatrix(const H1Space2D &fem, const GridFunc2D<double> &a);
+        MassMatrix(const H1Space2D &fem);
 
         /// @brief y <- y + c * M*x, where M is the mass matrix
         void action(double c, const double *x, double *y) const override;
 
         void action(const double *x, double *y) const override;
 
-        // returns the mass matrix as a dvec_wrapper of managed memory
-        VectorWrapper<const double> to_device() const { return reshape(_m, _m.size()); }
+        // returns the mass matrix as a dvec_wrapper of device memory
+        VectorWrapper<const double> to_device() const
+        {
+            return reshape(thrust::raw_pointer_cast(_m.data()), _m.size());
+        }
 
     private:
         const H1Space2D &fem;
-        thrust::universal_vector<double> _m;
+        thrust::device_vector<double> _m;
 
         template <typename Func>
         friend void l2_project(double *d_F, const MassMatrix &M, const Func &f);

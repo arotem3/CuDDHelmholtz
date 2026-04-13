@@ -32,12 +32,14 @@ static void accuracy_test(TestLogger &summary, const Mesh2D &mesh, const Basis &
 
     host_device_dvec _Af(ndof);
     host_device_dvec _Lf(ndof);
+    host_device_dvec _f(ndof);
 
     double *Af = _Af.device_write();
     double *Lf = _Lf.device_write();
+    double *f = _f.device_write();
 
-    auto _f = gridfunc(fem, [=] __device__(double2 x) { return func(x); });
-    double *f = thrust::raw_pointer_cast(_f.data());
+    auto X = fem.physical_coordinates(MemorySpace::DEVICE);
+    forall(ndof, [=] __device__(int i) mutable { f[i] = func(X(i)); });
 
     l2_project(Lf, MassMatrix(fem), [=] __device__(double2 x) { return L(x); });
 
