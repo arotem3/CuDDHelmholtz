@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <type_traits>
+#include <vector>
 
 #include "test_common.hpp"
 
@@ -41,6 +42,8 @@ static void test_axpby(TestLogger &summary)
         h_y[i] = static_cast<T>(rand()) / static_cast<T>(RAND_MAX) - static_cast<T>(0.2);
     }
 
+    std::vector<T> y_initial(h_y, h_y + n);
+
     const T *d_x = x.device_read();
     T *d_y = y.device_read_write();
 
@@ -49,13 +52,12 @@ static void test_axpby(TestLogger &summary)
 
     dla::axpby(n, a, d_x, b, d_y);
 
-    h_y = y.host_release();
     const T *h_y_result = y.host_read();
 
     T max_error = static_cast<T>(0.0);
     for (int i = 0; i < n; ++i)
     {
-        const T expected = b * h_y[i] + a * h_x[i];
+        const T expected = b * y_initial[i] + a * h_x[i];
         max_error = std::max(max_error, std::abs(h_y_result[i] - expected));
     }
 
@@ -65,8 +67,6 @@ static void test_axpby(TestLogger &summary)
     else
         summary.fail(std::format("linalg axpby ({})", type_name<T>()),
                      std::format("max error {} exceeds tolerance {}", max_error, tol));
-
-    delete[] h_y;
 }
 
 template <typename T>
@@ -175,18 +175,19 @@ static void test_scal(TestLogger &summary)
     for (int i = 0; i < n; ++i)
         h_x[i] = static_cast<T>(rand()) / static_cast<T>(RAND_MAX) - static_cast<T>(0.2);
 
+    std::vector<T> x_initial(h_x, h_x + n);
+
     const T a = static_cast<T>(M_PI);
     T *d_x = x.device_read_write();
     dla::scal(n, a, d_x);
 
-    h_x = x.host_release();
     const T *h_result = x.host_read();
 
     const T tol = tolerance<T>() * static_cast<T>(10);
     bool is_correct = true;
     for (int i = 0; i < n; ++i)
     {
-        if (std::abs(h_result[i] - a * h_x[i]) > tol)
+        if (std::abs(h_result[i] - a * x_initial[i]) > tol)
         {
             is_correct = false;
             break;
@@ -197,8 +198,6 @@ static void test_scal(TestLogger &summary)
         summary.pass(std::format("linalg scal ({})", type_name<T>()));
     else
         summary.fail(std::format("linalg scal ({})", type_name<T>()), "scaled vector does not match expected result");
-
-    delete[] h_x;
 }
 
 template <typename T>
