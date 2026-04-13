@@ -13,6 +13,7 @@
 #include "include/DD3D/DDMassMatrix3D.hpp"
 #include "include/DD3D/DDStiffnessMatrix3D.hpp"
 #include "include/DD3D/EnsembleSpace3D.hpp"
+#include "include/FEM2D/GridFunc2D.hpp"
 #include "include/FEM2D/H1Space2D.hpp"
 #include "include/FixedTensorWrapper.hpp"
 #include "include/H1Space3D.hpp"

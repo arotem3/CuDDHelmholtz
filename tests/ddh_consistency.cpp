@@ -20,11 +20,12 @@ static void test_operator_consistency(TestLogger &summary, std::string_view prec
     EnsembleSpace efem = partition_uniform_rect(fem, {N, N}, {8, 8});
 
     const scalar_t a_val = static_cast<scalar_t>(1.5);
-    thrust::universal_vector<double> h_a(fem.size(), double(a_val));
-    double *d_a = thrust::raw_pointer_cast(h_a.data());
+    GridFunc2D<double> a(fem);
+    auto h_a = a.write(MemorySpace::HOST);
+    std::fill(h_a.begin(), h_a.end(), a_val);
 
-    DDSubstructuredOperator<scalar_t, SubdomainSolver::WaveHoltz> F_wh(omega, d_a, fem, efem);
-    DDSubstructuredOperator<scalar_t, SubdomainSolver::MINRES> F_mr(omega, d_a, fem, efem);
+    DDSubstructuredOperator<scalar_t, SubdomainSolver::WaveHoltz> F_wh(efem, omega, a);
+    DDSubstructuredOperator<scalar_t, SubdomainSolver::MINRES> F_mr(efem, omega, a);
 
     const int n = F_wh.ndof();
 
@@ -70,11 +71,12 @@ static void test_rhs_evaluation(TestLogger &summary, std::string_view precision,
     EnsembleSpace efem = partition_uniform_rect(fem, {N, N}, {8, 8});
 
     const scalar_t a_val = static_cast<scalar_t>(1.5);
-    thrust::universal_vector<double> h_a(fem.size(), double(a_val));
-    double *d_a = thrust::raw_pointer_cast(h_a.data());
+    GridFunc2D<double> a(fem);
+    auto h_a = a.write(MemorySpace::HOST);
+    std::fill(h_a.begin(), h_a.end(), a_val);
 
-    DDSubstructuredOperator<scalar_t, SubdomainSolver::WaveHoltz> F_wh(omega, d_a, fem, efem);
-    DDSubstructuredOperator<scalar_t, SubdomainSolver::MINRES> F_mr(omega, d_a, fem, efem);
+    DDSubstructuredOperator<scalar_t, SubdomainSolver::WaveHoltz> F_wh(efem, omega, a);
+    DDSubstructuredOperator<scalar_t, SubdomainSolver::MINRES> F_mr(efem, omega, a);
 
     int n_dof = fem.size();
     int n_lambda = F_wh.ndof();
@@ -121,11 +123,12 @@ static void test_postprocessing(TestLogger &summary, std::string_view precision,
     EnsembleSpace efem = partition_uniform_rect(fem, {N, N}, {8, 8});
 
     const scalar_t a_val = static_cast<scalar_t>(1.5);
-    thrust::universal_vector<double> h_a(fem.size(), double(a_val));
-    double *d_a = thrust::raw_pointer_cast(h_a.data());
+    GridFunc2D<double> a(fem);
+    auto h_a = a.write(MemorySpace::HOST);
+    std::fill(h_a.begin(), h_a.end(), a_val);
 
-    DDSubstructuredOperator<scalar_t, SubdomainSolver::WaveHoltz> F_wh(omega, d_a, fem, efem);
-    DDSubstructuredOperator<scalar_t, SubdomainSolver::MINRES> F_mr(omega, d_a, fem, efem);
+    DDSubstructuredOperator<scalar_t, SubdomainSolver::WaveHoltz> F_wh(efem, omega, a);
+    DDSubstructuredOperator<scalar_t, SubdomainSolver::MINRES> F_mr(efem, omega, a);
 
     int n_dof = fem.size();
     int n_lambda = F_wh.ndof();

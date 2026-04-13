@@ -1,3 +1,4 @@
+#include "DD2D/DDTraceFunc2D.hpp"
 #include "DDHKernelImpl.hpp"
 
 using namespace cuddh;
@@ -8,70 +9,23 @@ struct MakeSolverData;
 template <typename scalar_t>
 struct MakeSolverData<scalar_t, SubdomainSolver::WaveHoltz>
 {
-    static DDSolverData<scalar_t, SubdomainSolver::WaveHoltz> make(double omega, const double *h_a,
-                                                                   const H1Space2D &fem, const EnsembleSpace &efem,
-                                                                   int wh_iters)
+    static DDSolverData<scalar_t, SubdomainSolver::WaveHoltz> make(double omega, const GridFunc2D<double> &a,
+                                                                   const EnsembleSpace &efem, int wh_iters)
     {
         cuddh_verify(wh_iters != 0,
                      printf("DDH error: waveholtz_iterations must be positive or -1 for residual-based stopping.\n"));
-        return {make_DDWaveHoltz_2d<scalar_t>(scalar_t(omega), h_a, fem, efem), wh_iters};
+        return {make_DDWaveHoltz_2d<scalar_t>(efem, scalar_t(omega), &a), wh_iters};
     }
 };
 
 template <typename scalar_t>
 struct MakeSolverData<scalar_t, SubdomainSolver::MINRES>
 {
-    static DDSolverData<scalar_t, SubdomainSolver::MINRES> make(double omega, const double *h_a, const H1Space2D &fem,
+    static DDSolverData<scalar_t, SubdomainSolver::MINRES> make(double omega, const GridFunc2D<double> &a,
                                                                 const EnsembleSpace &efem, int /*wh_iters*/)
     {
-        const int mx_dof = efem.max_size();
-        const int mx_fdof = efem.max_fsize();
-        const int n_domains = efem.size();
-
-        DDMassMatrix<scalar_t> raw_M(fem, efem);
-        DDFaceMassMatrix<scalar_t> raw_H(fem, efem);
-
-        auto m_raw = raw_M.to_device(); // shape [mx_dof,  n_domains]
-        auto h_raw = raw_H.to_device(); // shape [mx_fdof, n_domains]
-        auto gI = efem.global_indices(MemorySpace::DEVICE);
-        auto sizes = efem.sizes(MemorySpace::DEVICE);
-        auto fsizes = efem.fsizes(MemorySpace::DEVICE);
-
-        HostDeviceArray<scalar_t> scaled_mass(mx_dof * n_domains);
-        {
-            auto sm = reshape(scaled_mass.device_write(), mx_dof, n_domains);
-            const double *d_a = h_a;
-            forall(mx_dof * n_domains, [=] __device__(int tid) mutable {
-                int subsp = tid / mx_dof;
-                int i = tid % mx_dof;
-                if (i >= sizes(subsp))
-                {
-                    sm(i, subsp) = scalar_t(0);
-                    return;
-                }
-                scalar_t ai = static_cast<scalar_t>(d_a[gI(i, subsp)]);
-                sm(i, subsp) = ai * ai * m_raw(i, subsp);
-            });
-        }
-
-        HostDeviceArray<scalar_t> scaled_face_mass(mx_fdof * n_domains);
-        {
-            auto sfm = reshape(scaled_face_mass.device_write(), mx_fdof, n_domains);
-            const double *d_a = h_a;
-            forall(mx_fdof * n_domains, [=] __device__(int tid) mutable {
-                int subsp = tid / mx_fdof;
-                int i = tid % mx_fdof;
-                if (i >= fsizes(subsp))
-                {
-                    sfm(i, subsp) = scalar_t(0);
-                    return;
-                }
-                scalar_t ai = static_cast<scalar_t>(d_a[gI(i, subsp)]);
-                sfm(i, subsp) = ai * h_raw(i, subsp);
-            });
-        }
-
-        return {std::move(scaled_mass), std::move(scaled_face_mass), scalar_t(omega)};
+        GridFunc2D<double> a2 = a.transform([] __device__(double x) -> double { return x * x; });
+        return {DDMassMatrix<scalar_t>(efem, a2), DDFaceMassMatrix<scalar_t>(efem, a), scalar_t(omega)};
     }
 };
 
@@ -82,13 +36,12 @@ static constexpr __device__ int2 get_indices(int t, int2 dims)
 
 template <typename scalar_t>
 static int lambda_dofs(thrust::device_vector<LambdaDOFData<scalar_t>> &B, const EnsembleSpace &efem, double omega,
-                       VectorWrapper<const double> a)
+                       TensorWrapper<2, const double> a_face)
 {
     const int n_domains = efem.size();
     const int mx_fdof = efem.max_fsize();
 
     auto cmap = efem.connectivity_map(MemorySpace::HOST);
-    auto gI = efem.global_indices(MemorySpace::HOST);
     const int n_shared = cmap.shape(0);
 
     thrust::host_vector<LambdaDOFData<scalar_t>> h_B(2 * mx_fdof * n_domains, LambdaDOFData<scalar_t>{});
@@ -99,6 +52,10 @@ static int lambda_dofs(thrust::device_vector<LambdaDOFData<scalar_t>> &B, const 
     {
         const auto &dof = cmap(k);
 
+        const scalar_t T0 = omega * a_face(dof.local_dof_indices[0], dof.subspaces[0]) * dof.face_mass;
+        const scalar_t T1 = omega * a_face(dof.local_dof_indices[1], dof.subspaces[1]) * dof.face_mass;
+        const scalar_t T = std::sqrt(T0 + T1);
+
         for (const int s : {0, 1})
         {
             const int subspace = dof.subspaces[s];
@@ -108,8 +65,6 @@ static int lambda_dofs(thrust::device_vector<LambdaDOFData<scalar_t>> &B, const 
             {
                 if (b(o, face_index, subspace).i < 0)
                 {
-                    const scalar_t T = std::sqrt(2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass);
-
                     b(o, face_index, subspace) = LambdaDOFData<scalar_t>{
                         .i = (s == 0) ? k : n_shared + k, .j = (s == 0) ? n_shared + k : k, .trOp = T};
                     break;
@@ -122,11 +77,42 @@ static int lambda_dofs(thrust::device_vector<LambdaDOFData<scalar_t>> &B, const 
     return n_lambda;
 }
 
-template <typename scalar_t>
-static thrust::device_vector<scalar_t> partition_of_unity(const H1Space2D &fem, const EnsembleSpace &efem)
+static HostDeviceArray<double> face_dof_values(const EnsembleSpace &efem, const GridFunc2D<double> &a)
 {
-    MassMatrix M(fem);
-    DDMassMatrix<double> DDM(fem, efem);
+    const int nb = efem.h1_space().basis().size();
+    const int mx_n_faces = efem.max_n_faces();
+    const int mx_fdof = efem.max_fsize();
+    const int n_domains = efem.size();
+
+    DDTraceFunc2D<double> tr_a = subdomain_trace(efem, a);
+
+    auto d_n_faces = efem.n_faces(MemorySpace::DEVICE);
+    auto d_face_inds = efem.face_indices(MemorySpace::DEVICE);
+    auto d_tr_a = tr_a.read(MemorySpace::DEVICE);
+
+    HostDeviceArray<double> out(mx_fdof * n_domains);
+    auto a_face = reshape(out.device_write(), mx_fdof, n_domains);
+
+    forall_1d(nb, mx_n_faces * n_domains, [=] __device__(int tid) mutable {
+        const int i = threadIdx.x;
+        const int f = tid % mx_n_faces;
+        const int subsp = tid / mx_n_faces;
+
+        if (f >= d_n_faces(subsp))
+            return;
+
+        const int l = d_face_inds(i, f, subsp);
+        a_face(l, subsp) = d_tr_a(i, f, subsp);
+    });
+
+    return out;
+}
+
+template <typename scalar_t>
+static thrust::device_vector<scalar_t> partition_of_unity(const EnsembleSpace &efem)
+{
+    MassMatrix M(efem.h1_space());
+    DDMassMatrix<double> DDM(efem);
 
     auto d_m = M.to_device();
     auto d_ddm = DDM.to_device();
@@ -216,17 +202,16 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
 }
 
 template <typename scalar_t, SubdomainSolver Solver>
-DDSubstructuredOperator<scalar_t, Solver>::DDSubstructuredOperator(double omega, const double *h_a,
-                                                                   const H1Space2D &fem, const EnsembleSpace &efem,
-                                                                   DDKernelConfig config, int waveholtz_iterations)
+DDSubstructuredOperator<scalar_t, Solver>::DDSubstructuredOperator(const EnsembleSpace &efem, double omega,
+                                                                   const GridFunc2D<double> &a, DDKernelConfig config,
+                                                                   int waveholtz_iterations)
     : Operator<scalar_t>(0),
-      DDSolverData<scalar_t, Solver>{
-          MakeSolverData<scalar_t, Solver>::make(omega, h_a, fem, efem, waveholtz_iterations)},
-      g_ndof{fem.size()},
-      g_elem{fem.mesh().n_elem()},
-      n_basis{fem.basis().size()},
+      DDSolverData<scalar_t, Solver>{MakeSolverData<scalar_t, Solver>::make(omega, a, efem, waveholtz_iterations)},
+      g_ndof{efem.h1_space().size()},
+      g_elem{efem.h1_space().mesh().n_elem()},
+      n_basis{efem.h1_space().basis().size()},
       efem{efem},
-      S(fem, efem)
+      S(efem)
 {
     n_domains = efem.size();
     mx_fdof = efem.max_fsize();
@@ -241,9 +226,11 @@ DDSubstructuredOperator<scalar_t, Solver>::DDSubstructuredOperator(double omega,
         _work.resize(work_size);
     }
 
-    _partition_of_unity = partition_of_unity<scalar_t>(fem, efem);
+    _partition_of_unity = partition_of_unity<scalar_t>(efem);
     CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
-    n_lambda = lambda_dofs(_B, efem, omega, reshape(h_a, fem.size()));
+
+    HostDeviceArray<double> a_face = face_dof_values(efem, a);
+    n_lambda = lambda_dofs(_B, efem, omega, reshape(a_face.read(MemorySpace::HOST), mx_fdof, n_domains));
     this->set_size(2 * n_lambda);
 }
 
@@ -264,8 +251,8 @@ void DDSubstructuredOperator<scalar_t, Solver>::action(const double *fem_in, dou
     }
     else
     {
-        auto sm = reshape(this->scaled_mass.device_read(), mx_dof, n_domains);
-        auto sfm = reshape(this->scaled_face_mass.device_read(), mx_fdof, n_domains);
+        auto sm = this->mass.to_device();
+        auto sfm = this->face_mass.to_device();
         details::invoke_mr_kernel<scalar_t>(n_basis, kernel_config.tdof, bs, efem, g_ndof, n_lambda, B, S, punity, sm,
                                             sfm, this->omega, fem_in, fem_out, lambda_in, lambda_out, d_work);
     }

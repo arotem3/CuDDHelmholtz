@@ -19,6 +19,7 @@
 #include "DDSymmetrize.hpp"
 #include "DDWaveHoltz2D.hpp"
 #include "EnsembleSpace.hpp"
+#include "FEM2D/GridFunc2D.hpp"
 #include "HostDeviceArray.hpp"
 #include "LambdaDOFData.hpp"
 #include "LinearSolvers/minres.hpp"
@@ -52,8 +53,8 @@ namespace cuddh
     template <typename scalar_t>
     struct DDSolverData<scalar_t, SubdomainSolver::MINRES>
     {
-        HostDeviceArray<scalar_t> scaled_mass;
-        HostDeviceArray<scalar_t> scaled_face_mass;
+        DDMassMatrix<scalar_t> mass;
+        DDFaceMassMatrix<scalar_t> face_mass;
         scalar_t omega{};
     };
 
@@ -77,13 +78,13 @@ namespace cuddh
     public:
         /// @brief Initialize domain decomposition Helmholtz approximate solver.
         /// @param omega                Helmholtz frequency
-        /// @param h_a                  HOST ARRAY. Variable coefficient a(x)
+        /// @param a                    Variable coefficient a(x)
         /// @param fem                  H1Space2D on a uniform_rect mesh
         /// @param efem                 EnsembleSpace: uniform rectangular partition
         /// @param config               Kernel launch configuration
         /// @param waveholtz_iterations For WaveHoltz solver only: fixed number of
         ///                             iterations; -1 = residual-based stopping.
-        DDSubstructuredOperator(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem,
+        DDSubstructuredOperator(const EnsembleSpace &efem, double omega, const GridFunc2D<double> &a,
                                 DDKernelConfig config = {}, int waveholtz_iterations = -1);
 
         ~DDSubstructuredOperator() = default;
@@ -151,10 +152,10 @@ namespace cuddh
     class DDH : public Solver<double>
     {
     public:
-        DDH(double omega, const double *h_a, const H1Space2D &fem, const EnsembleSpace &efem,
-            DDKernelConfig kernel_config = {}, int waveholtz_iterations = -1)
-            : Solver<double>(2 * fem.size()),
-              F(omega, h_a, fem, efem, kernel_config, waveholtz_iterations),
+        DDH(const EnsembleSpace &efem, double omega, const GridFunc2D<double> &a, DDKernelConfig kernel_config = {},
+            int waveholtz_iterations = -1)
+            : Solver<double>(2 * efem.h1_space().size()),
+              F(efem, omega, a, kernel_config, waveholtz_iterations),
               solver(F),
               lambda(F.ndof()),
               Y(F.ndof())

@@ -18,9 +18,10 @@
 namespace cuddh
 {
     template <typename T>
-    DDWaveHoltz<T> make_DDWaveHoltz_2d(T omega, const double *a, const H1Space2D &fem, const EnsembleSpace &efem);
-    extern template DDWaveHoltz<float> make_DDWaveHoltz_2d<float>(float omega, const double *a, const H1Space2D &fem,
-                                                                  const EnsembleSpace &efem);
-    extern template DDWaveHoltz<double> make_DDWaveHoltz_2d<double>(double omega, const double *a, const H1Space2D &fem,
-                                                                    const EnsembleSpace &efem);
+    DDWaveHoltz<T> make_DDWaveHoltz_2d(const EnsembleSpace &efem, T omega, const GridFunc2D<double> *a = nullptr);
+
+    extern template DDWaveHoltz<float> make_DDWaveHoltz_2d<float>(const EnsembleSpace &efem, float omega,
+                                                                  const GridFunc2D<double> *a);
+    extern template DDWaveHoltz<double> make_DDWaveHoltz_2d<double>(const EnsembleSpace &efem, double omega,
+                                                                    const GridFunc2D<double> *a);
 } // namespace cuddh

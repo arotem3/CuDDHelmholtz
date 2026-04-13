@@ -1,6 +1,7 @@
 #pragma once
 
 #include "EnsembleSpace.hpp"
+#include "FEM2D/GridFunc2D.hpp"
 #include "HostDeviceArray.hpp"
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
@@ -15,7 +16,8 @@ namespace cuddh
                       "scalar_t must be float or double");
 
     public:
-        DDMassMatrix(const H1Space2D &fem, const EnsembleSpace &efem);
+        DDMassMatrix(const EnsembleSpace &efem);
+        DDMassMatrix(const EnsembleSpace &efem, const GridFunc2D<double> &a);
 
         auto to_device() const { return reshape(m.device_read(), mx_dofs, n_domains); }
 

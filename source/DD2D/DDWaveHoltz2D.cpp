@@ -8,21 +8,18 @@ static constexpr __device__ int2 get_indices(int t, int2 dims)
 }
 
 template <typename scalar_t>
-static HostDeviceArray<cuddh::scalar2<scalar_t>> make_alpha_beta(double theta, double sigma,
-                                                                 VectorWrapper<const double> a, const H1Space2D &fem,
-                                                                 const EnsembleSpace &efem)
+static HostDeviceArray<cuddh::scalar2<scalar_t>> make_alpha_beta(const EnsembleSpace &efem, double theta, double sigma,
+                                                                 const DDMassMatrix<scalar_t> &M,
+                                                                 const DDFaceMassMatrix<scalar_t> &H)
 {
-    DDMassMatrix<scalar_t> M(fem, efem);
-    DDFaceMassMatrix<scalar_t> H(fem, efem);
-
     auto m = M.to_device();
     auto h = H.to_device();
 
     const int n_domains = efem.size();
     const int mx_dof = efem.max_size();
 
-    auto s_dof = efem.sizes(MemorySpace::DEVICE);   // number of subdomain degrees of freedom
-    auto s_fdof = efem.fsizes(MemorySpace::DEVICE); // number of face space degrees of freedom
+    auto s_dof = efem.sizes(MemorySpace::DEVICE);
+    auto s_fdof = efem.fsizes(MemorySpace::DEVICE);
     auto gI = efem.global_indices(MemorySpace::DEVICE);
 
     HostDeviceArray<cuddh::scalar2<scalar_t>> ab(mx_dof * n_domains);
@@ -31,18 +28,14 @@ static HostDeviceArray<cuddh::scalar2<scalar_t>> make_alpha_beta(double theta, d
     forall(mx_dof * n_domains, [=] __device__(int tid) mutable {
         const auto [i, subsp] = get_indices(tid, {mx_dof, n_domains});
 
-        const int ndof = s_dof(subsp);  // dimension of subspace
-        const int fdof = s_fdof(subsp); // dimension of facespace
+        const int ndof = s_dof(subsp);
+        const int fdof = s_fdof(subsp);
 
         if (i >= ndof)
             return;
 
-        scalar_t ai = a(gI(i, subsp));
         scalar_t Mi = m(i, subsp);
         scalar_t Hi = (i < fdof) ? h(i, subsp) : 0;
-
-        Hi *= ai;
-        Mi *= ai * ai;
 
         scalar_t inv = 1 / (Mi + theta * Hi);
         scalar_t alpha = (Mi - theta * Hi) * inv;
@@ -54,22 +47,28 @@ static HostDeviceArray<cuddh::scalar2<scalar_t>> make_alpha_beta(double theta, d
     return ab;
 }
 
+static double compute_dt(double h, double p, const GridFunc2D<double> *a)
+{
+    double reciprocal_max_vel = 1.0;
+    if (a)
+    {
+        auto cinv = a->read(MemorySpace::DEVICE);
+        auto begin = thrust::device_pointer_cast(cinv.data());
+        reciprocal_max_vel = *thrust::min_element(begin, begin + cinv.size());
+    }
+
+    return 2.0 * reciprocal_max_vel * h / (p * p);
+}
+
 template <typename scalar_t>
-DDWaveHoltz<scalar_t> cuddh::make_DDWaveHoltz_2d(scalar_t omega, const double *a, const H1Space2D &fem,
-                                                 const EnsembleSpace &efem)
+DDWaveHoltz<scalar_t> cuddh::make_DDWaveHoltz_2d(const EnsembleSpace &efem, scalar_t omega, const GridFunc2D<double> *a)
 {
     DDWaveHoltz<scalar_t> W;
     W.n_domains = efem.size();
     W.mx_ndof = efem.max_size();
     W.omega = omega;
 
-    double dt = [&]() {
-        const int n_basis = fem.basis().size();
-        const double h = fem.mesh().h();
-        auto begin = thrust::device_pointer_cast(a);
-        const double reciprocal_max_vel = *thrust::min_element(begin, begin + fem.size());
-        return dt = 2.0 * reciprocal_max_vel * h / (n_basis * n_basis);
-    }();
+    double dt = compute_dt(efem.h1_space().mesh().h(), efem.h1_space().basis().size(), a);
 
     const double T = 2 * M_PI / omega;
     W.nt = std::ceil(T / dt);
@@ -87,15 +86,21 @@ DDWaveHoltz<scalar_t> cuddh::make_DDWaveHoltz_2d(scalar_t omega, const double *a
     const double theta = tn / omega;
     W.sigma = W.S / (0.5 * omega);
 
-    W.alpha_beta = make_alpha_beta<scalar_t>(theta, W.sigma, reshape(a, fem.size()), fem, efem);
+    std::unique_ptr<GridFunc2D<double>> a2;
+    if (a)
+        a2 = std::make_unique<GridFunc2D<double>>(a->transform([] __device__(double x) -> double { return x * x; }));
+
+    auto M = (a) ? DDMassMatrix<scalar_t>(efem, *a2) : DDMassMatrix<scalar_t>(efem);
+    auto H = (a) ? DDFaceMassMatrix<scalar_t>(efem, *a) : DDFaceMassMatrix<scalar_t>(efem);
+    W.alpha_beta = make_alpha_beta<scalar_t>(efem, theta, W.sigma, M, H);
 
     return W;
 }
 
 namespace cuddh
 {
-    template DDWaveHoltz<float> make_DDWaveHoltz_2d<float>(float omega, const double *a, const H1Space2D &fem,
-                                                           const EnsembleSpace &efem);
-    template DDWaveHoltz<double> make_DDWaveHoltz_2d<double>(double omega, const double *a, const H1Space2D &fem,
-                                                             const EnsembleSpace &efem);
+    template DDWaveHoltz<float> make_DDWaveHoltz_2d<float>(const EnsembleSpace &efem, float omega,
+                                                           const GridFunc2D<double> *a);
+    template DDWaveHoltz<double> make_DDWaveHoltz_2d<double>(const EnsembleSpace &efem, double omega,
+                                                             const GridFunc2D<double> *a);
 } // namespace cuddh

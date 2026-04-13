@@ -67,10 +67,10 @@ __device__ static double f(const double2 X, double omega)
 __device__ static double alpha(const double2 X)
 {
     const auto [x, y] = X;
-    const double r = x * x + y * y;
+    const double r = max(abs(x), abs(y));
 
-    if (r < 0.0625)
-        return 0.2;
+    if (r < 0.5)
+        return 0.5;
     else
         return 1.0;
 }
@@ -152,16 +152,16 @@ int main(int argc, char *argv[])
     EnsembleSpace efem = partition_uniform_rect(fem, {nx, ny}, {8, 8});
 
     const int ndof = fem.size(); // # of degrees of freedom
+    const int N = 2 * ndof;      // total degrees of freedom in [u, v] (U := u + i v)
 
-    const int N = 2 * ndof; // total degrees of freedom in [u, v] (U := u + i v)
+    // variable coefficient
+    auto a = gridfunc(fem, [] __device__(const double2 X) -> double { return alpha(X); });
 
-    auto ddh = [&]() -> std::unique_ptr<Solver<double>> {
-        auto a = gridfunc(fem, [] __device__(const double2 X) -> double { return alpha(X); });
-        double *d_a = thrust::raw_pointer_cast(a.data());
+    auto ddsolver = [&]() -> std::unique_ptr<Solver<double>> {
         if (subsolver == "minres")
-            return std::make_unique<DDH<float, SubdomainSolver::MINRES>>(omega, d_a, fem, efem, config);
+            return std::make_unique<DDH<float, SubdomainSolver::MINRES>>(efem, omega, a, config);
         else
-            return std::make_unique<DDH<float>>(omega, d_a, fem, efem, config);
+            return std::make_unique<DDH<float>>(efem, omega, a, config);
     }();
 
     thrust::universal_vector<double> U(N, 0.0);
@@ -182,25 +182,16 @@ int main(int argc, char *argv[])
               << "\t#subdomains = " << efem.size() << "\n"
               << "\tmax #elements / subdomain = " << efem.max_n_elem() << "\n"
               << "\tmax #dof / subdomain = " << efem.max_size() << "\n"
-              << "\tkernel = {" << get_kernel_str(ddh) << "}\n"
-              << "\t#lambda = " << get_n_lambda(ddh) << std::endl;
+              << "\tkernel = {" << get_kernel_str(ddsolver) << "}\n"
+              << "\t#lambda = " << get_n_lambda(ddsolver) << std::endl;
 
-    auto out = ddh->solve(u, b, opts);
+    auto out = ddsolver->solve(u, b, opts);
 
     double res = [&]() -> double {
         ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
         TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
 
-        auto a2 = gridfunc(fem, [] __device__(const double2 X) -> double {
-            double ax = alpha(X);
-            return ax * ax;
-        });
-        double *d_a2 = thrust::raw_pointer_cast(a2.data()); // variable coefficient projected onto H1Space2D
-
-        auto a = trace(fs, [] __device__(const double2 X) -> double { return alpha(X); });
-        double *d_a = thrust::raw_pointer_cast(a.data()); // variable coefficient projected onto TraceSpace2D
-
-        Helmholtz A(omega, d_a2, d_a, fem, fs);
+        Helmholtz A(fem, fs, omega, a);
 
         thrust::universal_vector<double> _Au(N, 0.0);
         auto Au = thrust::raw_pointer_cast(_Au.data());

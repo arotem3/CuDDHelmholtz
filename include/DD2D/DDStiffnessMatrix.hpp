@@ -63,7 +63,7 @@ namespace cuddh
     public:
         using sym2x2 = SmallSymmetricMatrix<scalar_t, 2>;
 
-        DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem);
+        DDStiffnessMatrix(const EnsembleSpace &efem);
 
         DeviceDDStiffnessMatrix<scalar_t> to_device() const
         {

@@ -11,10 +11,10 @@ static void make_diffmat(scalar_t *h_D, const Basis &basis)
 }
 
 template <typename scalar_t>
-static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D &fem, const EnsembleSpace &efem)
+static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const EnsembleSpace &efem)
 {
-    const Mesh2D &mesh = fem.mesh();
-    const Basis &basis = fem.basis();
+    const Mesh2D &mesh = efem.h1_space().mesh();
+    const Basis &basis = efem.h1_space().basis();
     const QuadratureRule &q = basis.quadrature();
 
     const int n_basis = basis.size();
@@ -57,15 +57,15 @@ static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const H1Space2D
 }
 
 template <typename scalar_t>
-DDStiffnessMatrix<scalar_t>::DDStiffnessMatrix(const H1Space2D &fem, const EnsembleSpace &efem)
-    : n_basis(fem.basis().size()),
+DDStiffnessMatrix<scalar_t>::DDStiffnessMatrix(const EnsembleSpace &efem)
+    : n_basis(efem.h1_space().basis().size()),
       mx_elem(efem.max_n_elem()),
       n_domains(efem.size()),
       d(n_basis * n_basis),
       g(n_basis * n_basis * mx_elem * n_domains)
 {
-    make_diffmat<scalar_t>(d.host_write(), fem.basis());
-    geom_factors<scalar_t>(g.device_write(), fem, efem);
+    make_diffmat<scalar_t>(d.host_write(), efem.h1_space().basis());
+    geom_factors<scalar_t>(g.device_write(), efem);
     d_I = efem.subspace_indices(MemorySpace::DEVICE);
 }
 

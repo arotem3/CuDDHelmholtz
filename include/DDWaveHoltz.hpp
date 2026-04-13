@@ -2,6 +2,7 @@
 
 #include "DD2D/EnsembleSpace.hpp"
 #include "DD3D/EnsembleSpace3D.hpp"
+#include "FEM2D/GridFunc2D.hpp"
 #include "cxmult.hpp"
 
 namespace cuddh
@@ -178,8 +179,7 @@ namespace cuddh
                                                   const EnsembleSpace3D &efem);
 
         template <typename T>
-        friend DDWaveHoltz<T> make_DDWaveHoltz_2d(T omega, const double *a, const H1Space2D &fem,
-                                                  const EnsembleSpace &efem);
+        friend DDWaveHoltz<T> make_DDWaveHoltz_2d(const EnsembleSpace &efem, T omega, const GridFunc2D<double> *a);
 
     private:
         int n_domains;
