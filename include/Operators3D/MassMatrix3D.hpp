@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-#include "H1Space3D.hpp"
+#include "FEM3D/H1Space3D.hpp"
 #include "HostDeviceArray.hpp"
 #include "Operator.hpp"
 #include "forall.hpp"
