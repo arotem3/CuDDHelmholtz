@@ -1,4 +1,5 @@
 #include "DD3D/DDStiffnessMatrix3D.hpp"
+
 #include "forall.hpp"
 
 using namespace cuddh;
@@ -16,13 +17,12 @@ static thrust::device_vector<scalar_t> make_diffmat(const Basis &basis)
 }
 
 template <typename scalar_t>
-static thrust::device_vector<SmallSymmetricMatrix<scalar_t, 3>> geom_factors(const H1Space3D &fem,
-                                                                             const EnsembleSpace3D &efem)
+static thrust::device_vector<SmallSymmetricMatrix<scalar_t, 3>> geom_factors(const EnsembleSpace3D &efem)
 {
     using mat_t = SmallSymmetricMatrix<scalar_t, 3>;
 
-    const DeviceMesh3D &mesh = fem.mesh().to_device();
-    const Basis &basis = fem.basis();
+    const DeviceMesh3D &mesh = efem.h1_space().mesh().to_device();
+    const Basis &basis = efem.h1_space().basis();
     const QuadratureRule &q = basis.quadrature();
 
     const int n_basis = basis.size();
@@ -85,11 +85,11 @@ static thrust::device_vector<SmallSymmetricMatrix<scalar_t, 3>> geom_factors(con
 }
 
 template <typename scalar_t>
-DDStiffnessMatrix3D<scalar_t>::DDStiffnessMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem)
-    : n_basis(fem.basis().size()), mx_elem(efem.max_n_elem()), n_domains(efem.size())
+DDStiffnessMatrix3D<scalar_t>::DDStiffnessMatrix3D(const EnsembleSpace3D &efem)
+    : n_basis(efem.h1_space().basis().size()), mx_elem(efem.max_n_elem()), n_domains(efem.size())
 {
-    d = make_diffmat<scalar_t>(fem.basis());
-    g = geom_factors<scalar_t>(fem, efem);
+    d = make_diffmat<scalar_t>(efem.h1_space().basis());
+    g = geom_factors<scalar_t>(efem);
     d_I = efem.subspace_indices(MemorySpace::DEVICE);
 }
 

@@ -6,7 +6,6 @@
 
 #include "DD2D.hpp"
 #include "FEM2D/H1Space2D.hpp"
-#include "LambdaDof.hpp"
 #include "Tensor.hpp"
 
 namespace cuddh
@@ -42,6 +41,12 @@ namespace cuddh
         /// @brief returns the elements in each subspace. That is elements(el, p)
         /// is the element index of the el-th element in subspace p.
         const_imat_wrapper elements(MemorySpace m) const { return reshape(elems.read(m), mx_elems, n_spaces); }
+
+        /// @brief returns the subdomain label for each global element.
+        const_ivec_wrapper element_labels(MemorySpace m) const
+        {
+            return reshape(_element_labels.read(m), fem.mesh().n_elem());
+        }
 
         /// @brief returns the number of elements in each subspace. That is
         /// n_elems(p) is the number of elements in subspace p.
@@ -94,12 +99,13 @@ namespace cuddh
         /// @brief returns the maximum number of face space degrees of freedom. That is, the maximum of fsizes.
         int max_fsize() const { return mx_fdof; }
 
-        /// @brief connectivity_map(:, k) = [p, q, i, j] indicating the
-        /// subspaces p and q share a face degree of freedom, and that degree of
-        /// freedom corresponds to the i-th face DOF of subspace p, and the j-th
-        /// face DOF of subspace q. The map is sorted with respect to p, and
-        /// does not store the symmetric set [q, p, j, i].
-        auto connectivity_map(MemorySpace m) const { return reshape(cmap.read(m), n_shared_dofs); }
+        /// @brief returns shared face tuples (subspace0, subspace1, local_face0, local_face1).
+        TensorWrapper<2, const int> shared_faces(MemorySpace m) const
+        {
+            return reshape(_shared_faces.read(m), 4, n_shared_faces);
+        }
+
+        int n_shared() const { return n_shared_faces; }
 
     private:
         const H1Space2D &fem;
@@ -110,19 +116,20 @@ namespace cuddh
         int mx_faces;
         int mx_ndof;
         int mx_fdof;
-        int n_shared_dofs;
+        int n_shared_faces;
 
         host_device_ivec gI;
         host_device_ivec s_dof;
         host_device_ivec elems;
+        host_device_ivec _element_labels;
         host_device_ivec s_elems;
         host_device_ivec _faces;
+        host_device_ivec _shared_faces;
         host_device_ivec s_faces;
         host_device_ivec sI;
         host_device_ivec fI;
         host_device_ivec s_fdof;
         host_device_ivec f_sides;
-        HostDeviceArray<LambdaDof> cmap;
     };
 
     EnsembleSpace partition_uniform_rect(const H1Space2D &fem, int2 mesh_dims, int2 block_dims = {0, 0});

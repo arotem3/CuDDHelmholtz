@@ -14,7 +14,8 @@ namespace
         int set_subdomain_num_boundary_faces(ivec_wrapper &h_s_faces) const;
         void set_subdomain_face_indices(imat_wrapper &h_faces) const;
         void set_subdomain_face_sides(imat_wrapper &h_f_sides) const;
-        int compute_shared_dof_map(HostDeviceArray<LambdaDof> &cmap, const TensorWrapper<3, int> &h_fI) const;
+        int n_shared_faces() const { return shared_faces.size(); }
+        int set_shared_faces(imat_wrapper &h_shared_faces) const;
         void compute_fdof_indices(TensorWrapper<3, int> &h_fI, const TensorWrapper<4, int> &h_sI) const;
         int set_subdomain_num_dofs(ivec_wrapper &h_s_dof) const;
         int set_subdomain_num_fdofs(ivec_wrapper &h_s_fdof) const;
@@ -58,6 +59,11 @@ EnsembleSpace::EnsembleSpace(const H1Space2D &fem, int n_spaces_, const int *ele
     auto h_elems = reshape(elems.host_write(), mx_elems, n_spaces);
     ESbuilder.set_subdomain_elements(h_elems);
 
+    _element_labels.resize(nel);
+    auto h_labels = reshape(_element_labels.host_write(), nel);
+    for (int el = 0; el < nel; ++el)
+        h_labels(el) = element_labels[el];
+
     // determine faces in each subspace
     mx_faces = ESbuilder.set_subdomain_num_boundary_faces(h_s_faces);
 
@@ -70,6 +76,11 @@ EnsembleSpace::EnsembleSpace(const H1Space2D &fem, int n_spaces_, const int *ele
     f_sides.resize(mx_faces * n_spaces);
     auto h_f_sides = reshape(f_sides.host_write(), mx_faces, n_spaces);
     ESbuilder.set_subdomain_face_sides(h_f_sides);
+
+    n_shared_faces = ESbuilder.n_shared_faces();
+    _shared_faces.resize(4 * n_shared_faces);
+    auto h_shared_faces = reshape(_shared_faces.host_write(), 4, n_shared_faces);
+    ESbuilder.set_shared_faces(h_shared_faces);
 
     // determine the mapping between global and subspace indices
     sI.resize(n_basis * n_basis * mx_elems * n_spaces);
@@ -86,10 +97,6 @@ EnsembleSpace::EnsembleSpace(const H1Space2D &fem, int n_spaces_, const int *ele
     fI.resize(n_basis * mx_faces * n_spaces);
     auto h_fI = reshape(fI.host_write(), n_basis, mx_faces, n_spaces);
     ESbuilder.compute_fdof_indices(h_fI, h_sI);
-
-    // determine the mapping between subdomain face spaces of the shared
-    // degrees of freedom.
-    n_shared_dofs = ESbuilder.compute_shared_dof_map(cmap, h_fI);
 }
 
 static constexpr int2 get_block_dims(int2 block_dims, int n_basis)
@@ -405,72 +412,21 @@ void ::EnsembleSpaceBuilder::set_subdomain_face_sides(imat_wrapper &h_f_sides) c
     }
 }
 
-int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &cmap,
-                                                   const TensorWrapper<3, int> &h_fI) const
+int ::EnsembleSpaceBuilder::set_shared_faces(imat_wrapper &h_shared_faces) const
 {
-    const Mesh2D &mesh = fem.mesh();
-    auto w = fem.basis().quadrature().w(MemorySpace::HOST);
+    const int n = shared_faces.size();
+    cuddh_verify(h_shared_faces.shape(0) == 4 && h_shared_faces.shape(1) == n,
+                 printf("EnsembleSpace error: invalid shared_faces output shape."));
 
-    const int n_shared = shared_faces.size(); // total number of faces shared between subdomains
-    const int n_basis = fem.basis().size();
-    const int n_spaces = E.size();
-
-    std::unordered_map<int, std::unordered_map<int, LambdaDof>> shared_dofs;
-
-    for (auto [domain0, domain1, local_face_index0, local_face_index1] : shared_faces)
+    for (int i = 0; i < n; ++i)
     {
-        // sanity check that the shared face indices match up
-        cuddh_verify(F.at(domain0).at(local_face_index0).first == F.at(domain1).at(local_face_index1).first,
-                     printf("EnsembleSpace error: shared face indices do not match up."));
-
-        const Edge edge = mesh.edge(F.at(domain0).at(local_face_index0).first);
-
-        // key is same for (domain0, domain1) and (domain1, domain0) symmetric pairs
-        const int key = std::min(domain0, domain1) + n_spaces * std::max(domain0, domain1);
-
-        auto &dofs = shared_dofs[key];
-
-        for (int i = 0; i < n_basis; ++i)
-        {
-            const int local_dof0 = h_fI(i, local_face_index0, domain0);
-            const int local_dof1 = h_fI(i, local_face_index1, domain1);
-
-            const int lkey = (domain0 < domain1) ? local_dof0 : local_dof1; // key is same for symmetric pairs
-
-            if (not dofs.contains(lkey))
-            {
-                LambdaDof dof;
-                dof.subspaces[0] = domain0;
-                dof.subspaces[1] = domain1;
-                dof.local_dof_indices[0] = local_dof0;
-                dof.local_dof_indices[1] = local_dof1;
-                dof.face_mass = 0.0;
-
-                dofs[lkey] = dof;
-            }
-
-            dofs.at(lkey).face_mass += w(i) * edge.measure();
-        }
+        h_shared_faces(0, i) = shared_faces.at(i)[0];
+        h_shared_faces(1, i) = shared_faces.at(i)[1];
+        h_shared_faces(2, i) = shared_faces.at(i)[2];
+        h_shared_faces(3, i) = shared_faces.at(i)[3];
     }
 
-    int n_shared_dofs = 0;
-    for (const auto &[_, dofs] : shared_dofs)
-        n_shared_dofs += dofs.size();
-
-    cmap.resize(n_shared_dofs);
-
-    auto h_cmap = reshape(cmap.host_write(), n_shared_dofs);
-    int i = 0;
-    for (const auto &[_, dofs] : shared_dofs)
-    {
-        for (const auto &[__, dof] : dofs)
-        {
-            h_cmap(i) = dof;
-            i++;
-        }
-    }
-
-    return n_shared_dofs;
+    return n;
 }
 
 void ::EnsembleSpaceBuilder::compute_fdof_indices(TensorWrapper<3, int> &h_fI, const TensorWrapper<4, int> &h_sI) const

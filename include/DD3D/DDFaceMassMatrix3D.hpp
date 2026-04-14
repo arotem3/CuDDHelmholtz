@@ -3,6 +3,8 @@
 #include <thrust/universal_vector.h>
 
 #include "EnsembleSpace3D.hpp"
+#include "FEM3D/GridFunc3D.hpp"
+#include "Tensor.hpp"
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
 
@@ -11,9 +13,10 @@ namespace cuddh
     class DDFaceMassMatrix3D
     {
     public:
-        DDFaceMassMatrix3D(const H1Space3D &tr, const EnsembleSpace3D &efem);
+        DDFaceMassMatrix3D(const EnsembleSpace3D &efem);
+        DDFaceMassMatrix3D(const EnsembleSpace3D &efem, const GridFunc3D<double> &a);
 
-        auto to_device() const { return reshape(m, mx_fdofs, n_domains); }
+        MatrixWrapper<const float> to_device() const { return reshape(m, mx_fdofs, n_domains); }
 
     private:
         int mx_fdofs;

@@ -4,8 +4,9 @@
 
 using namespace cuddh;
 
-static thrust::universal_vector<float> mass(const H1Space3D &fem, const EnsembleSpace3D &efem)
+static thrust::universal_vector<float> mass(const EnsembleSpace3D &efem, const GridFunc3D<double> *a)
 {
+    const H1Space3D &fem = efem.h1_space();
     const DeviceMesh3D &mesh = fem.mesh().to_device();
     const Basis &basis = fem.basis();
     const QuadratureRule &q = basis.quadrature();
@@ -21,6 +22,10 @@ static thrust::universal_vector<float> mass(const H1Space3D &fem, const Ensemble
     auto d_n_elems = efem.n_elems(MemorySpace::DEVICE);
     auto d_elems = efem.elements(MemorySpace::DEVICE);
     auto sI = efem.subspace_indices(MemorySpace::DEVICE);
+
+    TensorWrapper<4, const double> A;
+    if (a)
+        A = a->read(MemorySpace::DEVICE);
 
     thrust::universal_vector<float> u_m(mx_dofs * n_domains, 0.0f);
     auto M = reshape(u_m, mx_dofs, n_domains);
@@ -50,6 +55,10 @@ static thrust::universal_vector<float> mass(const H1Space3D &fem, const Ensemble
 
             xi.z = x(k);
             float val = w(i) * w(j) * w(k) * element.measure(xi);
+
+            if (A)
+                val *= static_cast<float>(A(i, j, k, g_el));
+
             atomicAdd(&M(l, subsp), val);
         }
     });
@@ -57,8 +66,13 @@ static thrust::universal_vector<float> mass(const H1Space3D &fem, const Ensemble
     return u_m;
 }
 
-DDMassMatrix3D::DDMassMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem)
+DDMassMatrix3D::DDMassMatrix3D(const EnsembleSpace3D &efem) : mx_dofs(efem.max_size()), n_domains(efem.size())
+{
+    m = mass(efem, nullptr);
+}
+
+DDMassMatrix3D::DDMassMatrix3D(const EnsembleSpace3D &efem, const GridFunc3D<double> &a)
     : mx_dofs(efem.max_size()), n_domains(efem.size())
 {
-    m = mass(fem, efem);
+    m = mass(efem, &a);
 }

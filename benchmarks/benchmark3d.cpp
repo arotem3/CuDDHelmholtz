@@ -32,24 +32,13 @@ static int run_benchmark(const char *precision, int degree, int nx, int ny, int 
     EnsembleSpace3D efem = partition_uniform_cube(fem, {(unsigned int)nx, (unsigned int)ny, (unsigned int)nz},
                                                   {(unsigned int)sx, (unsigned int)sy, (unsigned int)sz});
 
-    thrust::universal_vector<double> a(fem.size());
-    double *d_a = thrust::raw_pointer_cast(a.data());
-    gridfunc(fem, [] __device__(double3 X) -> double {
-        (void)X;
-        return 1.0;
-    }, d_a);
+    GridFunc3D<double> a = gridfunc(fem, [] __device__(double3) -> double { return 1.0; });
 
-    DDSubstructuredOperator3D<scalar_t> F(omega, d_a, fem, efem, config, waveholtz_iterations);
+    DDSubstructuredOperator3D<scalar_t> F(efem, omega, a, config, waveholtz_iterations);
 
     auto boundary_faces = mesh.get_boundary_faces();
     TraceSpace3D fs(fem, boundary_faces.size(), boundary_faces);
-    thrust::universal_vector<double> ax(fs.size());
-    double *d_ax = thrust::raw_pointer_cast(ax.data());
-    trace(fs, [] __device__(double3 X) -> double {
-        (void)X;
-        return 1.0;
-    }, d_ax);
-    Helmholtz3D H(omega, d_a, d_ax, fem, fs);
+    Helmholtz3D H(fem, fs, omega, a);
 
     thrust::universal_vector<scalar_t> lambda_a(F.ndof(), scalar_t(0));
     thrust::universal_vector<scalar_t> lambda_b(F.ndof(), scalar_t(0));

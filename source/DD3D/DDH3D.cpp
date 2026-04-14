@@ -1,5 +1,8 @@
 #include "DD3D/DDH3D.hpp"
 
+#include <map>
+#include <vector>
+
 #include "FixedTensorWrapper.hpp"
 
 using namespace cuddh;
@@ -285,14 +288,87 @@ __global__ __launch_bounds__(NB * NB * NB * NEL, 1024 / (NB * NB * NB * NEL)) vo
 // Returns n_lambda = 2 * n_shared.
 template <typename scalar_t>
 static int lambda_dofs(thrust::device_vector<LambdaDOFData<scalar_t>> &B, const EnsembleSpace3D &efem, double omega,
-                       VectorWrapper<const double> a)
+                       const GridFunc3D<double> &a)
 {
+    struct SharedDof
+    {
+        int subspaces[2];
+        int local_dof_indices[2];
+        double integral;
+    };
+
+    const H1Space3D &fem = efem.h1_space();
+    const Mesh3D &mesh = fem.mesh();
+    const int n_basis = fem.basis().size();
     const int n_domains = efem.size();
     const int mx_fdof = efem.max_fsize();
 
-    auto cmap = efem.connectivity_map(MemorySpace::HOST);
-    auto gI = efem.global_indices(MemorySpace::HOST);
-    const int n_shared = cmap.shape(0);
+    auto shared_faces = efem.shared_faces(MemorySpace::HOST);
+    const int n_shared_faces = shared_faces.shape(1);
+    auto fI = efem.face_indices(MemorySpace::HOST);
+    auto faces = efem.faces(MemorySpace::HOST);
+    auto A = a.read(MemorySpace::HOST);
+
+    auto w = fem.basis().quadrature().w(MemorySpace::HOST);
+    auto x = fem.basis().quadrature().x(MemorySpace::HOST);
+
+    std::map<int, std::map<int, SharedDof>> shared_dofs;
+
+    for (int s = 0; s < n_shared_faces; ++s)
+    {
+        const int domain0 = shared_faces(0, s);
+        const int domain1 = shared_faces(1, s);
+        const int local_face_index0 = shared_faces(2, s);
+        const int local_face_index1 = shared_faces(3, s);
+
+        const int global_face0 = faces(local_face_index0, domain0);
+        const int global_face1 = faces(local_face_index1, domain1);
+        cuddh_verify(global_face0 == global_face1, printf("DDH3D error: shared face indices do not match up.\n"));
+
+        const int pair_key = std::min(domain0, domain1) + n_domains * std::max(domain0, domain1);
+        auto &dofs = shared_dofs[pair_key];
+
+        const FaceConnectivity connectivity = mesh.face_connectivity(global_face0);
+        const int e0 = connectivity.elements[0];
+        const int e1 = connectivity.elements[1];
+        const QuadFace face = mesh.face(global_face0);
+
+        for (int j = 0; j < n_basis; ++j)
+        {
+            for (int i = 0; i < n_basis; ++i)
+            {
+                const int idx0 = fI(i, j, local_face_index0, domain0);
+                const int idx1 = fI(i, j, local_face_index1, domain1);
+                const int lkey = (domain0 < domain1) ? idx0 : idx1;
+
+                if (not dofs.contains(lkey))
+                {
+                    SharedDof dof{};
+                    dof.subspaces[0] = domain0;
+                    dof.subspaces[1] = domain1;
+                    dof.local_dof_indices[0] = idx0;
+                    dof.local_dof_indices[1] = idx1;
+                    dof.integral = 0.0;
+                    dofs[lkey] = dof;
+                }
+
+                const auto [x0, y0, z0] = face2vol(n_basis, i, j, connectivity.label[0]);
+                const auto [ip, jp] = permute_face_index(n_basis, i, j, connectivity.permutation);
+                const auto [x1, y1, z1] = face2vol(n_basis, ip, jp, connectivity.label[1]);
+
+                const double a_left = A(x0, y0, z0, e0);
+                const double a_right = A(x1, y1, z1, e1);
+                const double wt = w(i) * w(j) * face.measure({x(i), x(j)});
+
+                dofs.at(lkey).integral += wt * (a_left + a_right);
+            }
+        }
+    }
+
+    int n_shared = 0;
+    for (const auto &[_, dofs] : shared_dofs)
+        n_shared += dofs.size();
+
     const int n_lambda = 2 * n_shared;
 
     // leading dim 3: at most 3 boundary faces can share a DOF in 3D
@@ -300,25 +376,30 @@ static int lambda_dofs(thrust::device_vector<LambdaDOFData<scalar_t>> &B, const 
 
     auto b = reshape(thrust::raw_pointer_cast(h_B.data()), 3, mx_fdof, n_domains);
 
-    for (int k = 0; k < n_shared; ++k)
+    int k = 0;
+    for (const auto &[_, dofs] : shared_dofs)
     {
-        const LambdaDof dof = cmap(k);
-
-        for (const int s : {0, 1})
+        for (const auto &[__, dof] : dofs)
         {
-            const int subspace = dof.subspaces[s];
-            const int face_index = dof.local_dof_indices[s];
+            const scalar_t T = std::sqrt(omega * dof.integral);
 
-            for (int o = 0; o < 3; ++o)
+            for (const int s : {0, 1})
             {
-                if (b(o, face_index, subspace).i < 0)
+                const int subspace = dof.subspaces[s];
+                const int face_index = dof.local_dof_indices[s];
+
+                for (int o = 0; o < 3; ++o)
                 {
-                    const scalar_t T = std::sqrt(2.0 * omega * a(gI(face_index, subspace)) * dof.face_mass);
-                    b(o, face_index, subspace) = LambdaDOFData<scalar_t>{
-                        .i = (s == 0) ? k : n_shared + k, .j = (s == 0) ? n_shared + k : k, .trOp = T};
-                    break;
+                    if (b(o, face_index, subspace).i < 0)
+                    {
+                        b(o, face_index, subspace) = LambdaDOFData<scalar_t>{
+                            .i = (s == 0) ? k : n_shared + k, .j = (s == 0) ? n_shared + k : k, .trOp = T};
+                        break;
+                    }
                 }
             }
+
+            ++k;
         }
     }
 
@@ -331,7 +412,7 @@ template <typename scalar_t>
 static thrust::device_vector<scalar_t> partition_of_unity(const H1Space3D &fem, const EnsembleSpace3D &efem)
 {
     MassMatrix3D M(fem);
-    DDMassMatrix3D DDM(fem, efem);
+    DDMassMatrix3D DDM(efem);
 
     auto d_m = diagonal_mass(M, MemorySpace::DEVICE);
     auto d_ddm = DDM.to_device();
@@ -417,21 +498,21 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
 }
 
 template <std::floating_point scalar_t>
-DDSubstructuredOperator3D<scalar_t>::DDSubstructuredOperator3D(double omega_, const double *h_a, const H1Space3D &fem,
-                                                                                                                             const EnsembleSpace3D &efem_, DDKernelConfig config,
-                                                                                                                             int waveholtz_iterations_)
+DDSubstructuredOperator3D<scalar_t>::DDSubstructuredOperator3D(const EnsembleSpace3D &efem_, double omega_,
+                                                               const GridFunc3D<double> &a, DDKernelConfig config,
+                                                               int waveholtz_iterations_)
     : Operator<scalar_t>(0),
-      g_ndof{fem.size()},
-      g_elem{fem.mesh().n_elem()},
-      n_basis{fem.basis().size()},
       efem{efem_},
-      S(fem, efem_),
-            W{make_DDWaveHoltz_3d<scalar_t>(omega_, h_a, fem, efem_)},
-            waveholtz_iterations{waveholtz_iterations_}
+      g_ndof{efem_.h1_space().size()},
+      g_elem{efem_.h1_space().mesh().n_elem()},
+      n_basis{efem_.h1_space().basis().size()},
+      S(efem_),
+      W{make_DDWaveHoltz_3d<scalar_t>(efem_, omega_, &a)},
+      waveholtz_iterations{waveholtz_iterations_}
 {
     cuddh_verify(n_basis >= 2 && n_basis <= 4, printf("DDH3D error: Only n_basis in [2,3,4] supported.\n"););
-        cuddh_verify(waveholtz_iterations == -1 || waveholtz_iterations > 0,
-                                 printf("DDH3D error: waveholtz_iterations must be positive or -1 for residual-based stopping.\n"));
+    cuddh_verify(waveholtz_iterations == -1 || waveholtz_iterations > 0,
+                 printf("DDH3D error: waveholtz_iterations must be positive or -1 for residual-based stopping.\n"));
 
     n_domains = efem.size();
     mx_dof = efem.max_size();
@@ -446,8 +527,10 @@ DDSubstructuredOperator3D<scalar_t>::DDSubstructuredOperator3D(double omega_, co
         _work.resize(work_size);
     }
 
+    const H1Space3D &fem = efem.h1_space();
     _partition_of_unity = partition_of_unity<scalar_t>(fem, efem);
-    n_lambda = lambda_dofs(_B, efem, omega_, reshape(h_a, fem.size()));
+
+    n_lambda = lambda_dofs(_B, efem, omega_, a);
     this->set_size(2 * n_lambda);
 }
 
@@ -472,8 +555,8 @@ struct KernelDispatcher3D
         if (d_update)
             dla::zeros(2 * n_lambda, d_update);
 
-        auto data = DDH3DKernelData<scalar_t, NB, NEL, TDOF>::make(
-            n_lambda, g_ndof, efem, B, punity, stiffness_matrix, waveholtz, wh_iterations, d_work);
+        auto data = DDH3DKernelData<scalar_t, NB, NEL, TDOF>::make(n_lambda, g_ndof, efem, B, punity, stiffness_matrix,
+                                                                   waveholtz, wh_iterations, d_work);
         const int n_domains = efem.size();
         dim3 block_size(NB * NB * NB, NEL);
         ddh_action_kernel_3d<scalar_t, NB, NEL, TDOF><<<n_domains, block_size>>>(data, x, y, d_lambda, d_update);
@@ -553,8 +636,8 @@ void DDSubstructuredOperator3D<scalar_t>::action(const double *fem_in, double *f
     scalar_t *d_work = thrust::raw_pointer_cast(_work.data());
 
     KernelDispatcher3D<scalar_t>(n_basis, kernel_config.tdof, static_cast<int>(kernel_config.block_size))
-        .invoke(efem, g_ndof, n_lambda, B, S, punity, W, waveholtz_iterations, fem_in, fem_out, lambda_in,
-            lambda_out, d_work);
+        .invoke(efem, g_ndof, n_lambda, B, S, punity, W, waveholtz_iterations, fem_in, fem_out, lambda_in, lambda_out,
+                d_work);
 }
 
 template <std::floating_point scalar_t>

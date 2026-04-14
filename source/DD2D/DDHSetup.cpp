@@ -1,3 +1,5 @@
+#include <map>
+
 #include "DD2D/DDTraceFunc2D.hpp"
 #include "DDHKernelImpl.hpp"
 
@@ -38,38 +40,93 @@ template <typename scalar_t>
 static int lambda_dofs(thrust::device_vector<LambdaDOFData<scalar_t>> &B, const EnsembleSpace &efem, double omega,
                        TensorWrapper<2, const double> a_face)
 {
+    struct SharedDof
+    {
+        int subspaces[2];
+        int local_dof_indices[2];
+        double integral;
+    };
+
     const int n_domains = efem.size();
     const int mx_fdof = efem.max_fsize();
+    const int n_basis = efem.h1_space().basis().size();
 
-    auto cmap = efem.connectivity_map(MemorySpace::HOST);
-    const int n_shared = cmap.shape(0);
+    const Mesh2D &mesh = efem.h1_space().mesh();
+    auto shared_faces = efem.shared_faces(MemorySpace::HOST);
+    auto faces = efem.faces(MemorySpace::HOST);
+    auto fI = efem.face_indices(MemorySpace::HOST);
+    auto w = efem.h1_space().basis().quadrature().w(MemorySpace::HOST);
+
+    std::map<int, std::map<int, SharedDof>> shared_dofs;
+    const int n_shared_faces = shared_faces.shape(1);
+    for (int s = 0; s < n_shared_faces; ++s)
+    {
+        const int domain0 = shared_faces(0, s);
+        const int domain1 = shared_faces(1, s);
+        const int local_face_index0 = shared_faces(2, s);
+        const int local_face_index1 = shared_faces(3, s);
+
+        const int global_face0 = faces(local_face_index0, domain0);
+        const int global_face1 = faces(local_face_index1, domain1);
+        cuddh_verify(global_face0 == global_face1, printf("DDH error: shared face indices do not match up."));
+
+        const double edge_measure = mesh.edge(global_face0).measure();
+        const int pair_key = std::min(domain0, domain1) + n_domains * std::max(domain0, domain1);
+        auto &dofs = shared_dofs[pair_key];
+
+        for (int i = 0; i < n_basis; ++i)
+        {
+            const int local_dof0 = fI(i, local_face_index0, domain0);
+            const int local_dof1 = fI(i, local_face_index1, domain1);
+            const int lkey = (domain0 < domain1) ? local_dof0 : local_dof1;
+
+            if (not dofs.contains(lkey))
+            {
+                SharedDof dof{};
+                dof.subspaces[0] = domain0;
+                dof.subspaces[1] = domain1;
+                dof.local_dof_indices[0] = local_dof0;
+                dof.local_dof_indices[1] = local_dof1;
+                dof.integral = 0.0;
+                dofs[lkey] = dof;
+            }
+
+            dofs.at(lkey).integral += w(i) * edge_measure * (a_face(local_dof0, domain0) + a_face(local_dof1, domain1));
+        }
+    }
+
+    int n_shared = 0;
+    for (const auto &[_, dofs] : shared_dofs)
+        n_shared += dofs.size();
 
     thrust::host_vector<LambdaDOFData<scalar_t>> h_B(2 * mx_fdof * n_domains, LambdaDOFData<scalar_t>{});
     auto b = reshape(thrust::raw_pointer_cast(h_B.data()), 2, mx_fdof, n_domains);
 
     int n_lambda = 2 * n_shared;
-    for (int k = 0; k < n_shared; ++k)
+    int k = 0;
+    for (const auto &[_, dofs] : shared_dofs)
     {
-        const auto &dof = cmap(k);
-
-        const scalar_t T0 = omega * a_face(dof.local_dof_indices[0], dof.subspaces[0]) * dof.face_mass;
-        const scalar_t T1 = omega * a_face(dof.local_dof_indices[1], dof.subspaces[1]) * dof.face_mass;
-        const scalar_t T = std::sqrt(T0 + T1);
-
-        for (const int s : {0, 1})
+        for (const auto &[__, dof] : dofs)
         {
-            const int subspace = dof.subspaces[s];
-            const int face_index = dof.local_dof_indices[s];
+            const scalar_t T = std::sqrt(omega * dof.integral);
 
-            for (const int o : {0, 1})
+            for (const int s : {0, 1})
             {
-                if (b(o, face_index, subspace).i < 0)
+                const int subspace = dof.subspaces[s];
+                const int face_index = dof.local_dof_indices[s];
+
+                for (const int o : {0, 1})
                 {
-                    b(o, face_index, subspace) = LambdaDOFData<scalar_t>{
-                        .i = (s == 0) ? k : n_shared + k, .j = (s == 0) ? n_shared + k : k, .trOp = T};
-                    break;
+                    if (b(o, face_index, subspace).i < 0)
+                    {
+                        b(o, face_index, subspace) = LambdaDOFData<scalar_t>{
+                            .i = (s == 0) ? k : n_shared + k, .j = (s == 0) ? n_shared + k : k, .trOp = T};
+                        break;
+                    }
                 }
             }
+
+            ++k;
         }
     }
 

@@ -256,7 +256,7 @@ namespace cuddh
     class DDStiffnessMatrix3D
     {
     public:
-        DDStiffnessMatrix3D(const H1Space3D &fem, const EnsembleSpace3D &efem);
+        DDStiffnessMatrix3D(const EnsembleSpace3D &efem);
 
         DeviceDDStiffnessMatrix3D<scalar_t> to_device() const
         {

@@ -61,8 +61,41 @@ __device__ static double f(double3 x, double omega)
 
 __device__ static double alpha(double3 x)
 {
-    const double r = x.x * x.x + x.y * x.y + x.z * x.z;
-    return (r < 0.0625) ? 0.2 : 1.0;
+    const double r = max(abs(x.x), abs(x.y));
+    return (r < 0.5) ? 0.5 : 1.0;
+}
+
+static dim3 target_sdim(int B, int T, int nb)
+{
+    B = (B > 0) ? B : 1024;
+    T = (T > 0) ? T : 2;
+
+    uint32_t mx_elems = B * T / (nb * nb * nb);
+
+    uint32_t best_sx = 1, best_sy = 1, best_fill = 1;
+    double best_aspect = std::numeric_limits<double>::infinity();
+
+    for (uint32_t sx = 1; sx <= mx_elems; ++sx)
+    {
+        uint32_t sy = mx_elems / sx;
+        if (sy < 1)
+            continue;
+
+        uint32_t fill = sx * sy;
+        if (fill < best_fill)
+            continue;
+
+        double aspect_err = std::abs(std::log(double(sx) / double(sy)));
+        if (fill > best_fill || aspect_err < best_aspect)
+        {
+            best_sx = sx;
+            best_sy = sy;
+            best_fill = fill;
+            best_aspect = aspect_err;
+        }
+    }
+
+    return {best_sx, best_sy, 1};
 }
 
 int main(int argc, char *argv[])
@@ -128,25 +161,23 @@ int main(int argc, char *argv[])
     Basis basis(deg + 1);
 
     H1Space3D fem(mesh, basis);
-    EnsembleSpace3D efem = partition_uniform_cube(fem, {(unsigned)nx, (unsigned)ny, (unsigned)nz});
+    EnsembleSpace3D efem =
+        partition_uniform_cube(fem, {(unsigned)nx, (unsigned)ny, (unsigned)nz}, target_sdim(block_size, tdof, deg + 1));
 
     const int ndof = fem.size();
     const int N = 2 * ndof;
 
     thrust::universal_vector<double> U(N);
     thrust::universal_vector<double> b(N);
-    thrust::universal_vector<double> a(ndof);
 
     double *u_U = U.data().get();
     double *u_b = b.data().get();
-    double *u_a = a.data().get();
 
-    MassMatrix3D M(fem);
-    l2_project(M, [=] __device__(double3 x) -> double { return f(x, omega); }, u_b);
+    l2_project(MassMatrix3D(fem), [=] __device__(double3 x) -> double { return f(x, omega); }, u_b);
 
-    gridfunc(fem, [=] __device__(double3 x) -> double { return alpha(x); }, u_a);
+    GridFunc3D<double> a = gridfunc(fem, [=] __device__(double3 x) -> double { return alpha(x); });
 
-    DDH3D<float> ddh(omega, u_a, fem, efem, config);
+    DDH3D<float> ddh(efem, omega, a, config);
 
     std::cout << "Solving the Helmholtz equation...\n"
               << "\tomega = " << omega << "\n"
@@ -165,20 +196,7 @@ int main(int argc, char *argv[])
         auto boundary_faces = mesh.get_boundary_faces();
         TraceSpace3D fs(fem, boundary_faces.size(), boundary_faces);
 
-        host_device_dvec a2x(ndof);
-        host_device_dvec ax(fs.size());
-
-        gridfunc(
-            fem,
-            [=] __device__(double3 x) -> double {
-                double aX = alpha(x);
-                return aX * aX;
-            },
-            a2x.device_write());
-
-        trace(fs, [=] __device__(double3 x) -> double { return alpha(x); }, ax.device_write());
-
-        Helmholtz3D A(omega, a2x.device_read(), ax.device_read(), fem, fs);
+        Helmholtz3D A(fem, fs, omega, a);
 
         host_device_dvec Au(N);
         double *d_Au = Au.device_write();

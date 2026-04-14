@@ -20,7 +20,9 @@ namespace
         void set_subdomain_elements(imat_wrapper &h_elems) const;
         int set_subdomain_num_boundary_faces(ivec_wrapper &h_s_faces) const;
         void set_subdomain_face_indices(imat_wrapper &h_faces) const;
-        int compute_shared_dof_map(HostDeviceArray<LambdaDof> &cmap, const TensorWrapper<4, int> &h_fI) const;
+        void set_subdomain_face_sides(imat_wrapper &h_face_sides) const;
+        int n_shared_faces() const { return shared_faces.size(); }
+        int set_shared_faces(imat_wrapper &h_shared_faces) const;
         void compute_fdof_indices(TensorWrapper<4, int> &h_fI, const TensorWrapper<5, int> &h_sI) const;
         int set_subdomain_num_dofs(ivec_wrapper &h_s_dof) const;
         int set_subdomain_num_fdofs(ivec_wrapper &h_s_fdof) const;
@@ -64,6 +66,11 @@ EnsembleSpace3D::EnsembleSpace3D(const H1Space3D &fem, int n_spaces, const int *
     auto h_elems = reshape(sp_elems.host_write(), mx_elems, n_spaces);
     ESbuilder.set_subdomain_elements(h_elems);
 
+    sp_element_labels.resize(nel);
+    auto h_labels = reshape(sp_element_labels.host_write(), nel);
+    for (int el = 0; el < nel; ++el)
+        h_labels(el) = element_labels[el];
+
     // determine faces in each subspace
     mx_faces = ESbuilder.set_subdomain_num_boundary_faces(h_s_faces);
 
@@ -71,6 +78,15 @@ EnsembleSpace3D::EnsembleSpace3D(const H1Space3D &fem, int n_spaces, const int *
     sp_faces.resize(mx_faces * n_spaces);
     auto h_faces = reshape(sp_faces.host_write(), mx_faces, n_spaces);
     ESbuilder.set_subdomain_face_indices(h_faces);
+
+    sp_face_sides.resize(mx_faces * n_spaces);
+    auto h_face_sides = reshape(sp_face_sides.host_write(), mx_faces, n_spaces);
+    ESbuilder.set_subdomain_face_sides(h_face_sides);
+
+    n_shared_faces = ESbuilder.n_shared_faces();
+    sp_shared_faces.resize(4 * n_shared_faces);
+    auto h_shared_faces = reshape(sp_shared_faces.host_write(), 4, n_shared_faces);
+    ESbuilder.set_shared_faces(h_shared_faces);
 
     // determine mapping between global and subspace indices
     sp_indices.resize(n_basis * n_basis * n_basis * mx_elems * n_spaces);
@@ -87,8 +103,6 @@ EnsembleSpace3D::EnsembleSpace3D(const H1Space3D &fem, int n_spaces, const int *
     fp_indices.resize(n_basis * n_basis * mx_faces * n_spaces);
     auto h_fI = reshape(fp_indices.host_write(), n_basis, n_basis, mx_faces, n_spaces);
     ESbuilder.compute_fdof_indices(h_fI, h_sI);
-
-    n_shared_dofs = ESbuilder.compute_shared_dof_map(cmap, h_fI);
 }
 
 EnsembleSpace3D cuddh::partition_uniform_cube(const H1Space3D &fem, dim3 mesh_dims, dim3 block_dims)
@@ -283,7 +297,15 @@ static void natural_ordering(std::vector<int> &dof_indices, std::vector<int> &fd
             {
                 for (int i = 0; i < n_basis; ++i)
                 {
-                    const auto [ip, jp] = permute_face_index(n_basis, i, j, connectivity.permutation);
+                    int ip = i;
+                    int jp = j;
+                    if (side == 1)
+                    {
+                        const auto [ip1, jp1] = permute_face_index(n_basis, i, j, connectivity.permutation);
+                        ip = ip1;
+                        jp = jp1;
+                    }
+
                     const auto vol_idx = face2vol(n_basis, ip, jp, connectivity.label[side]);
                     const int idx = unique.at(g_inds(vol_idx[0], vol_idx[1], vol_idx[2], connectivity.elements[side]));
 
@@ -369,77 +391,42 @@ void ::EnsembleSpaceBuilder::set_subdomain_face_indices(imat_wrapper &h_faces) c
     }
 }
 
-int ::EnsembleSpaceBuilder::compute_shared_dof_map(HostDeviceArray<LambdaDof> &cmap,
-                                                   const TensorWrapper<4, int> &h_fI) const
+void ::EnsembleSpaceBuilder::set_subdomain_face_sides(imat_wrapper &h_face_sides) const
 {
-    const Mesh3D &mesh = fem.mesh();
-    auto &q = fem.basis().quadrature();
-
-    auto w = q.w(MemorySpace::HOST);
-    auto x = q.x(MemorySpace::HOST);
-
-    const int n_basis = fem.basis().size();
     const int n_spaces = E.size();
 
-    std::unordered_map<int, std::unordered_map<int, LambdaDof>> shared_dofs;
+    std::fill(h_face_sides.begin(), h_face_sides.end(), -1);
 
-    for (auto [domain0, domain1, local_face_index0, local_face_index1] : shared_faces)
+    for (int p = 0; p < n_spaces; ++p)
     {
-        // sanity check that the shared face indices agree
-        cuddh_verify(F.at(domain0).at(local_face_index0).first == F.at(domain1).at(local_face_index1).first,
-                     printf("EnsembleSpace3D error: shared face indices do not match up.\n"));
-
-        const int global_face = F.at(domain0).at(local_face_index0).first;
-        const QuadFace face = mesh.face(global_face);
-
-        // key is the same for (domain0,domain1) and (domain1,domain0) symmetric pairs
-        const int key = std::min(domain0, domain1) + n_spaces * std::max(domain0, domain1);
-
-        auto &dofs = shared_dofs[key];
-
-        for (int j = 0; j < n_basis; ++j)
+        auto &faces = F.at(p);
+        const int n = faces.size();
+        for (int i = 0; i < n; ++i)
         {
-            for (int i = 0; i < n_basis; ++i)
-            {
-                const int idx0 = h_fI(i, j, local_face_index0, domain0);
-                const int idx1 = h_fI(i, j, local_face_index1, domain1);
+            const int side = faces.at(i).second;
+            h_face_sides(i, p) = side;
+        }
+    }
+}
 
-                const int lkey = (domain0 < domain1) ? idx0 : idx1; // key is same for symmetric pairs
+int ::EnsembleSpaceBuilder::set_shared_faces(imat_wrapper &h_shared_faces) const
+{
+    const int n = shared_faces.size();
+    if (h_shared_faces.shape(1) > 0)
+    {
+        cuddh_verify(h_shared_faces.shape(0) == 4 && h_shared_faces.shape(1) == n,
+                     printf("EnsembleSpace3D error: invalid shared_faces output shape.\n"));
 
-                if (not dofs.contains(lkey))
-                {
-                    LambdaDof dof;
-                    dof.subspaces[0] = domain0;
-                    dof.subspaces[1] = domain1;
-                    dof.local_dof_indices[0] = idx0;
-                    dof.local_dof_indices[1] = idx1;
-                    dof.face_mass = 0.0;
-                    dofs[lkey] = dof;
-                }
-
-                dofs.at(lkey).face_mass += w(i) * w(j) * face.measure({x(i), x(j)});
-            }
+        for (int i = 0; i < n; ++i)
+        {
+            h_shared_faces(0, i) = shared_faces.at(i)[0];
+            h_shared_faces(1, i) = shared_faces.at(i)[1];
+            h_shared_faces(2, i) = shared_faces.at(i)[2];
+            h_shared_faces(3, i) = shared_faces.at(i)[3];
         }
     }
 
-    int n_shared_dofs = 0;
-    for (const auto &[_, dofs] : shared_dofs)
-        n_shared_dofs += dofs.size();
-
-    cmap.resize(n_shared_dofs);
-
-    auto h_cmap = reshape(cmap.host_write(), n_shared_dofs);
-    int i = 0;
-    for (const auto &[_, dofs] : shared_dofs)
-    {
-        for (const auto &[__, dof] : dofs)
-        {
-            h_cmap(i) = dof;
-            i++;
-        }
-    }
-
-    return n_shared_dofs;
+    return n;
 }
 
 void ::EnsembleSpaceBuilder::compute_fdof_indices(TensorWrapper<4, int> &h_fI, const TensorWrapper<5, int> &h_sI) const
@@ -468,7 +455,15 @@ void ::EnsembleSpaceBuilder::compute_fdof_indices(TensorWrapper<4, int> &h_fI, c
             {
                 for (int i = 0; i < n_basis; ++i)
                 {
-                    const auto [ip, jp] = permute_face_index(n_basis, i, j, connectivity.permutation);
+                    int ip = i;
+                    int jp = j;
+                    if (side == 1)
+                    {
+                        const auto [ip1, jp1] = permute_face_index(n_basis, i, j, connectivity.permutation);
+                        ip = ip1;
+                        jp = jp1;
+                    }
+
                     const auto [x, y, z] = face2vol(n_basis, ip, jp, connectivity.label[side]);
                     const int idx = h_sI(x, y, z, subsp_element, p);
 
