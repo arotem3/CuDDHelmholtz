@@ -43,20 +43,6 @@
 
 using namespace cuddh;
 
-/// @brief Bilinear form (grad u, grad phi) where phi are in H1_0.
-class Poisson3D : public Operator<double>
-{
-public:
-    Poisson3D(const H1Space3D &fem, const TraceSpace3D &fs);
-
-    void action(const double *x, double *y) const;
-    void action(double c, const double *x, double *y) const;
-
-private:
-    const TraceSpace3D &tr;
-    StiffnessMatrix3D a;
-};
-
 __device__ static double f(double3 r)
 {
     return -4.0;
@@ -126,39 +112,30 @@ int main(int argc, char *argv[])
     // of freedom needed on the boundary of the domain. In particular, we use
     // this object to restrict the solution to H1_0.
     TraceSpace3D tr(fem, boundary_faces.size(), boundary_faces);
-    const int fdof = tr.size();
-
     // To manage memory between host and device, we use the HostDeviceArray class.
     host_device_dvec _u(ndof); // the solution vector
     host_device_dvec _b(ndof); // the right hand side: (f, phi) - (grad g, grad phi)
-    host_device_dvec _G(ndof); // the extension of g to H1
-
-    host_device_dvec _q(fdof); // projection of g onto face space
 
     double *u = _u.device_write();
     double *b = _b.device_write();
-    double *q = _q.device_write();
-    double *G = _G.device_write();
 
     // linear system
-    Poisson3D A(fem, tr);
+    StiffnessMatrix3D A0(fem);
+    HomogeneousDirichletOperator3D A(A0, tr);
+    DirichletBC3D bc(tr);
 
     // set the right hand side
-    MassMatrix3D M(fem);
-    l2_project(M, [] __device__(double3 r) { return f(r); }, b); // (f, phi)
-    tr.orth(b);                                                  // zero out the boundary terms
+    l2_project(MassMatrix3D(fem), [] __device__(double3 r) { return f(r); }, b); // (f, phi)
 
-    trace(tr, [] __device__(double3 r) { return g(r); }, q); // evaluate on the boundary
-
-    tr.prolong(q, G);     // extend q to H1
-    A.action(-1.0, G, b); // b = b - (grad G, grad phi)
+    bc.set([] __device__(double3 r) { return g(r); });
+    bc.apply_rhs(A0, b); // b <- orth(b) - A0 * E(q)
 
     // solve the linear system
     std::cout << "\nsolving with minres...\n";
     auto out = minres(u, A, b, opts);
 
-    // add G to u
-    dla::axpby(ndof, 1.0, G, 1.0, u);
+    // add extension to recover the full solution
+    bc.recover_solution(u);
 
     // compare against exact
     host_device_dvec _ue(ndof);
@@ -191,18 +168,4 @@ int main(int argc, char *argv[])
     else
         std::cerr << "Failed to save residuals to " << res_file << std::endl;
     return 0;
-}
-
-Poisson3D::Poisson3D(const H1Space3D &fem, const TraceSpace3D &tr) : Operator<double>(fem.size()), tr(tr), a(fem) {}
-
-void Poisson3D::action(const double *x, double *y) const
-{
-    a.action(x, y);
-    tr.orth(y);
-}
-
-void Poisson3D::action(double c, const double *x, double *y) const
-{
-    a.action(c, x, y);
-    tr.orth(y);
 }

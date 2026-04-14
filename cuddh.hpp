@@ -4,6 +4,7 @@
 #include "include/Basis.hpp"
 #include "include/DD2D/DDH.hpp"
 #include "include/DD3D/DDH3D.hpp"
+#include "include/DirichletBC.hpp"
 #include "include/FEM2D/GridFunc2D.hpp"
 #include "include/FEM2D/H1Space2D.hpp"
 #include "include/FEM2D/TraceFunc2D.hpp"

@@ -43,21 +43,6 @@
 
 using namespace cuddh;
 
-/// @brief Bilinear form (grad u, grad phi) where phi are in H1_0.
-class Poisson : public Operator<double>
-{
-public:
-    Poisson(const H1Space2D &fem, const TraceSpace2D &fs);
-
-    void action(const double *x, double *y) const;
-
-    void action(double c, const double *x, double *y) const;
-
-private:
-    StiffnessMatrix a;
-    const TraceSpace2D &fs;
-};
-
 __device__ static double f(const double2)
 {
     return 1.0;
@@ -131,37 +116,31 @@ int main(int argc, char *argv[])
     // of freedom needed on the boundary of the domain. In particular, we use
     // this object to restrict the solution to H1_0.
     TraceSpace2D fs(fem, boundary_faces.size(), boundary_faces);
-    const int fdof = fs.size();
 
     // To manage memory between host and device, we use the HostDeviceArray class.
     host_device_dvec _u(ndof);
     host_device_dvec _b(ndof);
-    host_device_dvec _G(ndof);
 
     double *u = _u.device_write(); // the solution vector
     double *b = _b.device_write(); // the right hand side: (f, phi) - (grad g, grad phi)
-    double *G = _G.device_write(); // the extension of q to H1
 
     // linear system
-    Poisson A(fem, fs);
+    StiffnessMatrix A0(fem);
+    HomogeneousDirichletOperator2D A(A0, fs);
+    DirichletBC2D bc(fs);
 
     // set up right hand side
     l2_project(b, MassMatrix(fem), [] __device__(const double2 x) -> double { return f(x); }); // (f, phi)
-    fs.orth(b); // zero out boundary terms
 
-    // evaluate g on the boundary faces
-    auto _q = trace(fs, [] __device__(const double2 x) -> double { return g(x); });
-    double *q = thrust::raw_pointer_cast(_q.data());
-
-    fs.prolong(q, G);     // extend q to H1
-    A.action(-1.0, G, b); // b <- b - (grad G, grad phi)
+    bc.set([] __device__(const double2 x) -> double { return g(x); });
+    bc.apply_rhs(A0, b); // b <- orth(b) - A0 * E(q)
 
     // solve for u (without boundary conditions)
     std::cout << "\nsolving with minres... \n";
     auto out = minres(u, A, b, opts);
 
-    // add G to u (now u satisfies Dirichlet BCs)
-    dla::axpby(ndof, 1.0, G, 1.0, u); // u <- u + G
+    // add extension to u (now u satisfies Dirichlet BCs)
+    bc.recover_solution(u);
 
     // copy to host
     const double *h_u = _u.host_read();
@@ -189,18 +168,4 @@ int main(int argc, char *argv[])
         std::cerr << "Failed to write residuals to: " << res_file << "\n";
 
     return 0;
-}
-
-Poisson::Poisson(const H1Space2D &fem, const TraceSpace2D &fs_) : Operator<double>(fem.size()), a(fem), fs{fs_} {}
-
-void Poisson::action(double c, const double *x, double *y) const
-{
-    a.action(c, x, y);
-    fs.orth(y);
-}
-
-void Poisson::action(const double *x, double *y) const
-{
-    a.action(x, y);
-    fs.orth(y);
 }
