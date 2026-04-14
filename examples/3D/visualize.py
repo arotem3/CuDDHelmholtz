@@ -178,10 +178,14 @@ if is_complex:
     m = max(np.abs(surface["u_re"]).max(), np.abs(surface["u_im"]).max())
     clim = (-m, m)
 
+    # Use distinct mesh instances so each subplot keeps its own scalar field.
+    surface_re = surface.copy(deep=True)
+    surface_im = surface.copy(deep=True)
+
     plotter.subplot(0, 0)
     plotter.add_text("Re{u}", font_size=12)
     plotter.add_mesh(
-        surface,
+        surface_re,
         scalars="u_re",
         cmap="seismic",
         clim=clim,
@@ -196,7 +200,7 @@ if is_complex:
     plotter.subplot(0, 1)
     plotter.add_text("Im{u}", font_size=12)
     plotter.add_mesh(
-        surface,
+        surface_im,
         scalars="u_im",
         cmap="seismic",
         clim=clim,
