@@ -18,11 +18,6 @@ parser.add_argument(
     help="Output boundary-surface image file name (default: solution.png)",
 )
 parser.add_argument(
-    "--volume-output",
-    default=None,
-    help="Optional output image file for volume rendering (default: <output>_volume.png)",
-)
-parser.add_argument(
     "--show",
     action="store_true",
     help="Show interactive window (default: off-screen screenshot only)",
@@ -134,14 +129,6 @@ if is_complex:
     grid.point_data["u_im"] = u_im.ravel(order="F")
     grid.point_data["u_abs"] = u_abs.ravel(order="F")
 
-# Dataset for volume rendering.
-volume = pv.RectilinearGrid(x1d, y1d, z1d)
-volume.point_data["u"] = u_re.ravel(order="F")
-if is_complex:
-    volume.point_data["u_re"] = u_re.ravel(order="F")
-    volume.point_data["u_im"] = u_im.ravel(order="F")
-    volume.point_data["u_abs"] = u_abs.ravel(order="F")
-
 # Keep only box boundary faces.
 surface = grid.extract_surface(
     pass_pointid=False,
@@ -241,47 +228,6 @@ else:
 
 plotter.show(screenshot=args.output)
 print(f"Saved figure to {args.output}")
-
-volume_output = args.volume_output
-if volume_output is None:
-    p = Path(args.output)
-    volume_output = str(p.with_name(f"{p.stem}_volume{p.suffix or '.png'}"))
-
-vol_plotter = pv.Plotter(
-    off_screen=not args.show,
-    window_size=tuple(args.window_size),
-)
-
-volume_scalar_bar_args = {
-    "vertical": True,
-    "width": 0.08,
-    "height": 0.78,
-    "position_x": 0.88,
-    "position_y": 0.11,
-    "title_font_size": 14,
-    "label_font_size": 12,
-    "n_labels": 7,
-}
-
-if is_complex:
-    vol_scalars = "u_abs"
-    vol_title = "|u| (Volume)"
-else:
-    vol_scalars = "u"
-    vol_title = "u (Volume)"
-
-vol_plotter.add_text(vol_title, font_size=12)
-# Use PyVista's default volume mapper/opacity behavior for automatic tuning.
-vol_plotter.add_volume(
-    volume,
-    scalars=vol_scalars,
-    cmap="seismic",
-    scalar_bar_args=volume_scalar_bar_args,
-)
-vol_plotter.show_bounds(grid=None, all_edges=True, location="outer")
-set_camera(vol_plotter)
-vol_plotter.show(screenshot=volume_output)
-print(f"Saved volume figure to {volume_output}")
 
 if args.residuals:
     residuals = np.fromfile(args.residuals, dtype=np.float64)
