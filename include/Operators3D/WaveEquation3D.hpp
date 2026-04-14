@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FEM3D/GridFunc3D.hpp"
 #include "Operators3D/FaceMassMatrix3D.hpp"
 #include "Operators3D/MassMatrix3D.hpp"
 #include "Operators3D/StiffnessMatrix3D.hpp"
@@ -7,13 +8,18 @@
 namespace cuddh
 {
     /**
-     * @brief SEM discretization ofthe wave equation: alpha^2(x) * u_{tt} - div(grad u) = f(x, t),
+     * @brief SEM discretization of the wave equation: alpha^2(x) * u_{tt} - div(grad u) = f(x, t),
      * with boundary conditions: alpha(x) * u_t + du/dn = 0.
      */
     class WaveEquation3D
     {
     public:
-        WaveEquation3D(const double *a2x, const double *ax, const H1Space3D &fem, const TraceSpace3D &tr);
+        /// @brief Constant-coefficient constructor: a(x) = 1.
+        WaveEquation3D(const H1Space3D &fem, const TraceSpace3D &tr);
+
+        /// @brief Variable-coefficient constructor.
+        /// @param a GridFunc3D representing the wave-speed coefficient a(x).
+        WaveEquation3D(const H1Space3D &fem, const TraceSpace3D &tr, const GridFunc3D<double> &a);
 
         /**
          * @brief u1 = u(t + dt) with u0 = u(t).
@@ -42,6 +48,6 @@ namespace cuddh
 
         StiffnessMatrix3D S;
         MassMatrix3D M;
-        host_device_dvec H;
+        FaceMassMatrix3D H;
     };
 } // namespace cuddh

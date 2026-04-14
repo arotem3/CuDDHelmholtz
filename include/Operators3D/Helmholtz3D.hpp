@@ -1,5 +1,7 @@
 #pragma once
 
+#include "FEM3D/GridFunc3D.hpp"
+#include "Operators3D/FaceMassMatrix3D.hpp"
 #include "Operators3D/MassMatrix3D.hpp"
 #include "Operators3D/StiffnessMatrix3D.hpp"
 #include "cuddh_error.hpp"
@@ -11,7 +13,14 @@ namespace cuddh
     class Helmholtz3D : public Operator<double>
     {
     public:
-        Helmholtz3D(double omega_, const double *a2x, const double *ax, const H1Space3D &fem, const TraceSpace3D &tr);
+        /// @brief Constant-coefficient constructor: a(x) = 1.
+        Helmholtz3D(const H1Space3D &fem, const TraceSpace3D &tr, double omega);
+
+        /// @brief Variable-coefficient constructor.
+        /// @param a GridFunc3D representing the wave-speed coefficient a(x).
+        ///          Internally squares a for the mass matrix and computes trace(tr, a)
+        ///          for the face mass term.
+        Helmholtz3D(const H1Space3D &fem, const TraceSpace3D &tr, double omega, const GridFunc3D<double> &a);
 
         /// @brief y[i] = a(x, phi[i]) where a(u,v) = (grad u, grad v) - omega^2 (u, v) - i*omega <u, v>
         /// @param x the real and imaginary part of the solution
@@ -28,6 +37,6 @@ namespace cuddh
 
         StiffnessMatrix3D S;
         MassMatrix3D M;
-        host_device_dvec H;
+        FaceMassMatrix3D H;
     };
 } // namespace cuddh

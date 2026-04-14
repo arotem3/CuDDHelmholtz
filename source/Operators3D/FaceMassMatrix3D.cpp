@@ -1,67 +1,72 @@
 #include "Operators3D/FaceMassMatrix3D.hpp"
 
+#include "FEM3D/TraceFunc3D.hpp"
 #include "forall.hpp"
+#include "linalg.hpp"
 
 using namespace cuddh;
 
-static void init_face_mass(const TraceSpace3D &tr, const double *a, double *m)
+static HostDeviceArray<double> init_face_mass(const TraceSpace3D &tr, const TraceFunc3D<double> *a)
 {
-    const Basis &basis = tr.h1_space().basis();
-    const auto &quad = basis.quadrature();
-    const auto &mesh = tr.h1_space().mesh().to_device();
-
     const int n_faces = tr.n_faces();
-    const int n_basis = basis.size();
+    const int n_basis = tr.h1_space().basis().size();
 
-    auto w = quad.w(MemorySpace::DEVICE);
-    auto x = quad.x(MemorySpace::DEVICE);
+    const auto &quad = tr.h1_space().basis().quadrature();
+    const auto w = quad.w(MemorySpace::DEVICE);
+    const auto x = quad.x(MemorySpace::DEVICE);
+    const auto mesh = tr.h1_space().mesh().to_device();
 
-    auto I = tr.subspace_indices(MemorySpace::DEVICE);
+    const auto faces = tr.faces(MemorySpace::DEVICE);
+    const auto I = tr.subspace_indices(MemorySpace::DEVICE);
+    const auto J = tr.global_indices(MemorySpace::DEVICE);
 
-    forall_2d(n_basis, n_basis, n_faces, [=] __device__(int f) mutable -> void {
-        const int i = threadIdx.x;
-        const int j = threadIdx.y;
+    TensorWrapper<3, const double> A;
+    if (a)
+        A = a->read(MemorySpace::DEVICE);
+
+    HostDeviceArray<double> m(tr.h1_space().size());
+    auto d_m = m.device_write();
+
+    forall_2d(n_basis, n_basis, n_faces, [=] __device__(int f) mutable {
+        const auto [i, j, _] = threadIdx;
 
         __shared__ QuadFace face;
         if (i == 0 && j == 0)
-            face = mesh.face(f);
-
-        const int idx = I(i, j, f);
-        double a_val = (a) ? a[idx] : 1.0;
-        a_val *= w(i) * w(j);
-
-        const double2 r{x(i), x(j)};
-
+            face = mesh.face(faces[f]);
         __syncthreads();
 
-        a_val *= face.measure(r);
-        atomicAdd(m + idx, a_val);
+        const int fem_idx = J(I(i, j, f));
+        double val = w(i) * w(j) * face.measure(double2{x(i), x(j)});
+
+        if (A)
+            val *= A(i, j, f);
+
+        atomicAdd(d_m + fem_idx, val);
     });
+
+    return m;
 }
 
-FaceMassMatrix3D::FaceMassMatrix3D(const TraceSpace3D &tr) : Operator<double>(tr.size()), tr{tr}, m(tr.size())
+FaceMassMatrix3D::FaceMassMatrix3D(const TraceSpace3D &tr) : Operator<double>(tr.h1_space().size()), _fem{tr.h1_space()}
 {
-    init_face_mass(tr, nullptr, m.device_write());
+    _m = init_face_mass(tr, nullptr);
 }
 
-FaceMassMatrix3D::FaceMassMatrix3D(const double *a, const TraceSpace3D &tr)
-    : Operator<double>(tr.size()), tr{tr}, m(tr.size())
+FaceMassMatrix3D::FaceMassMatrix3D(const TraceSpace3D &tr, const GridFunc3D<double> &a)
+    : Operator<double>(tr.h1_space().size()), _fem{tr.h1_space()}
 {
-    init_face_mass(tr, a, m.device_write());
+    TraceFunc3D<double> tf = trace(tr, a);
+    _m = init_face_mass(tr, &tf);
 }
 
 void FaceMassMatrix3D::action(double c, const double *x, double *y) const
 {
-    const int n = tr.size();
-    auto m = this->m.device_read();
-
-    forall(n, [=] __device__(int i) -> void { y[i] += c * m[i] * x[i]; });
+    auto m = to_device();
+    forall(m.size(), [=] __device__(int i) -> void { y[i] += c * m(i) * x[i]; });
 }
 
 void FaceMassMatrix3D::action(const double *x, double *y) const
 {
-    const int n = tr.size();
-    auto m = this->m.device_read();
-
-    forall(n, [=] __device__(int i) -> void { y[i] = m[i] * x[i]; });
+    auto m = to_device();
+    forall(m.size(), [=] __device__(int i) -> void { y[i] = m(i) * x[i]; });
 }

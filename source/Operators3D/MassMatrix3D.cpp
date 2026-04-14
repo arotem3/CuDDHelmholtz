@@ -1,56 +1,67 @@
 #include "Operators3D/MassMatrix3D.hpp"
 
+#include <thrust/device_ptr.h>
+#include <thrust/execution_policy.h>
+#include <thrust/iterator/zip_iterator.h>
+#include <thrust/transform_reduce.h>
+#include <thrust/tuple.h>
+
+#include "FEM3D/GridFunc3D.hpp"
 #include "forall.hpp"
 #include "linalg.hpp"
 
 using namespace cuddh;
 
-static void init_mass(const H1Space3D &fem, const double *d_a, double *d_M)
+static HostDeviceArray<double> init_mass(const H1Space3D &fem, const GridFunc3D<double> *a)
 {
     const auto &quad = fem.basis().quadrature();
     const auto &mesh = fem.mesh().to_device();
-
     const int n_elem = fem.mesh().n_elem();
     const int n_basis = quad.size();
-    const int ndof = fem.size();
 
-    auto I = reshape(fem.global_indices(MemorySpace::DEVICE), n_basis, n_basis, n_basis, n_elem);
+    auto I = fem.global_indices(MemorySpace::DEVICE);
+
+    TensorWrapper<4, const double> A;
+    if (a)
+        A = a->read(MemorySpace::DEVICE);
 
     auto w = quad.w(MemorySpace::DEVICE);
     auto x = quad.x(MemorySpace::DEVICE);
+
+    HostDeviceArray<double> M(fem.size());
+    double *d_M = M.device_write();
 
     forall_3d(n_basis, n_basis, n_basis, n_elem, [=] __device__(int el) mutable -> void {
         const int i = threadIdx.x;
         const int j = threadIdx.y;
         const int k = threadIdx.z;
-
         const int idx = I(i, j, k, el);
 
         __shared__ HexElement elem;
-
-        if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0)
+        if (i == 0 && j == 0 && k == 0)
             elem = mesh.element(el);
         __syncthreads();
 
         const double3 r{x(i), x(j), x(k)};
-        const double detJ = elem.measure(r);
+        double m = w(i) * w(j) * w(k) * elem.measure(r);
 
-        double m = w(i) * w(j) * w(k) * detJ;
-        m *= (d_a) ? d_a[idx] : 1.0;
+        if (A)
+            m *= A(i, j, k, el);
 
         atomicAdd(d_M + idx, m);
     });
+
+    return M;
 }
 
-MassMatrix3D::MassMatrix3D(const H1Space3D &fem) : Operator<double>(fem.size()), fem{fem}, _m(fem.size())
+MassMatrix3D::MassMatrix3D(const H1Space3D &fem) : Operator<double>(fem.size()), fem{fem}
 {
-    init_mass(fem, nullptr, _m.device_write());
+    _m = init_mass(fem, nullptr);
 }
 
-MassMatrix3D::MassMatrix3D(const double *d_a, const H1Space3D &fem)
-    : Operator<double>(fem.size()), fem{fem}, _m(fem.size())
+MassMatrix3D::MassMatrix3D(const H1Space3D &fem, const GridFunc3D<double> &a) : Operator<double>(fem.size()), fem{fem}
 {
-    init_mass(fem, d_a, _m.device_write());
+    _m = init_mass(fem, &a);
 }
 
 void MassMatrix3D::action(double c, const double *x, double *y) const
@@ -74,36 +85,27 @@ InvMassMatrix3D MassMatrix3D::inv() const
     return InvMassMatrix3D(*this);
 }
 
-static void inv_mass(int n, const double *__restrict__ d_m, double *__restrict__ d_mi)
-{
-    forall(n, [=] __device__(int i) -> void { d_mi[i] = 1.0 / d_m[i]; });
-}
-
-// inplace
 static void inv_mass(int n, double *d_m)
 {
     forall(n, [=] __device__(int i) -> void { d_m[i] = 1.0 / d_m[i]; });
 }
 
-InvMassMatrix3D::InvMassMatrix3D(const H1Space3D &fem) : Operator<double>(fem.size()), fem{fem}, _mi(fem.size())
+InvMassMatrix3D::InvMassMatrix3D(const H1Space3D &fem) : Operator<double>(fem.size()), fem{fem}
 {
-    init_mass(fem, nullptr, _mi.device_write());
+    _mi = init_mass(fem, nullptr);
     inv_mass(fem.size(), _mi.device_write());
 }
 
-InvMassMatrix3D::InvMassMatrix3D(const double *d_a, const H1Space3D &fem)
-    : Operator<double>(fem.size()), fem{fem}, _mi(fem.size())
+InvMassMatrix3D::InvMassMatrix3D(const H1Space3D &fem, const GridFunc3D<double> &a)
+    : Operator<double>(fem.size()), fem{fem}
 {
-    init_mass(fem, d_a, _mi.device_write());
+    _mi = init_mass(fem, &a);
     inv_mass(fem.size(), _mi.device_write());
 }
 
-InvMassMatrix3D::InvMassMatrix3D(const MassMatrix3D &M) : Operator<double>(M.fem.size()), fem{M.fem}, _mi(fem.size())
+InvMassMatrix3D::InvMassMatrix3D(const MassMatrix3D &M) : Operator<double>(M.fem.size()), fem{M.fem}, _mi{M._m}
 {
-    const double *d_m = M._m.device_read();
-    double *d_mi = _mi.device_write();
-
-    inv_mass(fem.size(), d_m, d_mi);
+    inv_mass(fem.size(), _mi.device_write());
 }
 
 void InvMassMatrix3D::action(double c, const double *x, double *y) const
@@ -122,90 +124,50 @@ void InvMassMatrix3D::action(const double *x, double *y) const
     forall(n, [=] __device__(int i) -> void { y[i] = mi[i] * x[i]; });
 }
 
-template <int SZ, int NR, typename Lambda>
-__global__ static void sum_reduction_kernel(int n, const double *__restrict__ m, const double *x, const double *y,
-                                            double *__restrict__ result, Lambda op)
+namespace
 {
-    __shared__ double s[SZ];
-
-    const int thread_id = threadIdx.x;
-    const int block_id = blockIdx.x;
-
-    double sum = 0.0;
-
-#pragma unroll
-    for (int j = 0; j < NR; ++j)
+    struct l2_dot_op
     {
-        const int k = thread_id + SZ * (j + NR * block_id);
-        if (k < n)
-            sum += op(m[k], x[k], y[k]);
-    }
-
-    s[thread_id] = sum;
-
-    // tree reduction
-    for (int m = SZ >> 1; m > 0; m >>= 1)
-    {
-        __syncthreads();
-
-        if (thread_id < m)
+        __device__ double operator()(thrust::tuple<double, double, double> t) const
         {
-            s[thread_id] += s[thread_id + m];
+            const auto [m, a, b] = t;
+            return a * m * b;
         }
-    }
+    };
 
-    if (thread_id == 0)
+    struct l2_dist_op
     {
-        sum = s[0];
-        atomicAdd(result, sum);
-    }
-}
+        __device__ double operator()(thrust::tuple<double, double, double> t) const
+        {
+            const auto [m, a, b] = t;
+            double e = a - b;
+            return e * m * e;
+        }
+    };
+} // anonymous namespace
 
 double cuddh::l2_dot(const MassMatrix3D &M, const double *x, const double *y)
 {
     const int n = M.fem.size();
-    auto m = M._m.device_read();
+    auto m = thrust::device_pointer_cast(M._m.device_read());
+    auto px = thrust::device_pointer_cast(x);
+    auto py = thrust::device_pointer_cast(y);
 
-    host_device_dvec result(1);
-    double *d_result = result.device_write();
-    dla::zeros(1, d_result);
+    auto begin = thrust::make_zip_iterator(thrust::make_tuple(m, px, py));
+    auto end = thrust::make_zip_iterator(thrust::make_tuple(m + n, px + n, py + n));
 
-    auto op = [] __device__(double m, double a, double b) -> double {
-        return a * m * b;
-    };
-
-    constexpr int block_size = 32;
-    constexpr int num_reads = 8;
-    constexpr int data_per_block = block_size * num_reads;
-
-    const int n_blocks = (n + data_per_block - 1) / data_per_block;
-
-    sum_reduction_kernel<block_size, num_reads><<<n_blocks, block_size>>>(n, m, x, y, d_result, op);
-
-    return *result.host_read();
+    return thrust::transform_reduce(thrust::device, begin, end, ::l2_dot_op{}, 0.0, thrust::plus<double>());
 }
 
 double cuddh::l2_dist(const MassMatrix3D &M, const double *x, const double *y)
 {
     const int n = M.fem.size();
-    auto m = M._m.device_read();
+    auto m = thrust::device_pointer_cast(M._m.device_read());
+    auto px = thrust::device_pointer_cast(x);
+    auto py = thrust::device_pointer_cast(y);
 
-    host_device_dvec result(1);
-    double *d_result = result.device_write();
-    dla::zeros(1, d_result);
+    auto begin = thrust::make_zip_iterator(thrust::make_tuple(m, px, py));
+    auto end = thrust::make_zip_iterator(thrust::make_tuple(m + n, px + n, py + n));
 
-    auto op = [] __device__(double m, double a, double b) -> double {
-        double e = a - b;
-        return e * m * e;
-    };
-
-    constexpr int block_size = 32;
-    constexpr int num_reads = 8;
-    constexpr int data_per_block = block_size * num_reads;
-
-    const int n_blocks = (n + data_per_block - 1) / data_per_block;
-
-    sum_reduction_kernel<block_size, num_reads><<<n_blocks, block_size>>>(n, m, x, y, d_result, op);
-
-    return std::sqrt(*result.host_read());
+    return std::sqrt(thrust::transform_reduce(thrust::device, begin, end, ::l2_dist_op{}, 0.0, thrust::plus<double>()));
 }

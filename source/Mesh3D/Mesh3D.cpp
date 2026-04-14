@@ -276,6 +276,10 @@ Mesh3D Mesh3D::from_vertices(int nx, const double3 *nodes, int nel, const int *e
     assert(I == n_interior_faces);
     assert(B == n_boundary_faces);
 
+    // copy connectivity vector to device-accessible array
+    mesh._connectivity.resize(n_faces);
+    std::copy_n(mesh.connectivity.data(), n_faces, mesh._connectivity.host_write());
+
     return mesh;
 }
 
@@ -288,6 +292,7 @@ DeviceMesh3D Mesh3D::to_device() const
     d_mesh.faces = reshape(faces.device_read(), 4, nf);
     d_mesh.interior_faces = reshape(interior_faces.device_read(), nif);
     d_mesh.boundary_faces = reshape(boundary_faces.device_read(), nbf);
+    d_mesh.connectivity = reshape(_connectivity.device_read(), nf);
 
     return d_mesh;
 }

@@ -1,48 +1,21 @@
 #include "Operators3D/Helmholtz3D.hpp"
 
+#include "forall.hpp"
+
 using namespace cuddh;
 
-static void init_face_mass(const TraceSpace3D &tr, const double *d_a, double *d_m)
+static GridFunc3D<double> square(const GridFunc3D<double> &a)
 {
-    const int n_faces = tr.n_faces();
-    const int n_basis = tr.h1_space().basis().size();
-
-    auto &quad = tr.h1_space().basis().quadrature();
-
-    auto w = quad.w(MemorySpace::DEVICE);
-    auto x = quad.x(MemorySpace::DEVICE);
-
-    DeviceMesh3D mesh = tr.h1_space().mesh().to_device();
-
-    auto I = tr.subspace_indices(MemorySpace::DEVICE);
-    auto J = tr.global_indices(MemorySpace::DEVICE);
-
-    forall_2d(n_basis, n_basis, n_faces, [=] __device__(int f) mutable -> void {
-        const int tr_idx = I(threadIdx.x, threadIdx.y, f);
-        const int fem_idx = J(tr_idx);
-
-        __shared__ QuadFace face;
-        if (threadIdx.x == 0 && threadIdx.y == 0)
-            face = mesh.face(f);
-
-        double value = w(threadIdx.x) * w(threadIdx.y);
-        if (d_a)
-            value *= d_a[tr_idx];
-
-        __syncthreads();
-
-        value *= face.measure(double2{x(threadIdx.x), x(threadIdx.y)});
-
-        atomicAdd(d_m + fem_idx, value);
-    });
+    return a.transform([] __device__(double x) -> double { return x * x; });
 }
 
-Helmholtz3D::Helmholtz3D(double omega_, const double *a2x, const double *ax, const H1Space3D &fem,
-                         const TraceSpace3D &tr)
-    : Operator<double>(2 * fem.size()), omega{omega_}, S(fem), M(a2x, fem), H(fem.size())
-{
-    init_face_mass(tr, ax, H.device_write());
-}
+Helmholtz3D::Helmholtz3D(const H1Space3D &fem, const TraceSpace3D &tr, double omega)
+    : Operator<double>(2 * fem.size()), omega{omega}, S(fem), M(fem), H(tr)
+{}
+
+Helmholtz3D::Helmholtz3D(const H1Space3D &fem, const TraceSpace3D &tr, double omega, const GridFunc3D<double> &a)
+    : Operator<double>(2 * fem.size()), omega{omega}, S(fem), M(fem, square(a)), H(tr, a)
+{}
 
 void Helmholtz3D::action(const double *x, double *y) const
 {
@@ -58,16 +31,17 @@ void Helmholtz3D::action(const double *x, double *y) const
     S.action(v, Av);
 
     double omega = this->omega;
-    auto m = diagonal_mass(M, MemorySpace::DEVICE);
-    auto h = reshape(H.device_read(), n);
+    double om2 = omega * omega;
+    auto m = M.to_device();
+    auto h = H.to_device();
 
-    forall(n, [=] __device__(int i) -> void {
-        const double mi = m[i];
-        const double hi = h[i];
+    forall(n, [=] __device__(int i) {
+        const double mi = om2 * m(i);
+        const double hi = omega * h(i);
 
         const double U = u[i], V = v[i];
 
-        Au[i] = Au[i] - omega * omega * mi * U + omega * hi * V;
-        Av[i] = -Av[i] + omega * omega * mi * V + omega * hi * U;
+        Au[i] = Au[i] - mi * U + hi * V;
+        Av[i] = -Av[i] + mi * V + hi * U;
     });
 }

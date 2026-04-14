@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "FEM3D/GridFunc3D.hpp"
 #include "HostDeviceArray.hpp"
 #include "Operators3D/FaceMassMatrix3D.hpp"
 #include "Operators3D/MassMatrix3D.hpp"
@@ -13,7 +14,12 @@ namespace cuddh
     class WaveHoltz3D : public Operator<double>
     {
     public:
-        WaveHoltz3D(double omega, const double *a2x, const double *ax, const H1Space3D &fem_, const TraceSpace3D &fs_);
+        /// @brief Constant-coefficient constructor: a(x) = 1.
+        WaveHoltz3D(const H1Space3D &fem, const TraceSpace3D &fs, double omega);
+
+        /// @brief Variable-coefficient constructor.
+        /// @param a GridFunc3D representing the wave-speed coefficient a(x).
+        WaveHoltz3D(const H1Space3D &fem, const TraceSpace3D &fs, double omega, const GridFunc3D<double> &a);
 
         /// @brief y <- y + c * S * x
         inline void S(double c, const double *x, double *y) const
@@ -44,7 +50,7 @@ namespace cuddh
         double shift;
 
         StiffnessMatrix3D stiffness;
-        HostDeviceArray<double2> ab; // time stepping
+        HostDeviceArray<double2> ab;
 
         mutable HostDeviceArray<double> acc;
         mutable HostDeviceArray<double> w;

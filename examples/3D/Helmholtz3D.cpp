@@ -61,11 +61,11 @@ __device__ static double f(double3 x, double omega)
     return F;
 }
 
-/// @brief a(x) = 1/c(x) where c(x) is the wave-speed.
-__device__ static double a(double3 x)
+/// @brief alpha(x) = 1/c(x) where c(x) is the wave-speed.
+__device__ static double alpha(double3 x)
 {
-    const double r = x.x * x.x + x.y * x.y + x.z * x.z;
-    return (r < 0.0625) ? 0.2 : 1.0;
+    const double r = max(abs(x.x), abs(x.y));
+    return (r < 0.5) ? 0.5 : 1.0;
 }
 
 int main(int argc, char *argv[])
@@ -115,33 +115,21 @@ int main(int argc, char *argv[])
     // Combine the mesh and basis functions in H1Space3D to define the global DOFs
     H1Space3D fem(mesh, basis);
     const int ndof = fem.size();
+    const int N = 2 * ndof;
 
     std::cout << "Solving the 3D Helmholtz equation...\n"
               << "\tomega = " << omega << "\n"
               << "\t#elements = " << mesh.n_elem() << "\n"
               << "\tpolynomial degree = " << deg << "\n"
-              << "\t#dof = " << 2 * ndof << "\n";
+              << "\t#dof = " << N << "\n";
 
     // Identify boundary faces and construct the trace space
     auto boundary_faces = mesh.get_boundary_faces();
     TraceSpace3D fs(fem, boundary_faces.size(), boundary_faces);
 
-    host_device_dvec a2x(ndof);
-    host_device_dvec ax(fs.size());
+    auto a = gridfunc(fem, [=] __device__(double3 x) -> double { return alpha(x); });
 
-    gridfunc(
-        fem,
-        [=] __device__(double3 x) -> double {
-            double aX = a(x);
-            return aX * aX;
-        },
-        a2x.device_write());
-
-    trace(fs, [=] __device__(double3 x) -> double { return a(x); }, ax.device_write());
-
-    Helmholtz3D A(omega, a2x.device_read(), ax.device_read(), fem, fs);
-
-    const int N = 2 * ndof;
+    Helmholtz3D A(fem, fs, omega, a);
 
     thrust::universal_vector<double> U(N, 0.0); // solution vector [u; v] initialized to zero
     thrust::universal_vector<double> B(N, 0.0); // right-hand side [b; 0]

@@ -2,61 +2,21 @@
 
 #include <thrust/extrema.h>
 
+#include <algorithm>
+
+#include "Operators3D/FaceMassMatrix3D.hpp"
 #include "forall.hpp"
 #include "linalg.hpp"
 
 using namespace cuddh;
 
-static thrust::device_vector<double> make_face_mass(const TraceSpace3D &tr, const double *d_a)
-{
-    const int n_faces = tr.n_faces();
-    const int n_basis = tr.h1_space().basis().size();
-
-    auto &quad = tr.h1_space().basis().quadrature();
-
-    auto w = quad.w(MemorySpace::DEVICE);
-    auto x = quad.x(MemorySpace::DEVICE);
-
-    DeviceMesh3D mesh = tr.h1_space().mesh().to_device();
-
-    auto I = tr.subspace_indices(MemorySpace::DEVICE);
-    auto J = tr.global_indices(MemorySpace::DEVICE);
-
-    thrust::device_vector<double> H(tr.h1_space().size(), 0);
-    auto d_m = thrust::raw_pointer_cast(H.data());
-
-    forall_2d(n_basis, n_basis, n_faces, [=] __device__(int f) mutable -> void {
-        const int tr_idx = I(threadIdx.x, threadIdx.y, f);
-        const int fem_idx = J(tr_idx);
-
-        __shared__ QuadFace face;
-        if (threadIdx.x == 0 && threadIdx.y == 0)
-            face = mesh.face(f);
-
-        double value = w(threadIdx.x) * w(threadIdx.y);
-        if (d_a)
-            value *= d_a[tr_idx];
-
-        __syncthreads();
-
-        value *= face.measure(double2{x(threadIdx.x), x(threadIdx.y)});
-
-        atomicAdd(d_m + fem_idx, value);
-    });
-
-    return H;
-}
-
-static HostDeviceArray<double2> make_alpha_beta(double theta, double sigma, const double *a2, const double *a,
-                                                const H1Space3D &fem, const TraceSpace3D &fs)
+static HostDeviceArray<double2> make_alpha_beta(const H1Space3D &fem, double theta, double sigma, const MassMatrix3D &M,
+                                                const FaceMassMatrix3D &H)
 {
     const int ndof = fem.size();
 
-    MassMatrix3D M(a2, fem);
-    auto m = diagonal_mass(M, MemorySpace::DEVICE);
-
-    auto H = make_face_mass(fs, a);
-    auto h = reshape(thrust::raw_pointer_cast(H.data()), ndof);
+    auto m = M.to_device();
+    auto h = H.to_device();
 
     HostDeviceArray<double2> _ab(ndof);
     auto ab = reshape(_ab.device_write(), ndof);
@@ -76,31 +36,60 @@ static HostDeviceArray<double2> make_alpha_beta(double theta, double sigma, cons
     return _ab;
 }
 
-WaveHoltz3D::WaveHoltz3D(double omega, const double *a2x, const double *ax, const H1Space3D &fem,
-                         const TraceSpace3D &fs)
+static GridFunc3D<double> square(const GridFunc3D<double> &a)
+{
+    return a.transform([] __device__(double x) -> double { return x * x; });
+}
+
+static double compute_nt(double omega, double h, double p, const GridFunc3D<double> *a)
+{
+    double c = 1.0;
+
+    if (a)
+    {
+        auto aview = a->read(MemorySpace::HOST);
+        c = *std::min_element(aview.begin(), aview.end());
+    }
+
+    cuddh_verify(
+        c > 0,
+        printf("WaveHoltz3D error: coefficient a must be strictly positive. Encountered non-positive value: %f.\n", c));
+
+    double dt = 2.0 * h * c / (p * p);
+    double T = 2.0 * M_PI / omega;
+    return std::max<int>(std::ceil(T / dt), 5);
+}
+
+WaveHoltz3D::WaveHoltz3D(const H1Space3D &fem, const TraceSpace3D &fs, double omega)
     : Operator<double>(2 * fem.size()), omega(omega), stiffness(fem), acc(fem.size()), w(this->ndof())
 {
-    const int n = this->ndof() / 2;
+    nt = compute_nt(omega, fem.mesh().h(), fem.basis().size(), nullptr);
 
-    const double maxvel = [&]() -> double {
-        auto iter = thrust::device_pointer_cast(a2x);
-        double amin = *thrust::min_element(iter, iter + n);
-        return 1.0 / std::sqrt(amin);
-    }();
-
-    double T = 2.0 * M_PI / omega;
-    double p = fem.basis().size();
-    double dt = 2.0 * fem.mesh().h() / (p * p * maxvel); // CFL condition
-
-    nt = std::max(std::ceil(T / dt), 5.0);
-
-    double tan = std::tan(M_PI / nt);
-    shift = 0.25 - 0.25 * tan * tan;
+    double tan_val = std::tan(M_PI / nt);
+    shift = 0.25 - 0.25 * tan_val * tan_val;
 
     const double theta = std::tan(M_PI / nt) / omega;
     const double sigma = std::sin(M_PI / nt) / (0.5 * omega);
 
-    ab = make_alpha_beta(theta, sigma, a2x, ax, fem, fs);
+    MassMatrix3D M(fem);
+    FaceMassMatrix3D H(fs);
+    ab = make_alpha_beta(fem, theta, sigma, M, H);
+}
+
+WaveHoltz3D::WaveHoltz3D(const H1Space3D &fem, const TraceSpace3D &fs, double omega, const GridFunc3D<double> &a)
+    : Operator<double>(2 * fem.size()), omega(omega), stiffness(fem), acc(fem.size()), w(this->ndof())
+{
+    nt = compute_nt(omega, fem.mesh().h(), fem.basis().size(), &a);
+
+    double tan_val = std::tan(M_PI / nt);
+    shift = 0.25 - 0.25 * tan_val * tan_val;
+
+    const double theta = std::tan(M_PI / nt) / omega;
+    const double sigma = std::sin(M_PI / nt) / (0.5 * omega);
+
+    MassMatrix3D M(fem, square(a));
+    FaceMassMatrix3D H(fs, a);
+    ab = make_alpha_beta(fem, theta, sigma, M, H);
 }
 
 void WaveHoltz3D::action(double c, const double *x, double *y) const

@@ -53,8 +53,8 @@ __device__ static double f(double3 x, double omega)
 
 __device__ static double alpha(double3 x)
 {
-    const double r = x.x * x.x + x.y * x.y + x.z * x.z;
-    return (r < 0.0625) ? 0.2 : 1.0;
+    const double r = max(abs(x.x), abs(x.y));
+    return (r < 0.5) ? 0.5 : 1.0;
 }
 
 int main(int argc, char *argv[])
@@ -116,38 +116,22 @@ int main(int argc, char *argv[])
     auto boundary_faces = mesh.get_boundary_faces();             // identify boundary faces
     TraceSpace3D fs(fem, boundary_faces.size(), boundary_faces); // define trace space
 
-    const int fdof = fs.size(); // number of degrees of freedom in trace space
-
-    host_device_dvec U(N);     // solution vector
-    host_device_dvec b(N);     // forcing term
-    host_device_dvec Gb(N);    // WaveHoltz G applied to b
-    host_device_dvec a2(ndof); // variable coefficient on collocation points
-    host_device_dvec a(fdof);  // variable coefficient on trace space
+    host_device_dvec U(N);  // solution vector
+    host_device_dvec b(N);  // forcing term
+    host_device_dvec Gb(N); // WaveHoltz G applied to b
 
     double *d_U = U.device_write();   // device pointer to solution vector
     double *d_b = b.device_write();   // device pointer to right-hand side vector
-    double *d_a2 = a2.device_write(); // device pointer to variable coefficient
-    double *d_a = a.device_write();   // device pointer to variable coefficient on trace space
     double *d_Gb = Gb.device_write(); // device pointer to G applied to b
 
     // compute b = (f, phi)
-    MassMatrix3D M(fem);
-    l2_project(M, [=] __device__(double3 x) -> double { return f(x, omega); }, d_b); // compute right-hand side
+    l2_project(MassMatrix3D(fem), [=] __device__(double3 x) -> double { return f(x, omega); }, d_b);
 
-    // compute variable coefficient
-    gridfunc(
-        fem,
-        [=] __device__(double3 x) -> double {
-            double ax = alpha(x);
-            return ax * ax;
-        },
-        d_a2); // compute variable coefficient
-
-    // compute trace of the variable coefficient
-    trace(fs, [=] __device__(double3 x) -> double { return alpha(x); }, d_a);
+    // build variable coefficient GridFunc3D
+    auto a = gridfunc(fem, [=] __device__(double3 x) -> double { return alpha(x); });
 
     // Initialize the WaveHoltz operator
-    WaveHoltz3D W(omega, d_a2, d_a, fem, fs);
+    WaveHoltz3D W(fem, fs, omega, a);
 
     W.G(d_b, d_Gb); // apply G to the right-hand side vector
 
@@ -155,13 +139,13 @@ int main(int argc, char *argv[])
               << "\tomega = " << omega << "\n"
               << "\t#elements = " << mesh.n_elem() << "\n"
               << "\tpolynomial degree = " << deg << "\n"
-              << "\t#dof = " << 2 * ndof << std::endl;
+              << "\t#dof = " << N << std::endl;
 
     // Solve the system using GMRES
     SolverResults out = gmres(d_U, W, d_Gb, kdim, nullptr, opts);
 
     double res = [&]() {
-        Helmholtz3D A(omega, d_a2, d_a, fem, fs);
+        Helmholtz3D A(fem, fs, omega, a);
 
         thrust::device_vector<double> Au(N);
         double *d_Au = thrust::raw_pointer_cast(Au.data());

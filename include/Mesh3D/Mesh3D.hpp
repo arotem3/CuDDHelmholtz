@@ -180,6 +180,7 @@ namespace cuddh
         HostDeviceArray<int> faces;          // shape (4, n_faces) -> indices of faces
         HostDeviceArray<int> interior_faces; // shape (n_interior_faces) -> indices of interior faces (in faces)
         HostDeviceArray<int> boundary_faces; // shape (n_boundary_faces) -> indices of boundary faces (in faces)
+        HostDeviceArray<FaceConnectivity> _connectivity; // shape (n_faces) -> connectivity for each face
 
         std::vector<FaceConnectivity> connectivity;
     };
@@ -241,6 +242,16 @@ namespace cuddh
             return face(interior_faces[f]);
         }
 
+        /**
+         * @brief Returns the face connectivity of face f.
+         */
+        __device__ FaceConnectivity face_connectivity(int f) const
+        {
+            cuddh_assert(0 <= f && f < n_faces(),
+                         printf("Mesh3D error: face index %d out of range [0, %d).\n", f, n_faces()););
+            return connectivity[f];
+        }
+
     private:
         friend class Mesh3D;
 
@@ -249,5 +260,6 @@ namespace cuddh
         const_imat_wrapper faces;
         const_ivec_wrapper interior_faces;
         const_ivec_wrapper boundary_faces;
+        VectorWrapper<const FaceConnectivity> connectivity;
     };
 } // namespace cuddh

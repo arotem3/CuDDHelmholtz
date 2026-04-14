@@ -2,6 +2,7 @@
 
 #include <cmath>
 
+#include "FEM3D/GridFunc3D.hpp"
 #include "FEM3D/H1Space3D.hpp"
 #include "HostDeviceArray.hpp"
 #include "Operator.hpp"
@@ -24,10 +25,10 @@ namespace cuddh
 
         /**
          * @brief initialize weighted mass matrix m(u, v) = (a(x)*u, v)
-         * @param a DEVICE. H1Space3D vector representing the function a.
+         * @param a GridFunc3D representing the function a, accessed element-locally.
          * @param fem
          */
-        MassMatrix3D(const double *d_a, const H1Space3D &fem);
+        MassMatrix3D(const H1Space3D &fem, const GridFunc3D<double> &a);
 
         /**
          * @brief y <- y + c * M*x, where M is the mass matrix
@@ -38,6 +39,9 @@ namespace cuddh
          * @brief y <- M*x, where M is the mass matrix
          */
         void action(const double *x, double *y) const override;
+
+        /// @brief Returns the diagonal mass vector (length fem.size()) on the device.
+        const_dvec_wrapper to_device() const { return reshape(_m.device_read(), _m.size()); }
 
         InvMassMatrix3D inv() const;
 
@@ -64,7 +68,7 @@ namespace cuddh
     {
     public:
         InvMassMatrix3D(const H1Space3D &fem);
-        InvMassMatrix3D(const double *d_a, const H1Space3D &fem);
+        InvMassMatrix3D(const H1Space3D &fem, const GridFunc3D<double> &a);
         InvMassMatrix3D(const MassMatrix3D &M);
 
         /**
