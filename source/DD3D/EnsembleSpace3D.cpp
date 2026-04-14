@@ -38,7 +38,8 @@ namespace
 } // namespace
 
 EnsembleSpace3D::EnsembleSpace3D(const H1Space3D &fem, int n_spaces, const int *element_labels)
-    : n_spaces{n_spaces},
+    : fem(fem),
+      n_spaces{n_spaces},
       n_basis{fem.basis().size()},
       sp_dof(n_spaces),
       sp_n_elems(n_spaces),

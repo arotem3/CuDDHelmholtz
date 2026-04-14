@@ -20,6 +20,8 @@ namespace cuddh
          */
         EnsembleSpace3D(const H1Space3D &fem, int n_spaces, const int *element_labels);
 
+        const H1Space3D &fem_space() const { return fem; }
+
         /// @brief returns the number of subspaces
         int size() const { return n_spaces; }
 
@@ -112,6 +114,8 @@ namespace cuddh
         auto connectivity_map(MemorySpace m) const { return reshape(cmap.read(m), n_shared_dofs); }
 
     private:
+        const H1Space3D &fem;
+
         const int n_spaces;
         const int n_basis;
         int mx_elems;
