@@ -72,10 +72,11 @@ namespace cuddh
         HostDeviceArray<value_t> values;
     };
 
-    template <Func2D Func, typename value_t = std::invoke_result_t<Func, double2>>
+    template <Func2D Func, typename value_t = std::invoke_result_t<Func, double2>, int MXQ = 8>
     GridFunc2D<value_t> gridfunc(const H1Space2D &fem, const QuadratureRule &quad, Func &&f)
     {
-        constexpr int MXQ = 16;
+        static_assert(MXQ * MXQ <= 1024, "MXQ^2 cannot exceed max threads per block (1024).");
+
         const int n_quad = quad.size();
         cuddh_verify(n_quad <= MXQ, printf("gridfunc error: quad.size() (=%d) > %d not supported.\n", n_quad, MXQ));
 
@@ -88,12 +89,10 @@ namespace cuddh
         const auto mesh = fem.mesh().to_device();
 
         HostDeviceArray<value_t> _p(n_basis * n_quad);
-        fem.basis().eval(n_quad, quad.x(MemorySpace::HOST), _p.write(MemorySpace::HOST));
+        polynomial_projection_matrix(reshape(_p.write(MemorySpace::HOST), n_quad, n_basis), fem.basis(), quad);
         const auto p = reshape(_p.read(MemorySpace::DEVICE), n_quad, n_basis);
 
         const auto qx = quad.x(MemorySpace::DEVICE);
-        const auto qw = quad.w(MemorySpace::DEVICE);
-        const auto bw = fem.basis().quadrature().w(MemorySpace::DEVICE);
 
         const int nel = gf.n_elem();
         const int n = std::max(n_basis, n_quad);
@@ -118,8 +117,7 @@ namespace cuddh
                 double2 xi{qx(i), qx(j)};
                 double2 x = element.physical_coordinates(xi);
 
-                double ww = qw(i) * qw(j);
-                Fel[i][j] = ww * std::invoke(f, x);
+                Fel[i][j] = std::invoke(f, x);
             }
             __syncthreads();
 
@@ -138,9 +136,7 @@ namespace cuddh
                 value_t PyPxF{};
                 for (int l = 0; l < n_quad; ++l)
                     PyPxF = PyPxF + P[l][j] * Fel[i][l];
-
-                double inv = 1 / (bw(i) * bw(j));
-                F(i, j, el) = inv * PyPxF;
+                F(i, j, el) = PyPxF;
             }
         });
 
