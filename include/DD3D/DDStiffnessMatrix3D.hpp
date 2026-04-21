@@ -20,28 +20,24 @@ namespace cuddh
         template <typename scalar_t, int NB, int MX_NEL>
         struct SubdomainStiffnessMatrix3DSmemImpl
         {
+            static_assert(NB * NB * NB * MX_NEL < std::numeric_limits<int16_t>::max());
+            static_assert(NB < std::numeric_limits<int8_t>::max());
+
             using vec_t = cuddh::scalar3<scalar_t>;
             using mat_t = SmallSymmetricMatrix<scalar_t, 3>;
 
             struct SharedResources
             {
                 scalar_t D[NB][NB];
-                scalar_t u[MX_NEL * NB * NB * NB];
+                scalar_t remap[MX_NEL * NB * NB * NB];
+                scalar_t u[MX_NEL][NB][NB][NB];
                 vec_t grad[MX_NEL][NB][NB][NB];
             };
 
             SharedResources &smem;
             mat_t geom;
-            int I[3][NB];
-
-            __device__ static constexpr int3 get_index3d(int i)
-            {
-                int3 idx;
-                idx.z = i / (NB * NB);
-                idx.y = (i % (NB * NB)) / NB;
-                idx.x = (i % (NB * NB)) % NB;
-                return idx;
-            }
+            int16_t I;
+            int8_t x,y,z;
 
             __device__ SubdomainStiffnessMatrix3DSmemImpl(SharedResources &mem, scalar_t * /*unused*/, int subsp,
                                                           int nel, const MatrixWrapper<const scalar_t> &D,
@@ -49,19 +45,15 @@ namespace cuddh
                                                           const TensorWrapper<5, const int> &sI)
                 : smem{mem}
             {
-                const auto [x, y, z] = get_index3d(threadIdx.x);
+                z = threadIdx.x / (NB * NB);
+                y = (threadIdx.x % (NB * NB)) / NB;
+                x = (threadIdx.x % (NB * NB)) % NB;
                 const auto el = threadIdx.y;
 
                 if (el == 0 && z == 0)
                     smem.D[x][y] = D(x, y);
 
-                for (int i = 0; i < NB; ++i)
-                {
-                    I[0][i] = (el < nel) ? sI(i, y, z, el, subsp) : -1;
-                    I[1][i] = (el < nel) ? sI(x, i, z, el, subsp) : -1;
-                    I[2][i] = (el < nel) ? sI(x, y, i, el, subsp) : -1;
-                }
-
+                I = (el < nel) ? sI(x, y, z, el, subsp) : -1;
                 geom = (el < nel) ? G(x, y, z, el, subsp) : mat_t{};
 
                 __syncthreads();
@@ -69,41 +61,37 @@ namespace cuddh
 
             __device__ scalar_t operator()(scalar_t in) const
             {
-                const auto [x, y, z] = get_index3d(threadIdx.x);
-                const auto el = threadIdx.y;
-                const int tid = threadIdx.x + blockDim.x * threadIdx.y;
+                const int16_t el = threadIdx.y;
+                const int16_t tid = threadIdx.x + blockDim.x * threadIdx.y;
 
-                smem.u[tid] = in;
+                smem.remap[tid] = in;
+                __syncthreads();
+
+                smem.u[el][x][y][z] = (I >= 0) ? smem.remap[I] : 0;
                 __syncthreads();
 
                 vec_t grad{0, 0, 0};
-
-                if (I[0][0] >= 0) // el < nel
+                for (int i = 0; i < NB; ++i)
                 {
-                    for (int i = 0; i < NB; ++i)
-                    {
-                        grad.x += smem.D[x][i] * smem.u[I[0][i]];
-                        grad.y += smem.D[y][i] * smem.u[I[1][i]];
-                        grad.z += smem.D[z][i] * smem.u[I[2][i]];
-                    }
+                    grad.x += smem.D[x][i] * smem.u[el][i][y][z];
+                    grad.y += smem.D[y][i] * smem.u[el][x][i][z];
+                    grad.z += smem.D[z][i] * smem.u[el][x][y][i];
                 }
-                __syncthreads();
 
-                smem.u[tid] = 0;
+                smem.remap[tid] = 0;
                 smem.grad[el][x][y][z] = geom * grad;
                 __syncthreads();
 
                 scalar_t Su = 0;
-
                 for (int i = 0; i < NB; ++i)
                 {
                     Su += smem.D[i][x] * smem.grad[el][i][y][z].x + smem.D[i][y] * smem.grad[el][x][i][z].y +
                           smem.D[i][z] * smem.grad[el][x][y][i].z;
                 }
-                atomicAdd(smem.u + I[0][x], Su);
+                atomicAdd(smem.remap + I, Su);
                 __syncthreads();
 
-                return smem.u[tid];
+                return smem.remap[tid];
             }
         };
 
@@ -111,6 +99,9 @@ namespace cuddh
         template <typename scalar_t, int TDOF, int NB, int NEL>
         struct SubdomainStiffnessMatrix3DTDOFImpl
         {
+            static_assert(NB * NB * NB * NEL < std::numeric_limits<int16_t>::max());
+            static_assert(NB < std::numeric_limits<int8_t>::max());
+
             using vec_t = cuddh::scalar3<scalar_t>;
             using mat_t = SmallSymmetricMatrix<scalar_t, 3>;
             using arr_t = cuda::std::array<scalar_t, TDOF>;
@@ -118,23 +109,15 @@ namespace cuddh
             struct SharedResources
             {
                 scalar_t D[NB][NB];
-                scalar_t u[NEL][NB][NB][NB]; // single-pass buffer, indexed [el][x][y][z]
+                scalar_t u[NEL][NB][NB][NB];
                 vec_t grad[NEL][NB][NB][NB];
             };
 
             SharedResources &smem;
             scalar_t *const global_work;
             mat_t geom[TDOF];
-            int I[TDOF]; // global_work index for this thread's DOF per TDOF slot (-1 if out of range)
-
-            __device__ static constexpr int3 get_index3d(int i)
-            {
-                int3 idx;
-                idx.z = i / (NB * NB);
-                idx.y = (i % (NB * NB)) / NB;
-                idx.x = (i % (NB * NB)) % NB;
-                return idx;
-            }
+            int16_t I[TDOF];
+            int8_t x, y, z;
 
             __device__ SubdomainStiffnessMatrix3DTDOFImpl(SharedResources &mem, scalar_t *global_work, int subsp,
                                                           int nel, const MatrixWrapper<const scalar_t> &D,
@@ -142,15 +125,17 @@ namespace cuddh
                                                           const TensorWrapper<5, const int> &sI)
                 : smem{mem}, global_work{global_work}
             {
-                const auto [x, y, z] = get_index3d(threadIdx.x);
-                const auto el = threadIdx.y;
+                z = threadIdx.x / (NB * NB);
+                y = (threadIdx.x % (NB * NB)) / NB;
+                x = (threadIdx.x % (NB * NB)) % NB;
+                const int16_t el = threadIdx.y;
 
                 if (el == 0 && z == 0)
                     smem.D[x][y] = D(x, y);
 
                 for (int t = 0; t < TDOF; ++t)
                 {
-                    const int el_t = el + NEL * t;
+                    const int16_t el_t = el + NEL * t;
                     I[t] = (el_t < nel) ? sI(x, y, z, el_t, subsp) : -1;
                     geom[t] = (el_t < nel) ? G(x, y, z, el_t, subsp) : mat_t{};
                 }
@@ -162,9 +147,9 @@ namespace cuddh
             {
                 constexpr int EDOF = NB * NB * NB;
                 constexpr int BDOF = EDOF * NEL;
-                const auto [x, y, z] = get_index3d(threadIdx.x);
-                const auto el = threadIdx.y;
-                const int tid = threadIdx.x + EDOF * threadIdx.y;
+
+                const int16_t el = threadIdx.y;
+                const int16_t tid = threadIdx.x + EDOF * threadIdx.y;
 
                 for (int t = 0; t < TDOF; ++t)
                     global_work[tid + BDOF * t] = values[t];
@@ -172,22 +157,16 @@ namespace cuddh
 
                 for (int t = 0; t < TDOF; ++t)
                 {
-                    if (I[t] >= 0)
-                        smem.u[el][x][y][z] = global_work[I[t]];
+                    smem.u[el][x][y][z] = (I[t] >= 0) ? global_work[I[t]] : 0;
                     __syncthreads();
 
                     vec_t grad{0, 0, 0};
-
-                    if (I[t] >= 0)
+                    for (int i = 0; i < NB; ++i)
                     {
-                        for (int i = 0; i < NB; ++i)
-                        {
-                            grad.x += smem.D[x][i] * smem.u[el][i][y][z];
-                            grad.y += smem.D[y][i] * smem.u[el][x][i][z];
-                            grad.z += smem.D[z][i] * smem.u[el][x][y][i];
-                        }
+                        grad.x += smem.D[x][i] * smem.u[el][i][y][z];
+                        grad.y += smem.D[y][i] * smem.u[el][x][i][z];
+                        grad.z += smem.D[z][i] * smem.u[el][x][y][i];
                     }
-                    __syncthreads();
 
                     smem.grad[el][x][y][z] = geom[t] * grad;
                     __syncthreads();

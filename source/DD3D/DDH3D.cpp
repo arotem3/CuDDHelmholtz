@@ -109,9 +109,14 @@ public:
 };
 
 template <typename scalar_t, int NB, int NEL, int TDOF = 1>
-__global__ __launch_bounds__(NB * NB * NB * NEL, 1024 / (NB * NB * NB * NEL)) void ddh_action_kernel_3d(
-    const DDH3DKernelData<scalar_t, NB, NEL, TDOF> helper, const double *const __restrict__ x,
-    double *const __restrict__ y, const scalar_t *const __restrict__ d_lambda, scalar_t *const __restrict__ d_update)
+__global__ __launch_bounds__(NB * NB * NB * NEL,
+                             (32 * CUDDH_WARPS_PER_SM) /
+                                 (NB * NB * NB * NEL *
+                                  TDOF)) void ddh_action_kernel_3d(const DDH3DKernelData<scalar_t, NB, NEL, TDOF> helper,
+                                                                  const double *const __restrict__ x,
+                                                                  double *const __restrict__ y,
+                                                                  const scalar_t *const __restrict__ d_lambda,
+                                                                  scalar_t *const __restrict__ d_update)
 {
     constexpr int EDOF = NB * NB * NB;
     [[maybe_unused]] constexpr int BDOF = EDOF * NEL;
@@ -490,7 +495,15 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
     else
     {
         int B = static_cast<int>(config.block_size);
-        config.tdof = (mx_dof + B - 1) / B;
+        int t = (mx_dof + B - 1) / B;
+
+        if (config.tdof <= 0)
+            config.tdof = t;
+        
+        cuddh_verify(config.tdof >= t,
+                     printf("DDH3D: Kernel configuration with %d threads/block requires tdof >= %d, but tdof = %d "
+                            "was specified. This occured because at least one subdomain has %d elements.\n",
+                            B, t, config.tdof, mx_elems));
     }
 
     cuddh_verify(config.tdof <= 4, printf("DDH: Kernel configuration with tdof > 4 not compiled.\n"));
@@ -620,6 +633,12 @@ struct KernelDispatcher3D
                 break;
             case 4:
                 dispatch_tdof<4>(std::forward<Args>(args)...);
+                break;
+            case 5:
+                dispatch_tdof<5>(std::forward<Args>(args)...);
+                break;
+            case 6:
+                dispatch_tdof<6>(std::forward<Args>(args)...);
                 break;
             default:
                 cuddh_verify(false, printf("DDH3D error: Invalid n_basis (=%d). Must be one of {2, 3, 4}.\n", n_basis));

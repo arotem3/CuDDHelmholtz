@@ -10,6 +10,7 @@
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
 #include "forall.hpp"
+#include "FixedTensorWrapper.hpp"
 
 namespace cuddh
 {
@@ -127,6 +128,9 @@ namespace cuddh::details
         requires(NB == 2 || NB == 4)
     struct SubdomainStiffnessMatrixWarpImpl
     {
+        static_assert(NB * NB * NEL < std::numeric_limits<int16_t>::max());
+        static_assert(NB * NB < std::numeric_limits<int8_t>::max());
+
         using vec_t = cuddh::scalar2<scalar_t>;
         using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
 
@@ -136,10 +140,10 @@ namespace cuddh::details
         };
 
         SharedResources &smem;
-        mat_t geom;
-        int I;
-        int tx, ty;
         scalar_t Dxy;
+        mat_t geom;
+        int16_t I;
+        int8_t tx, ty;
 
         __device__ SubdomainStiffnessMatrixWarpImpl(SharedResources &mem, scalar_t *, int subsp, int nel,
                                                     const MatrixWrapper<const scalar_t> &D,
@@ -165,10 +169,11 @@ namespace cuddh::details
         __device__ scalar_t operator()(scalar_t in) const
         {
             const auto lane = cuda::ptx::get_sreg_laneid();
-            const int E = (lane / (NB * NB)) * (NB * NB);
+            const int16_t E = (lane / (NB * NB)) * (NB * NB);
+            const int16_t tid = threadIdx.x + NB * NB * threadIdx.y;
 
-            smem.u[0][threadIdx.x + NB * NB * threadIdx.y] = in;
-            smem.u[1][threadIdx.x + NB * NB * threadIdx.y] = 0;
+            smem.u[0][tid] = in;
+            smem.u[1][tid] = 0;
             __syncthreads();
 
             const scalar_t u = (I >= 0) ? smem.u[0][I] : 0;
@@ -204,13 +209,16 @@ namespace cuddh::details
                 atomicAdd(smem.u[1] + I, Su);
             __syncthreads();
 
-            return smem.u[1][threadIdx.x + NB * NB * threadIdx.y];
+            return smem.u[1][tid];
         }
     };
 
     template <typename scalar_t, int NB, int NEL>
     struct SubdomainStiffnessMatrixSmemImpl
     {
+        static_assert(NB * NB * NEL < std::numeric_limits<int16_t>::max());
+        static_assert(NB * NB < std::numeric_limits<int8_t>::max());
+
         using vec_t = cuddh::scalar2<scalar_t>;
         using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
 
@@ -223,8 +231,8 @@ namespace cuddh::details
 
         SharedResources &smem;
         mat_t geom;
-        int I[2][NB];
-        int tx, ty;
+        int16_t I;
+        int8_t tx, ty;
 
         __device__ SubdomainStiffnessMatrixSmemImpl(SharedResources &mem, scalar_t *, int subsp, int nel,
                                                     const MatrixWrapper<const scalar_t> &D,
@@ -244,12 +252,7 @@ namespace cuddh::details
             if (el == 0)
                 smem.D[tx][ty] = D(tx, ty);
 
-            for (int i = 0; i < NB; ++i)
-            {
-                I[0][i] = (el < nel) ? sI(i, ty, el, subsp) : -1;
-                I[1][i] = (el < nel) ? sI(tx, i, el, subsp) : -1;
-            }
-
+            I = (el < nel) ? sI(tx, ty, el, subsp) : -1;
             geom = (el < nel) ? G(tx, ty, el, subsp) : mat_t{};
 
             __syncthreads();
@@ -257,25 +260,31 @@ namespace cuddh::details
 
         __device__ scalar_t operator()(scalar_t in) const
         {
-            const auto el = threadIdx.y;
+            const int16_t el = threadIdx.y;
+            const int16_t tid = threadIdx.x + NB * NB * threadIdx.y;
 
-            smem.u[threadIdx.x + NB * NB * threadIdx.y] = in;
+            // shuffle
+            smem.u[tid] = in;
+            __syncthreads();
+
+            in = (I >= 0) ? smem.u[I] : 0;
+            __syncthreads();
+
+            FixedTensorWrapper<scalar_t, NB, NB, NEL> u(smem.u);
+            u(tx, ty, el) = in;
             __syncthreads();
 
             vec_t grad{0, 0};
 
-            if (I[0][0] >= 0) // el < nel
+            for (int i = 0; i < NB; ++i)
             {
-                for (int i = 0; i < NB; ++i)
-                {
-                    grad.x += smem.D[tx][i] * smem.u[I[0][i]];
-                    grad.y += smem.D[ty][i] * smem.u[I[1][i]];
-                }
+                grad.x += smem.D[tx][i] * u(i, ty, el);
+                grad.y += smem.D[ty][i] * u(tx, i, el);
             }
             __syncthreads();
 
             smem.grad[el][ty][tx] = geom * grad;
-            smem.u[threadIdx.x + NB * NB * threadIdx.y] = 0;
+            smem.u[tid] = 0;
             __syncthreads();
 
             scalar_t Su = 0;
@@ -283,17 +292,20 @@ namespace cuddh::details
             {
                 Su += smem.D[i][tx] * smem.grad[el][ty][i].x + smem.D[i][ty] * smem.grad[el][i][tx].y;
             }
-            if (I[0][0] >= 0)
-                atomicAdd(smem.u + I[0][tx], Su);
+            if (I >= 0)
+                atomicAdd(smem.u + I, Su);
             __syncthreads();
 
-            return smem.u[threadIdx.x + NB * NB * threadIdx.y];
+            return smem.u[tid];
         }
     };
 
     template <typename scalar_t, int TDOF, int NB, int NEL>
     struct SubdomainStiffnessMatrixTDOFImpl
     {
+        static_assert(NB * NB * NEL < std::numeric_limits<int16_t>::max());
+        static_assert(NB * NB < std::numeric_limits<int8_t>::max());
+
         using vec_t = cuddh::scalar2<scalar_t>;
         using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
         using arr_t = cuda::std::array<scalar_t, TDOF>;
@@ -308,8 +320,8 @@ namespace cuddh::details
         SharedResources &smem;
         scalar_t *const global_work;
         mat_t geom[TDOF];
-        int I[TDOF];
-        int tx, ty;
+        int16_t I[TDOF];
+        int8_t tx, ty;
 
         __device__ SubdomainStiffnessMatrixTDOFImpl(SharedResources &mem, scalar_t *global_work, int subsp, int nel,
                                                     const auto &D, const auto &G, const auto &sI)
@@ -341,8 +353,8 @@ namespace cuddh::details
         {
             constexpr int EDOF = NB * NB;
             constexpr int BDOF = EDOF * NEL;
-            const auto el = threadIdx.y;
-            const int tid = threadIdx.x + EDOF * threadIdx.y;
+            const int16_t el = threadIdx.y;
+            const int16_t tid = threadIdx.x + EDOF * threadIdx.y;
 
             for (int t = 0; t < TDOF; ++t)
                 global_work[tid + BDOF * t] = values[t];
@@ -394,6 +406,9 @@ namespace cuddh::details
         requires(NB == 2 || NB == 4)
     struct SubdomainStiffnessMatrixTDOFWarpImpl
     {
+        static_assert(NB * NB * NEL < std::numeric_limits<int16_t>::max());
+        static_assert(NB * NB < std::numeric_limits<int8_t>::max());
+
         using vec_t = cuddh::scalar2<scalar_t>;
         using mat_t = SmallSymmetricMatrix<scalar_t, 2>;
         using arr_t = cuda::std::array<scalar_t, TDOF>;
@@ -403,10 +418,10 @@ namespace cuddh::details
 
         SharedResources &smem;
         scalar_t *const global_work;
-        mat_t geom[TDOF];
-        int I[TDOF];
-        int tx, ty;
         scalar_t Dxy;
+        mat_t geom[TDOF];
+        int16_t I[TDOF];
+        int8_t tx, ty;
 
         __device__ SubdomainStiffnessMatrixTDOFWarpImpl(SharedResources &mem, scalar_t *global_work, int subsp, int nel,
                                                         const auto &D, const auto &G, const auto &sI)
@@ -437,9 +452,9 @@ namespace cuddh::details
             constexpr int BDOF = EDOF * NEL;
 
             const auto lane = cuda::ptx::get_sreg_laneid();
-            const int E = (lane / EDOF) * EDOF;
+            const int16_t E = (lane / EDOF) * EDOF;
+            const int16_t tid = threadIdx.x + EDOF * threadIdx.y;
 
-            const int tid = threadIdx.x + EDOF * threadIdx.y;
             for (int t = 0; t < TDOF; ++t)
                 global_work[tid + BDOF * t] = values[t];
             __syncthreads();
