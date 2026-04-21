@@ -211,14 +211,14 @@ public:
 // ---------------------------------------------------------------------------
 
 template <typename scalar_t, int NB, int NEL, int TDOF = 1>
-__global__ __launch_bounds__(NB * NB * NB * NEL,
-                             (32 * CUDDH_WARPS_PER_SM) /
-                                 (NB * NB * NB * NEL *
-                                  TDOF)) void ddh_action_kernel_3d(const DDH3DKernelData<scalar_t, NB, NEL, TDOF> helper,
-                                                                  const double *const __restrict__ x,
-                                                                  double *const __restrict__ y,
-                                                                  const scalar_t *const __restrict__ d_lambda,
-                                                                  scalar_t *const __restrict__ d_update)
+__global__ __launch_bounds__(
+    NB * NB * NB * NEL,
+    (32 * CUDDH_WARPS_PER_SM) /
+        (NB * NB * NB * NEL * TDOF)) void ddh_action_kernel_3d(const DDH3DKernelData<scalar_t, NB, NEL, TDOF> helper,
+                                                               const double *const __restrict__ x,
+                                                               double *const __restrict__ y,
+                                                               const scalar_t *const __restrict__ d_lambda,
+                                                               scalar_t *const __restrict__ d_update)
 {
     constexpr int EDOF = NB * NB * NB;
     [[maybe_unused]] constexpr int BDOF = EDOF * NEL;
@@ -779,7 +779,7 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
 
         if (config.tdof <= 0)
             config.tdof = t;
-        
+
         cuddh_verify(config.tdof >= t,
                      printf("DDH3D: Kernel configuration with %d threads/block requires tdof >= %d, but tdof = %d "
                             "was specified. This occured because at least one subdomain has %d elements.\n",
@@ -792,10 +792,11 @@ static DDKernelConfig make_valid_config(DDKernelConfig config, int nb, int mx_el
 
 template <std::floating_point scalar_t, SubdomainSolver Solver>
 DDSubstructuredOperator3D<scalar_t, Solver>::DDSubstructuredOperator3D(const EnsembleSpace3D &efem_, double omega_,
-                                                                       const GridFunc3D<double> &a, DDKernelConfig config,
-                                                                       int waveholtz_iterations_)
+                                                                       const GridFunc3D<double> &a,
+                                                                       DDKernelConfig config, int waveholtz_iterations_)
     : Operator<scalar_t>(0),
-      DDSolverData3D<scalar_t, Solver>{MakeSolverData3D<scalar_t, Solver>::make(omega_, a, efem_, waveholtz_iterations_)},
+      DDSolverData3D<scalar_t, Solver>{
+          MakeSolverData3D<scalar_t, Solver>::make(omega_, a, efem_, waveholtz_iterations_)},
       efem{efem_},
       g_ndof{efem_.h1_space().size()},
       g_elem{efem_.h1_space().mesh().n_elem()},
@@ -931,7 +932,8 @@ template <typename scalar_t>
 struct KernelDispatcher3DMR
 {
     int n_basis, tdof, block_size;
-    KernelDispatcher3DMR(int n_basis, int tdof, int block_size) : n_basis(n_basis), tdof(tdof), block_size(block_size) {}
+    KernelDispatcher3DMR(int n_basis, int tdof, int block_size) : n_basis(n_basis), tdof(tdof), block_size(block_size)
+    {}
 
     template <int NB, int TDOF, int BLOCK_SIZE>
     static void dispatch_kernel(const EnsembleSpace3D &efem, const int g_ndof, const int n_lambda,
@@ -949,9 +951,8 @@ struct KernelDispatcher3DMR
         if (d_update)
             dla::zeros(2 * n_lambda, d_update);
 
-        auto data = DDH3DMinResKernelData<scalar_t, NB, NEL, TDOF>::make(n_lambda, g_ndof, efem, B, punity,
-                                                                         stiffness_matrix, scaled_mass,
-                                                                         scaled_face_mass, omega, d_work);
+        auto data = DDH3DMinResKernelData<scalar_t, NB, NEL, TDOF>::make(
+            n_lambda, g_ndof, efem, B, punity, stiffness_matrix, scaled_mass, scaled_face_mass, omega, d_work);
         const int n_domains = efem.size();
         dim3 block_size(NB * NB * NB, NEL);
         ddh_mr_action_kernel_3d<scalar_t, NB, NEL, TDOF><<<n_domains, block_size>>>(data, x, y, d_lambda, d_update);
@@ -1015,6 +1016,12 @@ struct KernelDispatcher3DMR
                 break;
             case 4:
                 dispatch_tdof<4>(std::forward<Args>(args)...);
+                break;
+            case 5:
+                dispatch_tdof<5>(std::forward<Args>(args)...);
+                break;
+            case 6:
+                dispatch_tdof<6>(std::forward<Args>(args)...);
                 break;
             default:
                 cuddh_verify(false, printf("DDH3D error: Invalid n_basis (=%d). Must be one of {2, 3, 4}.\n", n_basis));
