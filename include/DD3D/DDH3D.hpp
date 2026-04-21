@@ -28,21 +28,48 @@
 
 namespace cuddh
 {
+    template <typename scalar_t, SubdomainSolver Solver>
+    struct DDSolverData3D
+    {};
+
+    template <typename scalar_t>
+    struct DDSolverData3D<scalar_t, SubdomainSolver::WaveHoltz>
+    {
+        DDWaveHoltz<scalar_t> W;
+        int waveholtz_iterations{-1};
+    };
+
+    template <typename scalar_t>
+    struct DDSolverData3D<scalar_t, SubdomainSolver::MINRES>
+    {
+        DDMassMatrix3D<scalar_t> mass;
+        DDFaceMassMatrix3D<scalar_t> face_mass;
+        scalar_t omega{};
+    };
+
     /**
      * @brief Operator for Helmholtz domain decomposition substructured problem in 3D.
-     * The scalar type scalar_t is either float or double and is the scalar type in which the substructured problem
-     * is solved. The original finite element problem is always in double precision.
+     *
+     * The scalar type scalar_t is either float or double and is the scalar type
+     * in which the substructured problem is solved. The original finite element
+     * problem is always in double precision.
+     *
+     * @tparam scalar_t   float or double
+     * @tparam Solver     SubdomainSolver::WaveHoltz (default) or
+     *                    SubdomainSolver::MINRES
      */
-    template <std::floating_point scalar_t>
-    class DDSubstructuredOperator3D : public Operator<scalar_t>
+    template <std::floating_point scalar_t, SubdomainSolver Solver = SubdomainSolver::WaveHoltz>
+    class DDSubstructuredOperator3D : public Operator<scalar_t>, private DDSolverData3D<scalar_t, Solver>
     {
     public:
         /// @brief initialize domain decomposition Helmholtz approximate solver.
-        /// @param omega the Helmholtz frequency
-        /// @param a the variable coefficient a(x)
-        /// @param efem EnsembleSpace3D. Must be a uniform partition of the mesh into rectangular subdomains.
-        /// @param config kernel launch configuration (TDOF). Block size is determined automatically from n_basis.
-        /// @param waveholtz_iterations Fixed number of WaveHoltz iterations;
+        /// @param efem                 EnsembleSpace3D. Must be a uniform partition of the mesh into rectangular
+        /// subdomains.
+        /// @param omega                the Helmholtz frequency
+        /// @param a                    the variable coefficient a(x)
+        /// @param config               kernel launch configuration (TDOF). Block size is determined automatically from
+        /// n_basis.
+        /// @param waveholtz_iterations For WaveHoltz solver only: fixed number of iterations;
         ///                             -1 = residual-based stopping.
         DDSubstructuredOperator3D(const EnsembleSpace3D &efem, double omega, const GridFunc3D<double> &a,
                                   DDKernelConfig config = {}, int waveholtz_iterations = -1);
@@ -58,8 +85,7 @@ namespace cuddh
         // substructured problem `lambda` and the Helmholtz forcing `f`.
         void postprocess(const scalar_t *lambda, const double *f, double *u) const;
 
-        /// @brief y <- A * x where A is the approximate inverse of the
-        /// Helmholtz equation estimated by the domain decomposition method.
+        /// @brief y <- F * x  (substructured operator action)
         void action(const scalar_t *x, scalar_t *y) const override;
 
         void action(scalar_t, const scalar_t *, scalar_t *) const override
@@ -94,8 +120,6 @@ namespace cuddh
         thrust::device_vector<LambdaDOFData<scalar_t>> _B;
 
         DDStiffnessMatrix3D<scalar_t> S;
-        DDWaveHoltz<scalar_t> W;
-        int waveholtz_iterations{-1};
 
         thrust::device_vector<scalar_t> _partition_of_unity;
         mutable thrust::device_vector<scalar_t> _work;
@@ -103,13 +127,16 @@ namespace cuddh
 
     extern template class DDSubstructuredOperator3D<float>;
     extern template class DDSubstructuredOperator3D<double>;
+    extern template class DDSubstructuredOperator3D<float, SubdomainSolver::MINRES>;
+    extern template class DDSubstructuredOperator3D<double, SubdomainSolver::MINRES>;
 
     /**
      * @brief Domain decomposition Helmholtz solver in 3D.
-     * The scalar type scalar_t is either float or double and is the scalar type in which the substructured problem
-     * is solved. The original finite element problem is always in double precision.
+     *
+     * @tparam scalar_t  float or double
+     * @tparam Solver    SubdomainSolver::WaveHoltz (default) or MINRES
      */
-    template <std::floating_point scalar_t>
+    template <std::floating_point scalar_t, SubdomainSolver InnerSolver = SubdomainSolver::WaveHoltz>
     class DDH3D : Solver<double>
     {
     public:
@@ -137,10 +164,10 @@ namespace cuddh
             return out;
         }
 
-        const DDSubstructuredOperator3D<scalar_t> &op() const { return F; }
+        const DDSubstructuredOperator3D<scalar_t, InnerSolver> &op() const { return F; }
 
     private:
-        DDSubstructuredOperator3D<scalar_t> F;
+        DDSubstructuredOperator3D<scalar_t, InnerSolver> F;
         MINRES<scalar_t> solver;
         mutable thrust::device_vector<scalar_t> lambda;
         mutable thrust::device_vector<scalar_t> Y;
@@ -148,4 +175,6 @@ namespace cuddh
 
     extern template class DDH3D<float>;
     extern template class DDH3D<double>;
+    extern template class DDH3D<float, SubdomainSolver::MINRES>;
+    extern template class DDH3D<double, SubdomainSolver::MINRES>;
 } // namespace cuddh

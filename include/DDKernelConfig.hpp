@@ -2,6 +2,13 @@
 
 namespace cuddh
 {
+    /// @brief Selects the subdomain solver used inside DDSubstructuredOperator and DDSubstructuredOperator3D.
+    enum class SubdomainSolver
+    {
+        WaveHoltz,
+        MINRES,
+    };
+
     /* Kernels are deployed with `block_size` threads per block with each thread computing `tdof` DOFs.
      * if `block_size == Default`, then it is determined from the EnsembleSpace and `tdof`.
      * if `tdof <= 0`, then it is determined from the EnsembleSpace and `block_size`.

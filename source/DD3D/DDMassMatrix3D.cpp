@@ -4,7 +4,8 @@
 
 using namespace cuddh;
 
-static thrust::universal_vector<float> mass(const EnsembleSpace3D &efem, const GridFunc3D<double> *a)
+template <typename scalar_t>
+static thrust::universal_vector<scalar_t> mass(const EnsembleSpace3D &efem, const GridFunc3D<double> *a)
 {
     const H1Space3D &fem = efem.h1_space();
     const DeviceMesh3D &mesh = fem.mesh().to_device();
@@ -27,7 +28,7 @@ static thrust::universal_vector<float> mass(const EnsembleSpace3D &efem, const G
     if (a)
         A = a->read(MemorySpace::DEVICE);
 
-    thrust::universal_vector<float> u_m(mx_dofs * n_domains, 0.0f);
+    thrust::universal_vector<scalar_t> u_m(mx_dofs * n_domains, scalar_t(0));
     auto M = reshape(u_m, mx_dofs, n_domains);
 
     forall_2d(n_basis, n_basis, mx_elem_per_dom * n_domains, [=] __device__(int b) mutable {
@@ -54,10 +55,10 @@ static thrust::universal_vector<float> mass(const EnsembleSpace3D &efem, const G
             const int l = sI(i, j, k, el, subsp);
 
             xi.z = x(k);
-            float val = w(i) * w(j) * w(k) * element.measure(xi);
+            scalar_t val = static_cast<scalar_t>(w(i) * w(j) * w(k) * element.measure(xi));
 
             if (A)
-                val *= static_cast<float>(A(i, j, k, g_el));
+                val *= static_cast<scalar_t>(A(i, j, k, g_el));
 
             atomicAdd(&M(l, subsp), val);
         }
@@ -66,13 +67,21 @@ static thrust::universal_vector<float> mass(const EnsembleSpace3D &efem, const G
     return u_m;
 }
 
-DDMassMatrix3D::DDMassMatrix3D(const EnsembleSpace3D &efem) : mx_dofs(efem.max_size()), n_domains(efem.size())
+template <typename scalar_t>
+DDMassMatrix3D<scalar_t>::DDMassMatrix3D(const EnsembleSpace3D &efem) : mx_dofs(efem.max_size()), n_domains(efem.size())
 {
-    m = mass(efem, nullptr);
+    m = mass<scalar_t>(efem, nullptr);
 }
 
-DDMassMatrix3D::DDMassMatrix3D(const EnsembleSpace3D &efem, const GridFunc3D<double> &a)
+template <typename scalar_t>
+DDMassMatrix3D<scalar_t>::DDMassMatrix3D(const EnsembleSpace3D &efem, const GridFunc3D<double> &a)
     : mx_dofs(efem.max_size()), n_domains(efem.size())
 {
-    m = mass(efem, &a);
+    m = mass<scalar_t>(efem, &a);
 }
+
+namespace cuddh
+{
+    template class DDMassMatrix3D<float>;
+    template class DDMassMatrix3D<double>;
+} // namespace cuddh

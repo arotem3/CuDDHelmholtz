@@ -32,13 +32,6 @@
 
 namespace cuddh
 {
-    /// @brief Selects the subdomain solver used inside DDSubstructuredOperator.
-    enum class SubdomainSolver
-    {
-        WaveHoltz,
-        MINRES,
-    };
-
     template <typename scalar_t, SubdomainSolver Solver>
     struct DDSolverData
     {};

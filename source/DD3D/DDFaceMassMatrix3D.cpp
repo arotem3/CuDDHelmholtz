@@ -2,7 +2,8 @@
 
 using namespace cuddh;
 
-static thrust::universal_vector<float> init_face_mass(const EnsembleSpace3D &efem, const GridFunc3D<double> *a)
+template <typename scalar_t>
+static thrust::universal_vector<scalar_t> init_face_mass(const EnsembleSpace3D &efem, const GridFunc3D<double> *a)
 {
     const H1Space3D &fem = efem.h1_space();
     const Basis &basis = fem.basis();
@@ -14,7 +15,7 @@ static thrust::universal_vector<float> init_face_mass(const EnsembleSpace3D &efe
     const int mx_fdofs = efem.max_fsize();
     const int n_domains = efem.size();
 
-    thrust::universal_vector<float> m(mx_fdofs * n_domains, 0.0f);
+    thrust::universal_vector<scalar_t> m(mx_fdofs * n_domains, scalar_t(0));
     auto H = reshape(m, mx_fdofs, n_domains);
 
     auto w = quad.w(MemorySpace::DEVICE);
@@ -69,19 +70,28 @@ static thrust::universal_vector<float> init_face_mass(const EnsembleSpace3D &efe
             value *= A(xv, yv, zv, el);
         }
 
-        atomicAdd(&H(idx, p), static_cast<float>(value));
+        atomicAdd(&H(idx, p), static_cast<scalar_t>(value));
     });
 
     return m;
 }
 
-DDFaceMassMatrix3D::DDFaceMassMatrix3D(const EnsembleSpace3D &efem) : mx_fdofs(efem.max_fsize()), n_domains(efem.size())
-{
-    m = init_face_mass(efem, nullptr);
-}
-
-DDFaceMassMatrix3D::DDFaceMassMatrix3D(const EnsembleSpace3D &efem, const GridFunc3D<double> &a)
+template <typename scalar_t>
+DDFaceMassMatrix3D<scalar_t>::DDFaceMassMatrix3D(const EnsembleSpace3D &efem)
     : mx_fdofs(efem.max_fsize()), n_domains(efem.size())
 {
-    m = init_face_mass(efem, &a);
+    m = init_face_mass<scalar_t>(efem, nullptr);
 }
+
+template <typename scalar_t>
+DDFaceMassMatrix3D<scalar_t>::DDFaceMassMatrix3D(const EnsembleSpace3D &efem, const GridFunc3D<double> &a)
+    : mx_fdofs(efem.max_fsize()), n_domains(efem.size())
+{
+    m = init_face_mass<scalar_t>(efem, &a);
+}
+
+namespace cuddh
+{
+    template class DDFaceMassMatrix3D<float>;
+    template class DDFaceMassMatrix3D<double>;
+} // namespace cuddh

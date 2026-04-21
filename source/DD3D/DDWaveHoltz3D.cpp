@@ -7,8 +7,8 @@ using namespace cuddh;
 
 template <typename scalar_t>
 static HostDeviceArray<cuddh::scalar2<scalar_t>> make_alpha_beta(const EnsembleSpace3D &efem, double theta,
-                                                                 double sigma, const DDMassMatrix3D &M,
-                                                                 const DDFaceMassMatrix3D &H)
+                                                                 double sigma, const DDMassMatrix3D<scalar_t> &M,
+                                                                 const DDFaceMassMatrix3D<scalar_t> &H)
 {
     auto m = M.to_device();
     auto h = H.to_device();
@@ -97,8 +97,8 @@ DDWaveHoltz<scalar_t> cuddh::make_DDWaveHoltz_3d(const EnsembleSpace3D &efem, sc
         a2 = std::make_unique<GridFunc3D<double>>(a->transform([] __device__(double x) -> double { return x * x; }));
     }
 
-    auto M = (a) ? DDMassMatrix3D(efem, *a2) : DDMassMatrix3D(efem);
-    auto H = (a) ? DDFaceMassMatrix3D(efem, *a) : DDFaceMassMatrix3D(efem);
+    auto M = (a) ? DDMassMatrix3D<scalar_t>(efem, *a2) : DDMassMatrix3D<scalar_t>(efem);
+    auto H = (a) ? DDFaceMassMatrix3D<scalar_t>(efem, *a) : DDFaceMassMatrix3D<scalar_t>(efem);
     W.alpha_beta = make_alpha_beta<scalar_t>(efem, theta, W.sigma, M, H);
 
     return W;
