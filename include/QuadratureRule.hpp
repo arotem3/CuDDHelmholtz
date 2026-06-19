@@ -1,11 +1,6 @@
-#ifndef CUDDH_QUADRATURE_HPP
-#define CUDDH_QUADRATURE_HPP
+#pragma once
 
-#include <unordered_map>
-#include <cmath>
-#include <sstream>
-#include <iomanip>
-
+#include "HostDeviceArray.hpp"
 #include "Tensor.hpp"
 #include "cuddh_error.hpp"
 
@@ -22,59 +17,34 @@ namespace cuddh
         };
 
         QuadratureRule();
-        QuadratureRule(const QuadratureRule&) = default;
-        QuadratureRule(QuadratureRule&&) = default;
-        QuadratureRule& operator=(const QuadratureRule&) = default;
-        QuadratureRule& operator=(QuadratureRule&&) = default;
+        QuadratureRule(const QuadratureRule &) = default;
+        QuadratureRule(QuadratureRule &&) = default;
+        QuadratureRule &operator=(const QuadratureRule &) = default;
+        QuadratureRule &operator=(QuadratureRule &&) = default;
 
         /// @brief initialize a quadrature rule with n points of type Guass-Lobatto or Gauss-Legendre
-        QuadratureRule(int n, QuadratureType type=GaussLobatto);
+        QuadratureRule(int n, QuadratureType type = GaussLobatto);
 
-        /// @brief returns the number of quadrature (point, weight) pairs 
-        int size() const
-        {
-            return _n;
-        }
+        /// @brief returns the number of quadrature (point, weight) pairs
+        constexpr int size() const { return _n; }
 
         /// @brief identifies the type of quadrature rule as either Gauss-Legendre or Gauss-Lobatto
-        QuadratureType type() const
-        {
-            return _type;
-        }
+        constexpr QuadratureType type() const { return _type; }
 
-        /// @brief identifies the quadrature rule by a name of the format "%s%05d" where s is type ("legendre" or "lobatto"), and d is n. 
+        /// @brief identifies the quadrature rule by a name of the format "%s%05d" where s is type ("legendre" or
+        /// "lobatto"), and d is n.
         std::string name() const;
 
-        /// @brief returns the quadrature points 
-        const_dvec_wrapper x() const
-        {
-            return const_dvec_wrapper(_x.data(), _n);
-        }
+        /// @brief returns the quadrature points
+        const_dvec_wrapper x(MemorySpace ms) const { return reshape(_x.read(ms), _n); }
 
-        /// @brief return the i-th quadrature point 
-        double x(int i) const
-        {
-            return _x(i);
-        }
-
-        /// @brief returns the quadrature weights 
-        const_dvec_wrapper w() const
-        {
-            return const_dvec_wrapper(_w.data(), _n);
-        }
-
-        /// @brief return the i-th quadrature weight 
-        double w(int i) const
-        {
-            return _w(i);
-        }
+        /// @brief returns the quadrature weights
+        const_dvec_wrapper w(MemorySpace ms) const { return reshape(_w.read(ms), _n); }
 
     private:
         int _n;
         QuadratureType _type;
-        dvec _x;
-        dvec _w;
+        HostDeviceArray<double> _x;
+        HostDeviceArray<double> _w;
     };
 } // namespace cuddh
-
-#endif

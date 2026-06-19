@@ -5,10 +5,9 @@ CMakeCache.txt
 libcuddh.a
 .vscode
 .DS_Store
-*.py
 solution
 *.sh
 tmp
 ncu_*
-benchmark*
 build
+*.mp4

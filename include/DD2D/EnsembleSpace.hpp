@@ -1,0 +1,136 @@
+#pragma once
+
+#include <algorithm>
+#include <array>
+#include <utility>
+
+#include "DD2D.hpp"
+#include "FEM2D/H1Space2D.hpp"
+#include "Tensor.hpp"
+
+namespace cuddh
+{
+    class EnsembleSpace
+    {
+    public:
+        /// @brief initialize an EnsembleSpace by specifying the global H1Space2D
+        /// and the association of each element to a subspace.
+        /// @param fem the global H1Space2D
+        /// @param n_spaces number of spaces in ensemble
+        /// @param element_labels has length n_elem. element_labels[el]
+        /// indicates which subspace element el belongs to.
+        EnsembleSpace(const H1Space2D &fem, int n_spaces, const int *element_labels);
+
+        /// @brief returns the number of subspaces
+        int size() const { return n_spaces; }
+
+        const H1Space2D &h1_space() const { return fem; }
+
+        /// @brief returns the global indices of the subspace degrees of
+        /// freedom. That is, global_indices(i, p) is the global index of the
+        /// i-th degree of freedom of subspace p.
+        const_imat_wrapper global_indices(MemorySpace m) const { return reshape(gI.read(m), mx_ndof, n_spaces); }
+
+        /// @brief returns the sizes of the subspaces. That is, sizes(p) is the
+        /// size of subspace p.
+        const_ivec_wrapper sizes(MemorySpace m) const { return reshape(s_dof.read(m), n_spaces); }
+
+        /// @brief returns the maximum size of any subspace. That is, the maximum of sizes.
+        int max_size() const { return mx_ndof; }
+
+        /// @brief returns the elements in each subspace. That is elements(el, p)
+        /// is the element index of the el-th element in subspace p.
+        const_imat_wrapper elements(MemorySpace m) const { return reshape(elems.read(m), mx_elems, n_spaces); }
+
+        /// @brief returns the subdomain label for each global element.
+        const_ivec_wrapper element_labels(MemorySpace m) const
+        {
+            return reshape(_element_labels.read(m), fem.mesh().n_elem());
+        }
+
+        /// @brief returns the number of elements in each subspace. That is
+        /// n_elems(p) is the number of elements in subspace p.
+        const_ivec_wrapper n_elems(MemorySpace m) const { return reshape(s_elems.read(m), n_spaces); }
+
+        /// @brief returns the maximum number of elements in any subspace. That is, the maximum of n_elems.
+        int max_n_elem() const { return mx_elems; }
+
+        /// @brief returns the boundary faces of each subspace.
+        /// That is faces(f, p) is the face index of the f-th boundary face of
+        /// subspace p.
+        const_imat_wrapper faces(MemorySpace m) const { return reshape(_faces.read(m), mx_faces, n_spaces); }
+
+        /// @brief returns the number of boundary faces in each subspace. That
+        /// is n_faces(p) is the number of faces in subspace p.
+        const_ivec_wrapper n_faces(MemorySpace m) const { return reshape(s_faces.read(m), n_spaces); }
+
+        /// @brief returns the maximum number of faces in any subspace.  That is, the maximum of n_faces.
+        int max_n_faces() const { return mx_faces; }
+
+        /// @brief returns which side (0 or 1) of each boundary face belongs to each subdomain.
+        /// That is, face_sides(f, p) is 0 or 1, indicating connectivity.elements[face_sides(f,p)]
+        /// is the element in subdomain p for the f-th boundary face of subspace p.
+        const_imat_wrapper face_sides(MemorySpace m) const { return reshape(f_sides.read(m), mx_faces, n_spaces); }
+
+        /// @brief returns the indices of subspace degrees of freedom
+        /// corresponding to the local element degrees of freedom. Namely,
+        /// subspace_indices(i,j,el,p) returns the subspace index of the degree
+        /// of freedom corresponding to the (i,j) node on element el.
+        TensorWrapper<4, const int> subspace_indices(MemorySpace m) const
+        {
+            return reshape(sI.read(m), n_basis, n_basis, mx_elems, n_spaces);
+        }
+
+        /// @brief returns the indices of the face space degrees of freedom from
+        /// face local indices in subspaces's face space.
+        ///
+        /// That is face_indices(i, f, p) is the face space index of i-th degree of
+        /// freedom on face f in subspace p.
+        const_icube_wrapper face_indices(MemorySpace m) const
+        {
+            return reshape(fI.read(m), n_basis, mx_faces, n_spaces);
+        }
+
+        /// @brief returns the number of face spaces degrees of freedom
+        /// associated with each space. That is fsizes(p) is the number of
+        /// degrees of freedom in the face space of subspace p.
+        const_ivec_wrapper fsizes(MemorySpace m) const { return reshape(s_fdof.read(m), n_spaces); }
+
+        /// @brief returns the maximum number of face space degrees of freedom. That is, the maximum of fsizes.
+        int max_fsize() const { return mx_fdof; }
+
+        /// @brief returns shared face tuples (subspace0, subspace1, local_face0, local_face1).
+        TensorWrapper<2, const int> shared_faces(MemorySpace m) const
+        {
+            return reshape(_shared_faces.read(m), 4, n_shared_faces);
+        }
+
+        int n_shared() const { return n_shared_faces; }
+
+    private:
+        const H1Space2D &fem;
+
+        const int n_spaces;
+        const int n_basis;
+        int mx_elems;
+        int mx_faces;
+        int mx_ndof;
+        int mx_fdof;
+        int n_shared_faces;
+
+        host_device_ivec gI;
+        host_device_ivec s_dof;
+        host_device_ivec elems;
+        host_device_ivec _element_labels;
+        host_device_ivec s_elems;
+        host_device_ivec _faces;
+        host_device_ivec _shared_faces;
+        host_device_ivec s_faces;
+        host_device_ivec sI;
+        host_device_ivec fI;
+        host_device_ivec s_fdof;
+        host_device_ivec f_sides;
+    };
+
+    EnsembleSpace partition_uniform_rect(const H1Space2D &fem, int2 mesh_dims, int2 block_dims = {0, 0});
+} // namespace cuddh

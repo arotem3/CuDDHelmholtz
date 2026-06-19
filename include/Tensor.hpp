@@ -1,11 +1,10 @@
-#ifndef TENSOR_HPP
-#define TENSOR_HPP
-
-#include <vector>
-#include <stdexcept>
-#include <memory>
-
+#pragma once
 #include <cuda_runtime.h>
+#include <thrust/universal_vector.h>
+
+#include <memory>
+#include <type_traits>
+#include <utility>
 
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
@@ -13,11 +12,11 @@
 namespace cuddh
 {
     template <typename Size, typename... Sizes>
-    __host__ __device__ inline int tensor_dims(int * dim, Size s, Sizes... shape)
+    __host__ __device__ inline int tensor_dims(int *dim, Size s, Sizes... shape)
     {
-        if (s < 0)
-            cuddh_error("Tensor error: tensor cannot have negative dimensions.");
-        
+        if constexpr (std::is_signed_v<Size>)
+            cuddh_assert(s >= 0, printf("Tensor error: tensor cannot have negative dimensions (%d).", s));
+
         *dim = s;
         if constexpr (sizeof...(shape) > 0)
         {
@@ -28,13 +27,11 @@ namespace cuddh
             return s;
     }
 
-    template <typename Ind, typename... Inds>
-    __host__ __device__ inline int tensor_index(const int * shape, Ind idx, Inds... ids)
+    template <typename... Inds>
+    __host__ __device__ __forceinline__ int tensor_index(const int *shape, int idx, Inds... ids)
     {
-        #ifdef CUDDH_DEBUG
-        if (idx < 0 || idx >= *shape)
-            cuddh_error("Tensor error: tensor index out of range.");
-        #endif
+        cuddh_assert(0 <= idx && idx < *shape,
+                     printf("Tensor error: tensor index out of range (%d not in [0,%d)).", idx, *shape));
 
         if constexpr (sizeof...(ids) > 0)
         {
@@ -56,33 +53,33 @@ namespace cuddh
     protected:
         int _shape[Dim];
         int len;
-        scalar * ptr;
-    
+        scalar *ptr;
+
     public:
         /// @brief empty tensor
         __host__ __device__ TensorWrapper() : _shape{0}, len{0}, ptr(nullptr) {};
 
-        virtual ~TensorWrapper() = default;
-        
+        ~TensorWrapper() = default;
+
         /// @brief copy tensor
         /// @param[in] tensor to copy
-        TensorWrapper(const TensorWrapper&) = default;
+        TensorWrapper(const TensorWrapper &) = default;
 
         /// @brief copy tensor
         /// @param[in] tensor to copy
         /// @return `this`
-        TensorWrapper& operator=(const TensorWrapper&) = default;
+        TensorWrapper &operator=(const TensorWrapper &) = default;
 
         /// @brief wrap externally managed array
         /// @tparam ...Sizes sequence of `int`
         /// @param[in] data_ externally managed array
         /// @param[in] ...shape_ shape of array as a sequence of `int`s
         template <typename... Sizes>
-        __host__ __device__ inline explicit TensorWrapper(scalar * data_, Sizes... shape_) : ptr(data_)
+        __host__ __device__ inline explicit TensorWrapper(scalar *data_, Sizes... shape_) : ptr(data_)
         {
             static_assert(Dim > 0, "Tensor must have a positive number of dimensions");
             static_assert(sizeof...(shape_) == Dim, "Wrong number of dimensions specified.");
-            
+
             len = tensor_dims(_shape, shape_...);
         }
 
@@ -91,14 +88,10 @@ namespace cuddh
         /// @param[in] ...ids indices
         /// @return reference to data at index (`...ids`)
         template <typename... Indices>
-        __host__ __device__ inline scalar& at(Indices... ids)
+        __host__ __device__ inline scalar &at(Indices... ids)
         {
             static_assert(sizeof...(ids) == Dim, "Wrong number of indices specified.");
-
-            #ifdef CUDDH_DEBUG
-            if (ptr == nullptr)
-                cuddh_error("TensorWrapper::at error: memory uninitialized.");
-            #endif
+            cuddh_assert(ptr, printf("TensorWrapper::at error: memory uninitialized."));
 
             return ptr[tensor_index(_shape, ids...)];
         }
@@ -108,14 +101,10 @@ namespace cuddh
         /// @param[in] ...ids indices
         /// @return const reference to data at index (`...ids`)
         template <typename... Indices>
-        __host__ __device__ inline const scalar& at(Indices... ids) const
+        __host__ __device__ inline const scalar &at(Indices... ids) const
         {
             static_assert(sizeof...(ids) == Dim, "Wrong number of indices specified.");
-
-            #ifdef CUDDH_DEBUG
-            if (ptr == nullptr)
-                cuddh_error("TensorWrapper::at error: memory uninitialized.");
-            #endif
+            cuddh_assert(ptr, printf("TensorWrapper::at error: memory uninitialized."));
 
             return ptr[tensor_index(_shape, ids...)];
         }
@@ -125,7 +114,7 @@ namespace cuddh
         /// @param[in] ...ids indices
         /// @return reference to data at index (`...ids`)
         template <typename... Indices>
-        __host__ __device__ inline scalar& operator()(Indices... ids)
+        __host__ __device__ inline scalar &operator()(Indices... ids)
         {
             return at(std::forward<Indices>(ids)...);
         }
@@ -135,7 +124,7 @@ namespace cuddh
         /// @param[in] ...ids indices
         /// @return const reference to data at index (`...ids`)
         template <typename... Indices>
-        __host__ __device__ inline const scalar& operator()(Indices... ids) const
+        __host__ __device__ inline const scalar &operator()(Indices... ids) const
         {
             return at(std::forward<Indices>(ids)...);
         }
@@ -143,14 +132,12 @@ namespace cuddh
         /// @brief linear indexing. read/write access.
         /// @param[in] idx flattened index
         /// @return reference to data at linear index `idx`.
-        __host__ __device__ inline scalar& operator[](int idx)
+        __host__ __device__ inline scalar &operator[](int idx)
         {
-            #ifdef CUDDH_DEBUG
-            if (ptr == nullptr)
-                cuddh_error("TensorWrapper::operator[] error: memory uninitialized.");
-            if (idx < 0 || idx >= len)
-                cuddh_error("TensorWrapper::operator[] error: linear index out of range.");
-            #endif
+            cuddh_assert(ptr, printf("TensorWrapper::operator[] error: memory uninitialized."));
+            cuddh_assert(
+                0 <= idx && idx < len,
+                printf("TensorWrapper::operator[] error: linear index out of range (%d not in [0,%d)).", idx, len));
 
             return ptr[idx];
         }
@@ -158,84 +145,54 @@ namespace cuddh
         /// @brief linear indexing. read only access.
         /// @param[in] idx flattened index
         /// @return const reference to data at linear index `idx`.
-        __host__ __device__ inline const scalar& operator[](int idx) const
+        __host__ __device__ inline const scalar &operator[](int idx) const
         {
-            #ifdef CUDDH_DEBUG
-            if (ptr == nullptr)
-                cuddh_error("TensorWrapper::operator[] error: memory uninitialized.");
-            if (idx < 0 || idx >= len)
-                cuddh_error("TensorWrapper::operator[] error: linear index out of range.");
-            #endif
+            cuddh_assert(ptr, printf("TensorWrapper::operator[] error: memory uninitialized."));
+            cuddh_assert(
+                0 <= idx && idx < len,
+                printf("TensorWrapper::operator[] error: linear index out of range (%d not in [0,%d)).", idx, len));
 
             return ptr[idx];
         }
-    
-        /// @brief implicit conversion to scalar* where the returned pointer is
-        /// the one managed by the tensor.
-        __host__ __device__ inline operator scalar*()
-        {
-            return ptr;
-        }
 
         /// @brief implicit conversion to scalar* where the returned pointer is
         /// the one managed by the tensor.
-        __host__ __device__ inline operator const scalar*() const
-        {
-            return ptr;
-        }
+        __host__ __device__ inline operator scalar *() { return ptr; }
 
-        /// @brief returns the externally managed array 
-         __host__ __device__ inline scalar * data()
-        {
-            return ptr;
-        }
+        /// @brief implicit conversion to scalar* where the returned pointer is
+        /// the one managed by the tensor.
+        __host__ __device__ inline operator const scalar *() const { return ptr; }
+
+        /// @brief returns the externally managed array
+        __host__ __device__ inline scalar *data() { return ptr; }
 
         /// @brief returns read-only pointer to the externally managed array
-        __host__ __device__ inline const scalar * data() const
-        {
-            return ptr;
-        }
-    
-        __host__ __device__ inline scalar * begin()
-        {
-            return ptr;
-        }
+        __host__ __device__ inline const scalar *data() const { return ptr; }
 
-        __host__ __device__ inline scalar * end()
-        {
-            return ptr + len;
-        }
+        __host__ __device__ inline scalar *begin() { return ptr; }
 
-        __host__ __device__ inline const scalar * begin() const
-        {
-            return ptr;
-        }
+        __host__ __device__ inline scalar *end() { return ptr + len; }
 
-        __host__ __device__ inline const scalar * end() const
-        {
-            return ptr + len;
-        }
+        __host__ __device__ inline const scalar *begin() const { return ptr; }
 
-        /// @brief returns the shape of the tensor. Has length `Dim` 
-        __host__ __device__ inline const int * shape() const
-        {
-            return _shape;
-        }    
+        __host__ __device__ inline const scalar *end() const { return ptr + len; }
+
+        /// @brief returns the shape of the tensor. Has length `Dim`
+        __host__ __device__ inline const int *shape() const { return _shape; }
 
         __host__ __device__ inline int shape(int d) const
         {
-            #ifdef CUDDH_DEBUG
-            if (d < 0 || d >= Dim)
-                cuddh_error("TensorWrapper::shape() error: shape index out of range of Dim.");
-            #endif
+            cuddh_assert(0 <= d && d < Dim,
+                         printf("TensorWrapper::shape() error: shape index out of range (%d not in [0,%d)).", d, Dim));
             return _shape[d];
         }
-    
+
         /// @brief returns total size of tensor. The product of shape.
-        __host__ __device__ inline int size() const
-        {
-            return len;
-        }
+        __host__ __device__ inline int size() const { return len; }
+
+        __host__ __device__ inline bool empty() const { return ptr == nullptr || len == 0; }
+
+        __host__ __device__ inline operator bool() const { return !empty(); }
     };
 
     /// @brief wraps an array in a `TensorWrapper`. Same as declaring a new
@@ -245,9 +202,29 @@ namespace cuddh
     /// @param[in] data the array
     /// @param[in] ...shape the shape of the tensor
     template <typename scalar, typename... Sizes>
-    __host__ __device__ inline TensorWrapper<sizeof...(Sizes), scalar> reshape(scalar * data, Sizes... shape)
+    __host__ __device__ inline TensorWrapper<sizeof...(Sizes), scalar> reshape(scalar *data, Sizes... shape)
     {
         return TensorWrapper<sizeof...(Sizes), scalar>(data, shape...);
+    }
+
+    template <typename scalar, typename Allocator, typename... Sizes>
+    inline auto reshape(thrust::universal_vector<scalar, Allocator> &vec, Sizes... shape)
+    {
+        cuddh_verify(
+            vec.size() >= (size_t)(1 * ... * shape),
+            printf("Tensor reshape error: provided vector size (%zu) is smaller than requested tensor size (%zu).\n",
+                   vec.size(), (size_t)(1 * ... * shape)));
+        return reshape(vec.data().get(), shape...);
+    }
+
+    template <typename scalar, typename Allocator, typename... Sizes>
+    inline auto reshape(const thrust::universal_vector<scalar, Allocator> &vec, Sizes... shape)
+    {
+        cuddh_verify(
+            vec.size() >= (size_t)(1 * ... * shape),
+            printf("Tensor reshape error: provided vector size (%zu) is smaller than requested tensor size (%zu).\n",
+                   vec.size(), (size_t)(1 * ... * shape)));
+        return reshape(vec.data().get(), shape...);
     }
 
     /// @brief reshape `TensorWrapper`. Returns new TensorWrapper with new shape
@@ -257,7 +234,8 @@ namespace cuddh
     /// @param[in] tensor the array
     /// @param[in] ...shape the shape of the tensor
     template <typename scalar, int Dim, typename... Sizes>
-    __host__ __device__ inline TensorWrapper<sizeof...(Sizes), scalar> reshape(TensorWrapper<Dim, scalar> tensor, Sizes... shape)
+    __host__ __device__ inline TensorWrapper<sizeof...(Sizes), scalar> reshape(TensorWrapper<Dim, scalar> tensor,
+                                                                               Sizes... shape)
     {
         return reshape(tensor.data(), std::forward<Sizes>(shape)...);
     }
@@ -276,26 +254,24 @@ namespace cuddh
         inline Tensor() : TensorWrapper<Dim, scalar>() {}
 
         ~Tensor() = default;
-  
+
         /// @brief move tensor
-        Tensor(Tensor&&) = default;
+        Tensor(Tensor &&) = default;
 
-        /// @brief move tensor 
-        Tensor& operator=(Tensor&&) = default;
-
-        /// @brief copy tensor
-        Tensor(const Tensor<Dim, scalar>&);
+        /// @brief move tensor
+        Tensor &operator=(Tensor &&) = default;
 
         /// @brief copy tensor
-        Tensor& operator=(const Tensor&);
+        Tensor(const Tensor<Dim, scalar> &);
+
+        /// @brief copy tensor
+        Tensor &operator=(const Tensor &);
 
         /// @brief new tensor of specified shape initialized with default constructor (0 for numeric types).
         /// @tparam ...Sizes sequence of `int`s
         /// @param[in] ...sizes_ shape
         template <typename... Sizes>
-        explicit Tensor(Sizes... shape_)
-            : TensorWrapper<Dim, scalar>(nullptr, shape_...),
-              mem(new scalar[this->len]())
+        explicit Tensor(Sizes... shape_) : TensorWrapper<Dim, scalar>(nullptr, shape_...), mem(new scalar[this->len]())
         {
             this->ptr = mem.get();
         }
@@ -308,7 +284,7 @@ namespace cuddh
         inline void reshape(Sizes... shape_)
         {
             static_assert(sizeof...(shape_) == Dim, "Wrong number of dimensions specified.");
-            
+
             int new_len = tensor_dims(this->_shape, shape_...);
 
             if (new_len > this->len)
@@ -321,7 +297,7 @@ namespace cuddh
     };
 
     template <int Dim, typename scalar>
-    Tensor<Dim, scalar>::Tensor(const Tensor<Dim, scalar>& t) : TensorWrapper<Dim, scalar>()
+    Tensor<Dim, scalar>::Tensor(const Tensor<Dim, scalar> &t) : TensorWrapper<Dim, scalar>()
     {
         this->len = 1;
         for (int d = 0; d < Dim; ++d)
@@ -331,13 +307,13 @@ namespace cuddh
         }
         mem.reset(new scalar[this->len]);
         this->ptr = mem.get();
-        
+
         for (int i = 0; i < this->len; ++i)
             mem[i] = t[i];
     }
 
     template <int Dim, typename scalar>
-    Tensor<Dim, scalar>& Tensor<Dim, scalar>::operator=(const Tensor<Dim, scalar>& t)
+    Tensor<Dim, scalar> &Tensor<Dim, scalar>::operator=(const Tensor<Dim, scalar> &t)
     {
         if (this->len != t.len)
         {
@@ -345,11 +321,11 @@ namespace cuddh
             mem.reset(new scalar[this->len]);
             this->ptr = mem.get();
         }
-        for (int i=0; i < Dim; ++i)
+        for (int i = 0; i < Dim; ++i)
             this->_shape[i] = t._shape[i];
-        for (int i=0; i < this->len; ++i)
+        for (int i = 0; i < this->len; ++i)
             mem[i] = t[i];
-        
+
         return *this;
     }
 
@@ -431,5 +407,3 @@ namespace cuddh
     /// @brief specialization of `Tensor` when `Dim == 3` and `scalar == int`.
     typedef Cube<int> icube;
 } // namespace cuddh
-
-#endif

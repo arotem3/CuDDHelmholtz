@@ -1,20 +1,23 @@
-#ifndef CUDDH_EXAMPLES_HPP
-#define CUDDH_EXAMPLES_HPP
+#pragma once
 
-#include <iostream>
-#include <iomanip>
+#include <format>
 #include <fstream>
-// #include <format>
+#include <iostream>
 
 namespace cuddh
 {
-    inline static void to_file(const std::string& fname, int n_dof, const double * u)
+    template <typename T>
+    inline static bool to_file(const std::string &fname, int n_dof, const T *u)
     {
         std::ofstream out(fname, std::ios::out | std::ios::binary);
-        out.write(reinterpret_cast<const char*>(u), n_dof * sizeof(double));
+        if (!out.is_open())
+        {
+            std::cerr << "Failed to open file " << fname << std::endl;
+            return false;
+        }
+        out.write(reinterpret_cast<const char *>(u), n_dof * sizeof(T));
         out.close();
+
+        return true;
     }
 } // namespace cuddh
-
-
-#endif

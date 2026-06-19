@@ -1,30 +1,26 @@
-#ifndef CUDDH_OPERATOR_HPP
-#define CUDDH_OPERATOR_HPP
+#pragma once
 
 namespace cuddh
 {
+    template <typename scalar_t>
     class Operator
     {
     public:
-        Operator() = default;
+        Operator(int n) : _n{n} {}
         virtual ~Operator() = default;
 
         /// @brief y <- y + c * A * x
-        virtual void action(double c, const double * x, double * y) const = 0;
+        virtual void action(scalar_t c, const scalar_t *x, scalar_t *y) const = 0;
 
-        /// @brief y <- A * x 
-        virtual void action(const double * x, double * y) const = 0;
-    };
+        /// @brief y <- A * x
+        virtual void action(const scalar_t *x, scalar_t *y) const = 0;
 
-    class SinglePrecisionOperator
-    {
-    public:
-        SinglePrecisionOperator() = default;
-        virtual ~SinglePrecisionOperator() = default;
+        constexpr int ndof() const { return _n; }
 
-        virtual void action(const float * x, float * y) const = 0;
+    protected:
+        constexpr void set_size(int n) { _n = n; }
+
+    private:
+        int _n;
     };
 } // namespace cuddh
-
-
-#endif

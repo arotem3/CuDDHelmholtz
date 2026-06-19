@@ -1,112 +1,70 @@
-#include "test.hpp"
+#include "test_common.hpp"
 
- __device__ static double func(const double X[2])
+__device__ static double func(double2 x)
 {
-    const double x = X[0], y = X[1];
-    return 3.0 * x * x - 2.0 * x * y + y + 1.0;
+    return 3.0 * x.x * x.x - 2.0 * x.x * x.y + x.y + 1.0;
 }
 
 using namespace cuddh;
 
-namespace cuddh_test
+static void run_mass_case(TestLogger &summary, const Mesh2D &mesh, Basis basis, std::string test_name)
 {
-    void t_mass(int& n_test, int& n_passed, const Mesh2D& mesh, const Basis& basis, const QuadratureRule& quad, const std::string& test_name)
+    constexpr double tol = 1e-8;
+
+    H1Space2D fem(mesh, basis);
+    const int ndof = fem.size();
+
+    host_device_dvec _u(ndof);
+    host_device_dvec _b(ndof);
+    host_device_dvec _Mf(ndof);
+
+    double *u = _u.device_write();
+    double *b = _b.device_write();
+    double *Mf = _Mf.device_write();
+
+    auto X = fem.physical_coordinates(MemorySpace::DEVICE);
+
+    host_device_dvec _f(ndof);
+    double *f = _f.device_write();
+
+    // evaluate f at the global FEM degrees of freedom
+    forall(ndof, [=] __device__(int i) mutable { f[i] = func(X(i)); });
+
+    // evaluate (f, phi)
+    MassMatrix m(fem);
+
+    l2_project(b, m, [=] __device__(double2 x) { return func(x); });
+
+    m.action(f, Mf);
+
+    double err = dla::dist(ndof, Mf, b) / dla::norm(ndof, b);
+
+    if (err < tol)
+        summary.pass(std::format("mass forward {}", test_name));
+    else
+        summary.fail(std::format("mass forward {}", test_name),
+                     std::format("relative error {} exceeds tolerance {}", err, tol));
+}
+
+static void run_mass_tests(TestLogger &summary)
+{
     {
-        constexpr double tol = 1e-8;
-        const int n_elem = mesh.n_elem();
-        const int n_basis = basis.size();
-
-        H1Space fem(mesh, basis);
-        const int ndof = fem.size();
-
-        host_device_dvec _u(ndof);
-        host_device_dvec _f(ndof);
-        host_device_dvec _b(ndof);
-        host_device_dvec _Mf(ndof);
-        
-        double * u = _u.device_write(); // projected func
-        double * f = _f.device_write(); // interpolated values of func
-        double * b = _b.device_write(); // (f, phi)
-        double * Mf = _Mf.device_write(); // mass matrix times f
-
-        auto X = fem.physical_coordinates(MemorySpace::DEVICE);
-
-        // evaluate f on nodes
-        forall(ndof, [=] __device__ (int i) -> void
-        {
-            double xy[2];
-            xy[0] = X(0, i);
-            xy[1] = X(1, i);
-            f[i] = func(xy);
-        });
-        
-        // evaluate (f, phi)
-        LinearFunctional l(fem, quad);
-        l.action([] __device__ (double X[2]) {return func(X);}, b);
-
-        MassMatrix m(fem);
-        DiagInvMassMatrix p(fem);
-
-        m.action(f, Mf);
-
-        double err = dist(ndof, Mf, b) / cuddh::norm(ndof, b);
-
-        n_test++;
-        if (err < tol)
-        {
-            std::cout << "\t[ + ] t_mass(" << test_name << ") forward error test successful." << std::endl;
-            n_passed++;
-        }
-        else
-        {
-            std::cout << "\t[ - ] t_mass(" << test_name << ") test failed.\n\t\tForward error ~ " << err << " > tol (" << tol << ")" << std::endl;
-        }
-        
-        // solve for u
-        const int gmres_m = 5;
-        const int maxiter = 10;
-        const double gmres_tol = 1e-12;
-        auto out = gmres(ndof, u, &m, b, &p, gmres_m, maxiter, gmres_tol);
-
-        err = dist(ndof, u, f) / cuddh::norm(ndof, f);
-
-        n_test++;
-        if (err < tol)
-        {
-            std::cout << "\t[ + ] t_mass(" << test_name << ") backward error test successful." << std::endl;
-            n_passed++;
-        }
-        else
-        {
-            std::cout << "\t[ - ] t_mass(" << test_name << ") backward error test failed.\n\t\tBackward error ~ " << err << "> tol (" << tol << ")" << std::endl;
-        }
+        const int nx = 10;
+        Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
+        for (int p : {3, 4, 5, 6, 7, 8})
+            run_mass_case(summary, mesh, Basis(p), std::format("structured mesh p={}", p));
     }
 
-    void t_mass(int& n_test, int& n_passed)
     {
-        {
-            const int nx = 10;
-            Mesh2D mesh = Mesh2D::uniform_rect(nx, -1.0, 1.0, nx, -1.0, 1.0);
-            for (int p : {3, 4, 5, 6, 7, 8})
-            {
-                Basis basis(p);
-                QuadratureRule quad(p+2, QuadratureRule::GaussLegendre);
-                std::string test_name = "structured mesh | p = " + std::to_string(p);
-
-                t_mass(n_test, n_passed, mesh, basis, quad, test_name);
-            }
-        }
-
-        {
-            Mesh2D mesh = load_unstructured_square();
-            for (int p : {3, 4, 5, 6, 7, 8})
-            {
-                Basis basis(p);
-                QuadratureRule quad(p+2, QuadratureRule::GaussLegendre);
-                std::string test_name = "unstructured mesh | p = " + std::to_string(p); 
-
-                t_mass(n_test, n_passed, mesh, basis, quad, test_name);
-            }
-        }
+        Mesh2D mesh = load_unstructured_square();
+        for (int p : {3, 4, 5, 6, 7, 8})
+            run_mass_case(summary, mesh, Basis(p), std::format("unstructured mesh p={}", p));
     }
-} // namespace cuddh
+}
+
+int main()
+{
+    TestLogger summary;
+    run_mass_tests(summary);
+    return summary.finish();
+}
