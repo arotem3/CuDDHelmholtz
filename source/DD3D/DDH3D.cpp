@@ -395,9 +395,14 @@ __global__ __launch_bounds__(
 // ---------------------------------------------------------------------------
 
 template <typename scalar_t, int NB, int NEL, int TDOF = 1>
-__global__ __launch_bounds__(NB * NB * NB * NEL, 1024 / (NB * NB * NB * NEL)) void ddh_mr_action_kernel_3d(
-    const DDH3DMinResKernelData<scalar_t, NB, NEL, TDOF> helper, const double *const __restrict__ x,
-    double *const __restrict__ y, const scalar_t *const __restrict__ d_lambda, scalar_t *const __restrict__ d_update)
+__global__ __launch_bounds__(
+    NB * NB * NB * NEL,
+    (32 * CUDDH_WARPS_PER_SM) /
+        (NB * NB * NB * NEL *
+         TDOF)) void ddh_mr_action_kernel_3d(const DDH3DMinResKernelData<scalar_t, NB, NEL, TDOF> helper,
+                                             const double *const __restrict__ x, double *const __restrict__ y,
+                                             const scalar_t *const __restrict__ d_lambda,
+                                             scalar_t *const __restrict__ d_update)
 {
     constexpr int EDOF = NB * NB * NB;
     [[maybe_unused]] constexpr int BDOF = EDOF * NEL;
