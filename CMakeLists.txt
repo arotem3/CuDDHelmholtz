@@ -92,6 +92,8 @@ if(CUDDH_USE_CUDSS)
     find_library(CUDSS_LIBRARY NAMES cudss)
     if(NOT CUDSS_LIBRARY)
         message(FATAL_ERROR "CUDDH_USE_CUDSS=ON but lib cudss was not found")
+    else()
+        message(STATUS "CUDDH_USE_CUDSS=ON and lib cudss was found: ${CUDSS_LIBRARY}")
     endif()
 
     target_link_libraries(cuddh PUBLIC ${CUDSS_LIBRARY})
