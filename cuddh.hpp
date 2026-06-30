@@ -31,6 +31,7 @@
 #include "include/Operators3D/WaveEquation3D.hpp"
 #include "include/Operators3D/WaveHoltz3D.hpp"
 #include "include/QuadratureRule.hpp"
+#include "include/SparseMatrix.hpp"
 #include "include/SmallMatrix.hpp"
 #include "include/Tensor.hpp"
 #include "include/forall.hpp"

@@ -18,6 +18,7 @@ endif()
 # Options
 option(CUDDH_DEBUG "Enable debug mode" OFF)
 option(CUDDH_WARPS_PER_SM "Number of warps per SM" 32)
+option(CUDDH_USE_CUDSS "Enable NVIDIA CuDSS sparse direct solver support" OFF)
 
 # Set CUDDH_DEBUG if build type is Debug
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -27,6 +28,7 @@ endif()
 # Display option values
 message(STATUS "CUDDH_DEBUG: ${CUDDH_DEBUG}")
 message(STATUS "CUDDH_WARPS_PER_SM: ${CUDDH_WARPS_PER_SM}")
+message(STATUS "CUDDH_USE_CUDSS: ${CUDDH_USE_CUDSS}")
 
 # Output configuration file
 configure_file(
@@ -84,6 +86,16 @@ if(CUDAToolkit_FOUND)
     target_link_libraries(cuddh PUBLIC CUDA::cudart CUDA::cublas)
 else()
     message(FATAL_ERROR "CUDAToolkit not found")
+endif()
+
+if(CUDDH_USE_CUDSS)
+    find_library(CUDSS_LIBRARY NAMES cudss)
+    if(NOT CUDSS_LIBRARY)
+        message(FATAL_ERROR "CUDDH_USE_CUDSS=ON but lib cudss was not found")
+    endif()
+
+    target_link_libraries(cuddh PUBLIC ${CUDSS_LIBRARY})
+    target_compile_definitions(cuddh PUBLIC CUDDH_HAS_CUDSS=1)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")

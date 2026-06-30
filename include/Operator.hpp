@@ -1,7 +1,12 @@
 #pragma once
 
+#include <complex>
+
 namespace cuddh
 {
+    template <typename scalar_t, bool Complex>
+    class SparseMatrix;
+
     template <typename scalar_t>
     class Operator
     {
@@ -14,6 +19,12 @@ namespace cuddh
 
         /// @brief y <- A * x
         virtual void action(const scalar_t *x, scalar_t *y) const = 0;
+
+        /// @brief Optional explicit assembly hook: S <- S + c * A.
+        virtual bool assemble(scalar_t, SparseMatrix<scalar_t, false> &) const { return false; }
+
+        /// @brief Optional explicit assembly hook for blocked-complex direct solves.
+        virtual bool assemble(std::complex<scalar_t>, SparseMatrix<scalar_t, true> &) const { return false; }
 
         constexpr int ndof() const { return _n; }
 
