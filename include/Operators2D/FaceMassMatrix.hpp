@@ -5,6 +5,7 @@
 #include "FEM2D/GridFunc2D.hpp"
 #include "FEM2D/H1Space2D.hpp"
 #include "Operator.hpp"
+#include "SparseMatrix.hpp"
 
 namespace cuddh
 {
@@ -23,6 +24,12 @@ namespace cuddh
 
         /// @brief y[i] = <x, phi[i]>
         void action(const double *x, double *y) const override;
+
+        /// @brief S <- S + c * H  (real sparse matrix)
+        bool assemble(double c, SparseMatrix<double> &S) const override;
+
+        /// @brief S <- S + c * H  (complex sparse matrix; c may be complex)
+        bool assemble(std::complex<double> c, SparseMatrix<double, true> &S) const override;
 
         /// @brief returns the (diagonal) mass matrix as VectorWrapper of managed memory
         VectorWrapper<const double> to_device() const

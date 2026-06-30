@@ -163,3 +163,100 @@ void StiffnessMatrix3D::action(const double *x, double *y) const
     dla::zeros(fem.size(), y);
     action(1.0, x, y);
 }
+
+bool StiffnessMatrix3D::assemble(double c, SparseMatrix<double> &S_out) const
+{
+    const int nb = fem.basis().size();
+    const int ne = fem.mesh().n_elem();
+    const double *D = _D.host_read();
+    const double3x3 *G = _G.host_read();
+    auto I = fem.global_indices(MemorySpace::HOST);
+    auto Dv = reshape(D, nb, nb);
+    auto Gv = reshape(G, nb, nb, nb, ne);
+
+    for (int el = 0; el < ne; ++el)
+        for (int a = 0; a < nb; ++a)
+            for (int b = 0; b < nb; ++b)
+                for (int cv = 0; cv < nb; ++cv)
+                {
+                    const int row = I(a, b, cv, el);
+                    for (int d = 0; d < nb; ++d)
+                        for (int e = 0; e < nb; ++e)
+                            for (int f = 0; f < nb; ++f)
+                            {
+                                const int col = I(d, e, f, el);
+                                double val = 0.0;
+                                if (b == e && cv == f)
+                                    for (int l = 0; l < nb; ++l)
+                                        val += Dv(l, a) * Gv(l, b, cv, el)(0, 0) * Dv(l, d);
+                                if (cv == f)
+                                    val += Dv(d, a) * Gv(d, b, cv, el)(1, 0) * Dv(b, e);
+                                if (b == e)
+                                    val += Dv(d, a) * Gv(d, b, cv, el)(2, 0) * Dv(cv, f);
+                                if (cv == f)
+                                    val += Dv(a, d) * Gv(a, e, cv, el)(0, 1) * Dv(e, b);
+                                if (a == d && cv == f)
+                                    for (int l = 0; l < nb; ++l)
+                                        val += Dv(l, b) * Gv(a, l, cv, el)(1, 1) * Dv(l, e);
+                                if (a == d)
+                                    val += Dv(e, b) * Gv(a, e, cv, el)(2, 1) * Dv(cv, f);
+                                if (b == e)
+                                    val += Dv(a, d) * Gv(a, b, f, el)(0, 2) * Dv(f, cv);
+                                if (a == d)
+                                    val += Dv(b, e) * Gv(a, b, f, el)(1, 2) * Dv(f, cv);
+                                if (a == d && b == e)
+                                    for (int l = 0; l < nb; ++l)
+                                        val += Dv(l, cv) * Gv(a, b, l, el)(2, 2) * Dv(l, f);
+                                S_out.add_entry(row, col, c * val);
+                            }
+                }
+    return true;
+}
+
+bool StiffnessMatrix3D::assemble(std::complex<double> c, SparseMatrix<double, true> &S_out) const
+{
+    const int nb = fem.basis().size();
+    const int ne = fem.mesh().n_elem();
+    const double *D = _D.host_read();
+    const double3x3 *G = _G.host_read();
+    auto I = fem.global_indices(MemorySpace::HOST);
+    auto Dv = reshape(D, nb, nb);
+    auto Gv = reshape(G, nb, nb, nb, ne);
+    for (int el = 0; el < ne; ++el)
+        for (int a = 0; a < nb; ++a)
+            for (int b = 0; b < nb; ++b)
+                for (int cv = 0; cv < nb; ++cv)
+                {
+                    const int row = I(a, b, cv, el);
+                    for (int d = 0; d < nb; ++d)
+                        for (int e = 0; e < nb; ++e)
+                            for (int f = 0; f < nb; ++f)
+                            {
+                                const int col = I(d, e, f, el);
+                                double val = 0.0;
+                                if (b == e && cv == f)
+                                    for (int l = 0; l < nb; ++l)
+                                        val += Dv(l, a) * Gv(l, b, cv, el)(0, 0) * Dv(l, d);
+                                if (cv == f)
+                                    val += Dv(d, a) * Gv(d, b, cv, el)(1, 0) * Dv(b, e);
+                                if (b == e)
+                                    val += Dv(d, a) * Gv(d, b, cv, el)(2, 0) * Dv(cv, f);
+                                if (cv == f)
+                                    val += Dv(a, d) * Gv(a, e, cv, el)(0, 1) * Dv(e, b);
+                                if (a == d && cv == f)
+                                    for (int l = 0; l < nb; ++l)
+                                        val += Dv(l, b) * Gv(a, l, cv, el)(1, 1) * Dv(l, e);
+                                if (a == d)
+                                    val += Dv(e, b) * Gv(a, e, cv, el)(2, 1) * Dv(cv, f);
+                                if (b == e)
+                                    val += Dv(a, d) * Gv(a, b, f, el)(0, 2) * Dv(f, cv);
+                                if (a == d)
+                                    val += Dv(b, e) * Gv(a, b, f, el)(1, 2) * Dv(f, cv);
+                                if (a == d && b == e)
+                                    for (int l = 0; l < nb; ++l)
+                                        val += Dv(l, cv) * Gv(a, b, l, el)(2, 2) * Dv(l, f);
+                                S_out.add_entry(row, col, c * val);
+                            }
+                }
+    return true;
+}

@@ -45,3 +45,12 @@ void Helmholtz3D::action(const double *x, double *y) const
         Av[i] = -Av[i] + mi * V + hi * U;
     });
 }
+
+bool Helmholtz3D::assemble(std::complex<double> c, SparseMatrix<double, true> &out) const
+{
+    using namespace std::complex_literals;
+    S.assemble(c, out);
+    M.assemble(-c * (omega * omega), out);
+    H.assemble(-1.0i * omega * c, out);
+    return true;
+}

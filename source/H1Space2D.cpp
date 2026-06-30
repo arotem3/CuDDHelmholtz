@@ -145,4 +145,32 @@ namespace cuddh
         forall(ndof, [=] __device__(int i) -> void { x[proj(i)] = 0.0; });
     }
 
+    void H1Space2D::set_pattern(SparseMatrix<double> &S) const
+    {
+        auto I = global_indices(MemorySpace::HOST);
+        for (int el = 0; el < n_elem; ++el)
+            for (int a = 0; a < n_basis; ++a)
+                for (int b = 0; b < n_basis; ++b)
+                {
+                    int row = I(a, b, el);
+                    for (int c = 0; c < n_basis; ++c)
+                        for (int d = 0; d < n_basis; ++d)
+                            S.add_entry(row, I(c, d, el));
+                }
+    }
+
+    void H1Space2D::set_pattern(SparseMatrix<double, true> &S) const
+    {
+        auto I = global_indices(MemorySpace::HOST);
+        for (int el = 0; el < n_elem; ++el)
+            for (int a = 0; a < n_basis; ++a)
+                for (int b = 0; b < n_basis; ++b)
+                {
+                    int row = I(a, b, el);
+                    for (int c = 0; c < n_basis; ++c)
+                        for (int d = 0; d < n_basis; ++d)
+                            S.add_entry(row, I(c, d, el));
+                }
+    }
+
 } // namespace cuddh

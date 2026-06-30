@@ -43,3 +43,13 @@ Helmholtz::Helmholtz(const H1Space2D &fem, const TraceSpace2D &fs, double omega)
 Helmholtz::Helmholtz(const H1Space2D &fem, const TraceSpace2D &fs, double omega, const GridFunc2D<double> &a)
     : Operator<double>(2 * fem.size()), omega{omega}, S(fem), M(fem, square(a)), H(fs, a)
 {}
+
+// Assembles the n×n complex Helmholtz matrix: c*(S - omega^2*M - i*omega*H).
+bool Helmholtz::assemble(std::complex<double> c, SparseMatrix<double, true> &out) const
+{
+    using namespace std::complex_literals;
+    S.assemble(c, out);
+    M.assemble(-c * (omega * omega), out);
+    H.assemble(-1.0i * c * omega, out);
+    return true;
+}

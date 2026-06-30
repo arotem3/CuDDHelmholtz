@@ -3,6 +3,7 @@
 #include "Basis.hpp"
 #include "HostDeviceArray.hpp"
 #include "Mesh3D/Mesh3D.hpp"
+#include "SparseMatrix.hpp"
 #include "Tensor.hpp"
 #include "cuddh_config.hpp"
 #include "forall.hpp"
@@ -35,6 +36,12 @@ namespace cuddh
         /// @brief returns the physical coordinates corresponding to collocation
         /// point of each nodal DOF. The output has shape (ndof,).
         VectorWrapper<const double3> physical_coordinates(MemorySpace m) const { return reshape(_xyz.read(m), ndof); }
+
+        /// @brief Add all (I(a,b,c,el), I(d,e,f,el)) element connectivity entries to S (real).
+        void set_pattern(SparseMatrix<double> &S) const;
+
+        /// @brief Add all (I(a,b,c,el), I(d,e,f,el)) element connectivity entries to S (complex).
+        void set_pattern(SparseMatrix<double, true> &S) const;
 
     private:
         const int n_elem;

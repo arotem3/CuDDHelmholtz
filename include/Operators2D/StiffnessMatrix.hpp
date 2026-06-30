@@ -4,6 +4,7 @@
 #include "HostDeviceArray.hpp"
 #include "Operator.hpp"
 #include "SmallMatrix.hpp"
+#include "SparseMatrix.hpp"
 
 namespace cuddh
 {
@@ -22,6 +23,12 @@ namespace cuddh
         /// @brief y[i] <- (grad x, grad phi[i])
         /// where phi[i] is the i-th basis function in the H1Space2D
         void action(const double *x, double *y) const override;
+
+        /// @brief S <- S + c * K  (real sparse matrix)
+        bool assemble(double c, SparseMatrix<double> &S_out) const override;
+
+        /// @brief S <- S + c * K  (complex sparse matrix; c may be complex)
+        bool assemble(std::complex<double> c, SparseMatrix<double, true> &S_out) const override;
 
     private:
         const H1Space2D &fem;

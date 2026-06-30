@@ -164,3 +164,36 @@ void TraceSpace3D::orth(double *x) const
 
     forall(ndof, [=] __device__(int i) -> void { x[proj[i]] = 0.0; });
 }
+
+void H1Space3D::set_pattern(SparseMatrix<double> &S) const
+{
+    auto I = global_indices(MemorySpace::HOST);
+    for (int el = 0; el < n_elem; ++el)
+        for (int a = 0; a < n_basis; ++a)
+            for (int b = 0; b < n_basis; ++b)
+                for (int cv = 0; cv < n_basis; ++cv)
+                {
+                    int row = I(a, b, cv, el);
+                    for (int d = 0; d < n_basis; ++d)
+                        for (int e = 0; e < n_basis; ++e)
+                            for (int f = 0; f < n_basis; ++f)
+                                S.add_entry(row, I(d, e, f, el));
+                }
+}
+
+void H1Space3D::set_pattern(SparseMatrix<double, true> &S) const
+{
+    auto I = global_indices(MemorySpace::HOST);
+    for (int el = 0; el < n_elem; ++el)
+        for (int a = 0; a < n_basis; ++a)
+            for (int b = 0; b < n_basis; ++b)
+                for (int cv = 0; cv < n_basis; ++cv)
+                {
+                    int row = I(a, b, cv, el);
+                    for (int d = 0; d < n_basis; ++d)
+                        for (int e = 0; e < n_basis; ++e)
+                            for (int f = 0; f < n_basis; ++f)
+                                S.add_entry(row, I(d, e, f, el));
+                }
+}
+

@@ -70,3 +70,21 @@ void FaceMassMatrix3D::action(const double *x, double *y) const
     auto m = to_device();
     forall(m.size(), [=] __device__(int i) -> void { y[i] = m(i) * x[i]; });
 }
+
+bool cuddh::FaceMassMatrix3D::assemble(double c, SparseMatrix<double> &S) const
+{
+    const int n = _fem.size();
+    const double *m = _m.host_read();
+    for (int i = 0; i < n; ++i)
+        S.add_entry(i, i, c * m[i]);
+    return true;
+}
+
+bool cuddh::FaceMassMatrix3D::assemble(std::complex<double> c, SparseMatrix<double, true> &S) const
+{
+    const int n = _fem.size();
+    const double *m = _m.host_read();
+    for (int i = 0; i < n; ++i)
+        S.add_entry(i, i, c * m[i]);
+    return true;
+}

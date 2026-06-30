@@ -171,3 +171,21 @@ double cuddh::l2_dist(const MassMatrix3D &M, const double *x, const double *y)
 
     return std::sqrt(thrust::transform_reduce(thrust::device, begin, end, ::l2_dist_op{}, 0.0, thrust::plus<double>()));
 }
+
+bool cuddh::MassMatrix3D::assemble(double c, SparseMatrix<double> &S) const
+{
+    const int n = fem.size();
+    const double *m = _m.host_read();
+    for (int i = 0; i < n; ++i)
+        S.add_entry(i, i, c * m[i]);
+    return true;
+}
+
+bool cuddh::MassMatrix3D::assemble(std::complex<double> c, SparseMatrix<double, true> &S) const
+{
+    const int n = fem.size();
+    const double *m = _m.host_read();
+    for (int i = 0; i < n; ++i)
+        S.add_entry(i, i, c * m[i]);
+    return true;
+}

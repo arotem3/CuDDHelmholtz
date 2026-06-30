@@ -128,4 +128,72 @@ namespace cuddh
         dla::zeros(this->ndof(), y);
         action(1.0, x, y);
     }
+
+    // Assemble the 2D element stiffness matrix using the explicit formula:
+    //   K[(a,b),(c,d)] = δ(b,d)*Σ_k D(k,a)*G(k,b)_00*D(k,c)
+    //                  + D(c,a)*G(c,b)_01*D(b,d)
+    //                  + D(a,c)*G(a,d)_01*D(d,b)
+    //                  + δ(a,c)*Σ_l D(l,b)*G(a,l)_11*D(l,d)
+    // with D(i,j) = D_ptr[i + nb*j] and G(k,l,el) at G_ptr[k + nb*l + nb^2*el].
+    bool StiffnessMatrix::assemble(double c, SparseMatrix<double> &S_out) const
+    {
+        const int nb = n_basis;
+        auto D = reshape(_D.host_read(), nb, nb);
+        auto G = reshape(_G.host_read(), nb, nb, n_elem);
+        auto I = fem.global_indices(MemorySpace::HOST);
+
+        for (int el = 0; el < n_elem; ++el)
+            for (int a = 0; a < nb; ++a)
+                for (int b = 0; b < nb; ++b)
+                {
+                    const int row = I(a, b, el);
+                    for (int cv = 0; cv < nb; ++cv)
+                        for (int d = 0; d < nb; ++d)
+                        {
+                            const int col = I(cv, d, el);
+                            double val = 0.0;
+                            if (b == d)
+                                for (int k = 0; k < nb; ++k)
+                                    val += D(k, a) * G(k, b, el)(0, 0) * D(k, cv);
+                            val += D(cv, a) * G(cv, b, el)(0, 1) * D(b, d);
+                            val += D(a, cv) * G(a, d, el)(0, 1) * D(d, b);
+                            if (a == cv)
+                                for (int l = 0; l < nb; ++l)
+                                    val += D(l, b) * G(a, l, el)(1, 1) * D(l, d);
+                            S_out.add_entry(row, col, c * val);
+                        }
+                }
+        return true;
+    }
+
+    bool StiffnessMatrix::assemble(std::complex<double> c, SparseMatrix<double, true> &S_out) const
+    {
+        const int nb = n_basis;
+        auto D = reshape(_D.host_read(), nb, nb);
+        auto G = reshape(_G.host_read(), nb, nb, n_elem);
+        auto I = fem.global_indices(MemorySpace::HOST);
+
+        for (int el = 0; el < n_elem; ++el)
+            for (int a = 0; a < nb; ++a)
+                for (int b = 0; b < nb; ++b)
+                {
+                    const int row = I(a, b, el);
+                    for (int cv = 0; cv < nb; ++cv)
+                        for (int d = 0; d < nb; ++d)
+                        {
+                            const int col = I(cv, d, el);
+                            double val = 0.0;
+                            if (b == d)
+                                for (int k = 0; k < nb; ++k)
+                                    val += D(k, a) * G(k, b, el)(0, 0) * D(k, cv);
+                            val += D(cv, a) * G(cv, b, el)(0, 1) * D(b, d);
+                            val += D(a, cv) * G(a, d, el)(0, 1) * D(d, b);
+                            if (a == cv)
+                                for (int l = 0; l < nb; ++l)
+                                    val += D(l, b) * G(a, l, el)(1, 1) * D(l, d);
+                            S_out.add_entry(row, col, c * val);
+                        }
+                }
+        return true;
+    }
 } // namespace cuddh

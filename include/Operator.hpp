@@ -20,7 +20,7 @@ namespace cuddh
         /// @brief y <- A * x
         virtual void action(const scalar_t *x, scalar_t *y) const = 0;
 
-        /// @brief Optional explicit assembly hook: S <- S + c * A.
+        /// @brief Optional explicit assembly hook: S <- S + c * A. Returns true if implemented.
         virtual bool assemble(scalar_t, SparseMatrix<scalar_t, false> &) const { return false; }
 
         /// @brief Optional explicit assembly hook for blocked-complex direct solves.

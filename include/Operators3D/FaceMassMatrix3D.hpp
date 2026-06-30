@@ -4,6 +4,7 @@
 #include "FEM3D/H1Space3D.hpp"
 #include "HostDeviceArray.hpp"
 #include "Operator.hpp"
+#include "SparseMatrix.hpp"
 #include "Tensor.hpp"
 #include "forall.hpp"
 
@@ -30,6 +31,12 @@ namespace cuddh
 
         /// @brief y[i] = <x, phi[i]>  (H1Space3D-sized vectors)
         void action(const double *x, double *y) const override;
+
+        /// @brief S <- S + c * H  (real sparse matrix)
+        bool assemble(double c, SparseMatrix<double> &S) const override;
+
+        /// @brief S <- S + c * H  (complex sparse matrix; c may be complex)
+        bool assemble(std::complex<double> c, SparseMatrix<double, true> &S) const override;
 
         /// @brief Returns the diagonal mass vector (length fem.size()) on the device.
         const_dvec_wrapper to_device() const { return reshape(_m.device_read(), _m.size()); }

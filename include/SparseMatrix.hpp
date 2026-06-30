@@ -4,6 +4,7 @@
 #include <chrono>
 #include <complex>
 #include <cstdint>
+#include <memory>
 #include <ostream>
 #include <stdexcept>
 #include <string>
@@ -220,13 +221,21 @@ namespace cuddh
 
         void build_csr_from_coo()
         {
-            _csr_row_ptr.resize(_rows + 1);
-            _csr_cols.resize(_nnz);
-            _csr_vals.resize(_nnz);
-
             const int *rows = _coo_rows.host_read();
             const int *cols = _coo_cols.host_read();
             const value_t *vals = _coo_vals.host_read();
+
+            // Count non-zeros, dropping structural zeros so that sparse
+            // operators like MassMatrix (diagonal) can assemble into a full
+            // FEM-space pattern without wasting storage.
+            int csr_nnz = 0;
+            for (int i = 0; i < _nnz; ++i)
+                if (vals[i] != value_t{})
+                    ++csr_nnz;
+
+            _csr_row_ptr.resize(_rows + 1);
+            _csr_cols.resize(csr_nnz);
+            _csr_vals.resize(csr_nnz);
 
             int *row_ptr = _csr_row_ptr.host_write();
             int *csr_cols = _csr_cols.host_write();
@@ -234,17 +243,24 @@ namespace cuddh
 
             std::fill(row_ptr, row_ptr + _rows + 1, 0);
             for (int i = 0; i < _nnz; ++i)
-                row_ptr[rows[i] + 1]++;
+                if (vals[i] != value_t{})
+                    row_ptr[rows[i] + 1]++;
 
             for (int r = 0; r < _rows; ++r)
                 row_ptr[r + 1] += row_ptr[r];
 
+            int k = 0;
             for (int i = 0; i < _nnz; ++i)
             {
-                csr_cols[i] = cols[i];
-                csr_vals[i] = vals[i];
+                if (vals[i] != value_t{})
+                {
+                    csr_cols[k] = cols[i];
+                    csr_vals[k] = vals[i];
+                    ++k;
+                }
             }
 
+            _nnz = csr_nnz;
             _finalized_storage_present = true;
         }
 
@@ -328,72 +344,23 @@ namespace cuddh
     public:
         using value_t = typename SparseMatrix<scalar_t, Complex>::value_t;
 
-        explicit SparseLU(const SparseMatrix<scalar_t, Complex> &A)
-        {
-            if (A.state() != SparseMatrixState::Finalized || !A._finalized_storage_present)
-                throw std::logic_error("SparseLU: input matrix must be finalized before factorization");
+        explicit SparseLU(const SparseMatrix<scalar_t, Complex> &A);
 
-            _n_rows = A._rows;
-            _n_cols = A._cols;
+        ~SparseLU();
+        SparseLU(SparseLU &&) noexcept;
+        SparseLU &operator=(SparseLU &&) noexcept;
+        SparseLU(const SparseLU &) = delete;
+        SparseLU &operator=(const SparseLU &) = delete;
 
-            _stats.n_rows = _n_rows;
-            _stats.n_cols = _n_cols;
-            _stats.nnz = A._nnz;
+        const SparseLUStats<scalar_t, Complex> &stats() const;
 
-            analyze(A);
-            factor(A);
-        }
+        bool solve(const scalar_t *rhs, scalar_t *x);
 
-        const SparseLUStats<scalar_t, Complex> &stats() const { return _stats; }
-
-        bool solve(const scalar_t *rhs, scalar_t *x)
-        {
-            (void)rhs;
-            (void)x;
-            throw std::logic_error("SparseLU: solve is not implemented yet (dense fallback removed)");
-        }
-
-        void print(std::ostream &os) const
-        {
-            os << "SparseLU(n=" << _stats.n_rows << ", m=" << _stats.n_cols << ", nnz=" << _stats.nnz << ")\n"
-               << "  analysis: " << _stats.analysis_seconds << " s\n"
-               << "  factor:   " << _stats.factor_seconds << " s\n"
-               << "  solves:   " << _stats.solve_calls << " calls, " << _stats.total_solve_seconds << " s total\n"
-               << "  memory:   finalized=" << _stats.finalized_bytes << " B, factor=" << _stats.factor_bytes << " B\n";
-        }
+        void print(std::ostream &os) const;
 
     private:
-        void analyze(const SparseMatrix<scalar_t, Complex> &A)
-        {
-            const auto t0 = std::chrono::high_resolution_clock::now();
-
-            _stats.finalized_bytes = A.finalized_storage_bytes();
-
-            const auto t1 = std::chrono::high_resolution_clock::now();
-            _stats.analysis_seconds = std::chrono::duration<double>(t1 - t0).count();
-            _analyzed = true;
-        }
-
-        void factor(const SparseMatrix<scalar_t, Complex> &A)
-        {
-            if (!_analyzed)
-                analyze(A);
-
-            if (_n_rows != _n_cols)
-                throw std::logic_error("SparseLU: factorization requires a square matrix");
-
-            (void)A;
-            throw std::logic_error("SparseLU: factor is not implemented yet (dense fallback removed)");
-        }
-
-    private:
-        int _n_rows{0};
-        int _n_cols{0};
-        SparseLUStats<scalar_t, Complex> _stats;
-        bool _analyzed{false};
-        bool _factored{false};
-        std::vector<value_t> _dense_lu;
-        std::vector<int> _pivots;
+        struct Impl;
+        std::unique_ptr<Impl> _pimpl;
     };
 
     template <typename scalar_t, bool Complex>
