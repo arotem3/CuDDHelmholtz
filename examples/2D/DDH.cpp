@@ -23,7 +23,8 @@
  *
  * The DDH class implements this discretization and solves the problem by solving a substructured problem on the
  * skeleton of the domain decomposition. The substructured problem is solved with MINRES and the action of the operator
- * is computed by solving the subdomain problems with the WaveHoltz iterations.
+ * is computed by solving the subdomain problems with either WaveHoltz iterations, MINRES, or (when compiled with CuDSS)
+ * a sparse direct LU factorization per subdomain.
  *
  * To compile & run this program:
  *  (1) From the CuDDHelmholtz directory, compile the library:
@@ -88,7 +89,7 @@ int main(int argc, char *argv[])
     int maxit = 1000;                     // maximum number of GMRES iterations
     double rtol = 1e-3;                   // relative tolerance
     std::string verbose_str = "progress"; // silent | progress | iteration
-    std::string subsolver = "waveholtz";  // waveholtz | minres
+    std::string subsolver = "waveholtz";  // waveholtz | minres | sparse
 
     CLI::App app{"DDH: Domain decomposition solver for the 2D Helmholtz equation"};
     app.add_option("-p,--deg", deg, "Polynomial degree of basis functions")->default_val(3);
@@ -107,9 +108,13 @@ int main(int argc, char *argv[])
     app.add_option("-v,--verbose", verbose_str, "Verbosity: silent | progress | iteration")
         ->default_val("progress")
         ->check(CLI::IsMember({"silent", "progress", "iteration"}, CLI::ignore_case));
-    app.add_option("--subsolver", subsolver, "Subdomain solver: waveholtz | minres")
+    app.add_option("--subsolver", subsolver, "Subdomain solver: waveholtz | minres | sparse")
         ->default_val("waveholtz")
+#ifdef CUDDH_HAS_CUDSS
+        ->check(CLI::IsMember({"waveholtz", "minres", "sparse"}, CLI::ignore_case));
+#else
         ->check(CLI::IsMember({"waveholtz", "minres"}, CLI::ignore_case));
+#endif
     CLI11_PARSE(app, argc, argv);
 
     int nx = grid[0];
@@ -157,12 +162,19 @@ int main(int argc, char *argv[])
     // variable coefficient
     auto a = gridfunc(fem, [] __device__(const double2 X) -> double { return alpha(X); });
 
+    Timer build_timer;
     auto ddsolver = [&]() -> std::unique_ptr<Solver<double>> {
         if (subsolver == "minres")
             return std::make_unique<DDH<float, SubdomainSolver::MINRES>>(efem, omega, a, config);
+#ifdef CUDDH_HAS_CUDSS
+        else if (subsolver == "sparse")
+            return std::make_unique<DDH<float, SubdomainSolver::SparseDirect>>(efem, omega, a);
+#endif
         else
             return std::make_unique<DDH<float>>(efem, omega, a, config);
     }();
+    CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
+    const double build_time = build_timer.elapsed();
 
     thrust::universal_vector<double> U(N, 0.0);
     thrust::universal_vector<double> B(N, 0.0);
@@ -182,10 +194,15 @@ int main(int argc, char *argv[])
               << "\t#subdomains = " << efem.size() << "\n"
               << "\tmax #elements / subdomain = " << efem.max_n_elem() << "\n"
               << "\tmax #dof / subdomain = " << efem.max_size() << "\n"
+              << "\tsubsolver = " << subsolver << "\n"
               << "\tkernel = {" << get_kernel_str(ddsolver) << "}\n"
-              << "\t#lambda = " << get_n_lambda(ddsolver) << std::endl;
+              << "\t#lambda = " << get_n_lambda(ddsolver) << "\n"
+              << std::format("\tbuild time = {:.3f} s\n", build_time) << std::flush;
 
+    Timer solve_timer;
     auto out = ddsolver->solve(u, b, opts);
+    CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
+    const double solve_time = solve_timer.elapsed();
 
     double res = [&]() -> double {
         ivec boundary_faces = mesh.boundary_edges();                 // identify boundary faces
@@ -200,7 +217,8 @@ int main(int argc, char *argv[])
         return dla::dist(N, Au, b) / dla::norm(N, b);
     }();
 
-    std::cout << std::format("Helmholtz residual |b - A u| / |b| ~ {:.2e}", res) << std::endl;
+    std::cout << std::format("iterations = {}\n", out.num_iter) << std::format("solve time = {:.3f} s\n", solve_time)
+              << std::format("Helmholtz residual |b - A u| / |b| ~ {:.2e}\n", res);
 
     CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -225,6 +243,10 @@ int get_n_lambda(const std::unique_ptr<Solver<double>> &ddh)
 {
     if (auto ddh_ptr = dynamic_cast<DDH<float, SubdomainSolver::MINRES> *>(ddh.get()))
         return ddh_ptr->op().ndof();
+#ifdef CUDDH_HAS_CUDSS
+    else if (auto ddh_ptr = dynamic_cast<DDH<float, SubdomainSolver::SparseDirect> *>(ddh.get()))
+        return ddh_ptr->op().ndof();
+#endif
     else if (auto ddh_ptr = dynamic_cast<DDH<float> *>(ddh.get()))
         return ddh_ptr->op().ndof();
     return 0;
@@ -234,6 +256,10 @@ std::string get_kernel_str(const std::unique_ptr<Solver<double>> &ddh)
 {
     if (auto ddh_ptr = dynamic_cast<DDH<float, SubdomainSolver::MINRES> *>(ddh.get()))
         return ddh_ptr->op().kernel_str();
+#ifdef CUDDH_HAS_CUDSS
+    else if (dynamic_cast<DDH<float, SubdomainSolver::SparseDirect> *>(ddh.get()))
+        return std::string("CuDSS batch direct LU");
+#endif
     else if (auto ddh_ptr = dynamic_cast<DDH<float> *>(ddh.get()))
         return ddh_ptr->op().kernel_str();
     return std::string("unknown");
