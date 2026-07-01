@@ -9,9 +9,8 @@ using namespace cuddh;
 namespace
 {
     // Gather: reads global FEM + lambda DOFs into a contiguous blocked-complex RHS buffer.
-    // Writes conj(F) = (F.x, -F.y) so that SparseBlockLU solves A·y = conj(F),
-    // matching the convention of the MINRES subdomain solver (which solves L·u = (F.x, -F.y)
-    // via the real symmetric block form of the Helmholtz system).
+    // Writes F = (F.x, F.y) so that SparseBlockLU solves A·y = F, matching the MINRES
+    // subdomain solver which (despite the symmetrization b[TDOF+t] = -v.y) still solves A·u = F.
     template <typename scalar_t>
     __global__ void ddh_sd_gather_kernel(int mx_ndof, int mx_fdof, int g_ndof, int n_lambda,
                                          const int *__restrict__ s_ndof, const int *__restrict__ s_fdof,
@@ -69,7 +68,7 @@ namespace
             }
 
             d_rhs[subsp * 2 * mx_ndof + i] = F.x;
-            d_rhs[subsp * 2 * mx_ndof + mx_ndof + i] = -F.y;
+            d_rhs[subsp * 2 * mx_ndof + mx_ndof + i] = F.y;
         }
     }
 
