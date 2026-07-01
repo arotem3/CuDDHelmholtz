@@ -45,6 +45,17 @@ namespace cuddh
         void scal(int n, double a, double *x);
         void scal(int n, float a, float *x);
 
+        /** @brief Negate the imaginary block of a blocked-complex vector [re; im] of size 2n.
+         *  Equivalent to x <- conj(x) in the [re; im] blocked representation. */
+        inline void conj(int n, double *x)
+        {
+            scal(n, -1.0, x + n);
+        }
+        inline void conj(int n, float *x)
+        {
+            scal(n, -1.0f, x + n);
+        }
+
         /** @brief x[i] <- a (device) */
         void fill(int n, double a, double *x);
         void fill(int n, float a, float *x);
