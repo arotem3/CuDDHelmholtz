@@ -76,7 +76,7 @@ bool cuddh::FaceMassMatrix3D::assemble(double c, SparseMatrix<double> &S) const
     const int n = _fem.size();
     const double *m = _m.host_read();
     for (int i = 0; i < n; ++i)
-        S.add_entry(i, i, c * m[i]);
+        S.set_value(i, i, c * m[i]);
     return true;
 }
 
@@ -85,6 +85,6 @@ bool cuddh::FaceMassMatrix3D::assemble(std::complex<double> c, SparseMatrix<doub
     const int n = _fem.size();
     const double *m = _m.host_read();
     for (int i = 0; i < n; ++i)
-        S.add_entry(i, i, c * m[i]);
+        S.set_value(i, i, c * m[i]);
     return true;
 }

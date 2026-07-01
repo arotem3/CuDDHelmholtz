@@ -160,7 +160,7 @@ namespace cuddh
                             if (a == cv)
                                 for (int l = 0; l < nb; ++l)
                                     val += D(l, b) * G(a, l, el)(1, 1) * D(l, d);
-                            S_out.add_entry(row, col, c * val);
+                            S_out.set_value(row, col, c * val);
                         }
                 }
         return true;
@@ -191,7 +191,7 @@ namespace cuddh
                             if (a == cv)
                                 for (int l = 0; l < nb; ++l)
                                     val += D(l, b) * G(a, l, el)(1, 1) * D(l, d);
-                            S_out.add_entry(row, col, c * val);
+                            S_out.set_value(row, col, c * val);
                         }
                 }
         return true;

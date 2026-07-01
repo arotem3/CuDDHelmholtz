@@ -15,7 +15,6 @@ static std::vector<double> random_vec(int n, unsigned seed = 42)
 }
 
 // Check that sparse matrix assembly matches the matrix-free action.
-// Matrix-free runs on device; SparseMatrix::action runs on host (CPU SpMV).
 static bool check_assembly(const Operator<double> &op, const SparseMatrix<double> &sp, const char *label,
                            TestLogger &log, double tol = 1e-10)
 {
@@ -32,9 +31,12 @@ static bool check_assembly(const Operator<double> &op, const SparseMatrix<double
     std::vector<double> y_mf(n);
     cudaMemcpy(y_mf.data(), d_y_mf, n * sizeof(double), cudaMemcpyDeviceToHost);
 
-    // Sparse: host path (SparseMatrix::action uses CPU loops)
-    std::vector<double> y_sp(n, 0.0);
-    sp.action(x_host.data(), y_sp.data());
+    // Sparse: device path
+    host_device_dvec _y_sp(n);
+    dla::zeros(n, _y_sp.device_write());
+    sp.action(_x.device_read(), _y_sp.device_read_write());
+    std::vector<double> y_sp(n);
+    cudaMemcpy(y_sp.data(), _y_sp.device_read(), n * sizeof(double), cudaMemcpyDeviceToHost);
 
     double err = 0.0, norm = 0.0;
     for (int i = 0; i < n; ++i)
@@ -78,9 +80,12 @@ static bool check_helmholtz_assembly(const Operator<double> &op, const SparseMat
     std::vector<double> y_mf(n2);
     cudaMemcpy(y_mf.data(), _y_mf.device_read(), n2 * sizeof(double), cudaMemcpyDeviceToHost);
 
-    // Sparse: host path. y_sp = A*z = [Re(A*z); Im(A*z)]
-    std::vector<double> y_sp(n2, 0.0);
-    sp.action(x_host.data(), y_sp.data());
+    // Sparse: device path. y_sp = A*z = [Re(A*z); Im(A*z)]
+    host_device_dvec _y_sp(n2);
+    dla::zeros(n2, _y_sp.device_write());
+    sp.action(_x.device_read(), _y_sp.device_read_write());
+    std::vector<double> y_sp(n2);
+    cudaMemcpy(y_sp.data(), _y_sp.device_read(), n2 * sizeof(double), cudaMemcpyDeviceToHost);
 
     double err = 0.0, norm = 0.0;
     for (int i = 0; i < n; ++i)

@@ -74,7 +74,7 @@ bool cuddh::FaceMassMatrix::assemble(double c, SparseMatrix<double> &S) const
     thrust::copy(_m.begin(), _m.end(), h_m.begin());
     const int n = static_cast<int>(h_m.size());
     for (int i = 0; i < n; ++i)
-        S.add_entry(i, i, c * h_m[i]);
+        S.set_value(i, i, c * h_m[i]);
     return true;
 }
 
@@ -84,6 +84,6 @@ bool cuddh::FaceMassMatrix::assemble(std::complex<double> c, SparseMatrix<double
     thrust::copy(_m.begin(), _m.end(), h_m.begin());
     const int n = static_cast<int>(h_m.size());
     for (int i = 0; i < n; ++i)
-        S.add_entry(i, i, c * h_m[i]);
+        S.set_value(i, i, c * h_m[i]);
     return true;
 }

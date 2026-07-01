@@ -207,7 +207,7 @@ bool StiffnessMatrix3D::assemble(double c, SparseMatrix<double> &S_out) const
                                 if (a == d && b == e)
                                     for (int l = 0; l < nb; ++l)
                                         val += Dv(l, cv) * Gv(a, b, l, el)(2, 2) * Dv(l, f);
-                                S_out.add_entry(row, col, c * val);
+                                S_out.set_value(row, col, c * val);
                             }
                 }
     return true;
@@ -255,7 +255,7 @@ bool StiffnessMatrix3D::assemble(std::complex<double> c, SparseMatrix<double, tr
                                 if (a == d && b == e)
                                     for (int l = 0; l < nb; ++l)
                                         val += Dv(l, cv) * Gv(a, b, l, el)(2, 2) * Dv(l, f);
-                                S_out.add_entry(row, col, c * val);
+                                S_out.set_value(row, col, c * val);
                             }
                 }
     return true;

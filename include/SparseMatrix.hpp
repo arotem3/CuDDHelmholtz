@@ -1,5 +1,7 @@
 #pragma once
 
+#include <thrust/complex.h>
+
 #include <algorithm>
 #include <chrono>
 #include <complex>
@@ -14,6 +16,8 @@
 
 #include "HostDeviceArray.hpp"
 #include "Operator.hpp"
+#include "forall.hpp"
+#include "linalg.hpp"
 
 namespace cuddh
 {
@@ -26,6 +30,9 @@ namespace cuddh
 
     template <typename scalar_t, bool Complex = false>
     class SparseLU;
+
+    template <typename scalar_t, bool Complex = false>
+    class SparseBlockLU;
 
     template <typename scalar_t, bool Complex = false>
     class SparseMatrix : public Operator<scalar_t>
@@ -53,6 +60,20 @@ namespace cuddh
             check_rowcol(row, col);
             require_state(SparseMatrixState::PatternAssembly, "add_entry");
             _pattern_entries.push_back({row, col});
+        }
+
+        void set_value(int row, int col, scalar_t value)
+        {
+            if constexpr (Complex)
+                add_value(row, col, value_t(value, scalar_t(0)));
+            else
+                add_value(row, col, value);
+        }
+
+        void set_value(int row, int col, std::complex<scalar_t> value)
+            requires(Complex)
+        {
+            add_value(row, col, value);
         }
 
         void finalize_pattern()
@@ -88,20 +109,6 @@ namespace cuddh
             _state = SparseMatrixState::COOAssembly;
         }
 
-        void add_entry(int row, int col, scalar_t value)
-        {
-            if constexpr (Complex)
-                add_value(row, col, value_t(value, scalar_t(0)));
-            else
-                add_value(row, col, value);
-        }
-
-        void add_entry(int row, int col, std::complex<scalar_t> value)
-            requires(Complex)
-        {
-            add_value(row, col, value);
-        }
-
         void finalize_values()
         {
             if (_state == SparseMatrixState::Finalized)
@@ -128,16 +135,17 @@ namespace cuddh
                    static_cast<size_t>(_nnz) * sizeof(value_t);
         }
 
+        // x and y are device pointers. y <- y + c * A * x.
         void action(scalar_t c, const scalar_t *x, scalar_t *y) const override
         {
             require_state(SparseMatrixState::Finalized, "action");
-
             if constexpr (Complex)
                 action_csr(value_t(c, scalar_t(0)), x, y);
             else
                 action_csr(c, x, y);
         }
 
+        // x and y are device pointers. y <- y + c * A * x (complex scaling).
         void action(std::complex<scalar_t> c, const scalar_t *x, scalar_t *y) const
             requires(Complex)
         {
@@ -145,10 +153,11 @@ namespace cuddh
             action_csr(c, x, y);
         }
 
+        // x and y are device pointers. y <- A * x.
         void action(const scalar_t *x, scalar_t *y) const override
         {
-            const int n = this->ndof();
-            std::fill(y, y + n, scalar_t{});
+            require_state(SparseMatrixState::Finalized, "action");
+            dla::zeros(this->ndof(), y);
             action(scalar_t{1}, x, y);
         }
 
@@ -191,7 +200,7 @@ namespace cuddh
         void add_value(int row, int col, value_t value)
         {
             check_rowcol(row, col);
-            require_state(SparseMatrixState::COOAssembly, "add_entry");
+            require_state(SparseMatrixState::COOAssembly, "set_value");
 
             const int slot = find_slot(_coo_rows.host_read(), _coo_cols.host_read(), _nnz, row, col);
             if (slot < 0)
@@ -264,44 +273,45 @@ namespace cuddh
             _finalized_storage_present = true;
         }
 
+    public:
+        // x and y are device pointers. Computes y += c * A * x on GPU.
         void action_csr(value_t c, const scalar_t *x, scalar_t *y) const
         {
             ensure_finalized_storage();
 
-            const int *row_ptr = _csr_row_ptr.host_read();
-            const int *cols = _csr_cols.host_read();
-            const value_t *vals = _csr_vals.host_read();
+            const int *rp = _csr_row_ptr.device_read();
+            const int *ci = _csr_cols.device_read();
 
             if constexpr (!Complex)
             {
-                for (int r = 0; r < _rows; ++r)
-                    for (int k = row_ptr[r]; k < row_ptr[r + 1]; ++k)
-                        y[r] += c * vals[k] * x[cols[k]];
+                const scalar_t *cv = _csr_vals.device_read();
+                const int nr = _rows;
+                forall(nr, [=] __device__(int r) {
+                    scalar_t acc{};
+                    for (int k = rp[r]; k < rp[r + 1]; ++k)
+                        acc += cv[k] * x[ci[k]];
+                    y[r] += c * acc;
+                });
             }
             else
             {
-                std::vector<value_t> x_complex(static_cast<size_t>(_cols), value_t{});
-                std::vector<value_t> y_complex(static_cast<size_t>(_rows), value_t{});
-
-                for (int i = 0; i < _cols; ++i)
-                    x_complex[i] = value_t(x[i], x[i + _cols]);
-
-                for (int i = 0; i < _rows; ++i)
-                    y_complex[i] = value_t(y[i], y[i + _rows]);
-
-                for (int r = 0; r < _rows; ++r)
-                {
-                    value_t out = y_complex[r];
-                    for (int k = row_ptr[r]; k < row_ptr[r + 1]; ++k)
-                        out += c * vals[k] * x_complex[cols[k]];
-                    y_complex[r] = out;
-                }
-
-                for (int i = 0; i < _rows; ++i)
-                {
-                    y[i] = y_complex[i].real();
-                    y[i + _rows] = y_complex[i].imag();
-                }
+                // x and y are in blocked format: [re_0..re_{n-1}, im_0..im_{n-1}].
+                using tcx = thrust::complex<scalar_t>;
+                const tcx *cv = reinterpret_cast<const tcx *>(_csr_vals.device_read());
+                const tcx c_cx(c.real(), c.imag());
+                const int nr = _rows;
+                const int nc = _cols;
+                forall(nr, [=] __device__(int r) {
+                    tcx acc{};
+                    for (int k = rp[r]; k < rp[r + 1]; ++k)
+                    {
+                        const int col = ci[k];
+                        acc += cv[k] * tcx(x[col], x[col + nc]);
+                    }
+                    const tcx res = c_cx * acc;
+                    y[r] += res.real();
+                    y[r + nr] += res.imag();
+                });
             }
         }
 
@@ -374,52 +384,175 @@ namespace cuddh
     class BlockSparseMatrix
     {
     public:
+        using value_t = std::conditional_t<Complex, std::complex<scalar_t>, scalar_t>;
+
         BlockSparseMatrix() = default;
 
-        explicit BlockSparseMatrix(std::vector<SparseMatrix<scalar_t, Complex>> blocks) : _blocks(std::move(blocks)) {}
+        BlockSparseMatrix(int n_blocks, const int *block_sizes)
+            : _n_blocks(n_blocks),
+              _block_sizes(block_sizes, block_sizes + n_blocks),
+              _coo_pattern(n_blocks),
+              _rp_offsets(n_blocks + 1, 0),
+              _nz_offsets(n_blocks + 1, 0)
+        {
+            if (n_blocks < 0)
+                throw std::invalid_argument("BlockSparseMatrix: n_blocks must be non-negative");
+        }
 
-        int size() const { return static_cast<int>(_blocks.size()); }
+        int n_blocks() const { return _n_blocks; }
+        int block_size(int b) const { return _block_sizes[b]; }
+        int block_nnz(int b) const { return _nz_offsets[b + 1] - _nz_offsets[b]; }
+        int total_nnz() const { return _nz_offsets[_n_blocks]; }
         SparseMatrixState state() const { return _state; }
 
-        SparseMatrix<scalar_t, Complex> &block(int i) { return _blocks.at(i); }
-        const SparseMatrix<scalar_t, Complex> &block(int i) const { return _blocks.at(i); }
+        // Flat CSR data — valid after finalize_pattern().
+        // Block b's row ptrs occupy row_ptrs()[rp_offset(b) .. rp_offset(b+1)-1] (local offsets starting from 0).
+        // Block b's non-zeros occupy col_indices()/values()[nz_offset(b) .. nz_offset(b+1)-1].
+        const int *row_ptrs() const { return _row_ptrs.data(); }
+        const int *col_indices() const { return _col_idx.data(); }
+        const value_t *values() const { return _values.data(); }
+        int rp_offset(int b) const { return _rp_offsets[b]; }
+        int nz_offset(int b) const { return _nz_offsets[b]; }
 
-        void add_entry(int block, int row, int col)
+        void add_entry(int b, int row, int col)
         {
-            _blocks.at(block).add_entry(row, col);
-            _state = SparseMatrixState::PatternAssembly;
+            if (_state != SparseMatrixState::PatternAssembly)
+                throw std::logic_error("BlockSparseMatrix::add_entry: invalid state");
+            _coo_pattern[b].emplace_back(row, col);
         }
 
-        void add_entry(int block, int row, int col, scalar_t value)
+        void set_value(int b, int row, int col, value_t val)
         {
-            _blocks.at(block).add_entry(row, col, value);
-            _state = SparseMatrixState::COOAssembly;
-        }
-
-        template <bool C = Complex>
-            requires(C)
-        void add_entry(int block, int row, int col, std::complex<scalar_t> value)
-        {
-            _blocks.at(block).add_entry(row, col, value);
-            _state = SparseMatrixState::COOAssembly;
+            if (_state != SparseMatrixState::COOAssembly)
+                throw std::logic_error("BlockSparseMatrix::set_value: invalid state");
+            const int rp_base = _rp_offsets[b];
+            const int nz_base = _nz_offsets[b];
+            const int loc0 = _row_ptrs[rp_base + row];
+            const int loc1 = _row_ptrs[rp_base + row + 1];
+            const int *ci = _col_idx.data() + nz_base + loc0;
+            const int len = loc1 - loc0;
+            const int pos = static_cast<int>(std::lower_bound(ci, ci + len, col) - ci);
+            if (pos >= len || ci[pos] != col)
+                throw std::invalid_argument("BlockSparseMatrix::set_value: (row, col) not in pattern");
+            _values[nz_base + loc0 + pos] += val;
         }
 
         void finalize_pattern()
         {
-            for (auto &b : _blocks)
-                b.finalize_pattern();
+            _rp_offsets[0] = 0;
+            _nz_offsets[0] = 0;
+            for (int b = 0; b < _n_blocks; ++b)
+            {
+                auto &coo = _coo_pattern[b];
+                std::sort(coo.begin(), coo.end());
+                coo.erase(std::unique(coo.begin(), coo.end()), coo.end());
+                _rp_offsets[b + 1] = _rp_offsets[b] + _block_sizes[b] + 1;
+                _nz_offsets[b + 1] = _nz_offsets[b] + static_cast<int>(coo.size());
+            }
+
+            _row_ptrs.resize(_rp_offsets[_n_blocks], 0);
+            _col_idx.resize(_nz_offsets[_n_blocks]);
+            _values.assign(_nz_offsets[_n_blocks], value_t{});
+
+            for (int b = 0; b < _n_blocks; ++b)
+            {
+                const int n = _block_sizes[b];
+                const auto &coo = _coo_pattern[b];
+                int *rp = _row_ptrs.data() + _rp_offsets[b];
+                int *ci = _col_idx.data() + _nz_offsets[b];
+
+                rp[0] = 0;
+                int cur_row = 0, k = 0;
+                for (const auto &[row, col] : coo)
+                {
+                    while (cur_row < row)
+                        rp[++cur_row] = k;
+                    ci[k++] = col;
+                }
+                while (cur_row < n)
+                    rp[++cur_row] = static_cast<int>(coo.size());
+            }
+
+            _coo_pattern.clear();
+            _coo_pattern.shrink_to_fit();
             _state = SparseMatrixState::COOAssembly;
         }
 
-        void finalize_values()
-        {
-            for (auto &b : _blocks)
-                b.finalize_values();
-            _state = SparseMatrixState::Finalized;
-        }
+        void finalize_values() { _state = SparseMatrixState::Finalized; }
 
     private:
-        std::vector<SparseMatrix<scalar_t, Complex>> _blocks;
+        int _n_blocks{0};
+        std::vector<int> _block_sizes;
+        std::vector<int> _rp_offsets;
+        std::vector<int> _nz_offsets;
+
+        std::vector<std::vector<std::pair<int, int>>> _coo_pattern; // cleared by finalize_pattern()
+
+        std::vector<int> _row_ptrs;
+        std::vector<int> _col_idx;
+        std::vector<value_t> _values;
+
         SparseMatrixState _state{SparseMatrixState::PatternAssembly};
     };
+
+    template <typename scalar_t, bool Complex = false>
+    struct SparseBlockLUStats
+    {
+        int n_blocks{0};
+        int max_n{0};
+        int total_nnz{0};
+        size_t factor_bytes{0};
+        double analysis_seconds{0.0};
+        double factor_seconds{0.0};
+        double total_solve_seconds{0.0};
+        int solve_calls{0};
+    };
+
+    /// @brief CuDSS non-uniform batch LU factorization for a collection of sparse matrices.
+    ///
+    /// All blocks are analyzed and factored in a single CuDSS batch call.  Solves are also
+    /// issued as a single batch call, making this the preferred interface for DD subdomain solves
+    /// where each subdomain has its own sparse matrix of potentially different size.
+    ///
+    /// `solve(d_rhs, d_x)` accepts and returns contiguous device buffers in blocked-complex
+    /// layout: block p occupies bytes at stride `2 * max_size` from the buffer start, with
+    /// re_0..re_{n_p-1} followed by im_0..im_{n_p-1} (padded to max_size with zeros).
+    ///
+    /// Requires CuDSS. Fails to compile if the library is built without `-DCUDDH_USE_CUDSS=ON`.
+    template <typename scalar_t, bool Complex>
+    class SparseBlockLU
+    {
+    public:
+        using value_t = typename SparseMatrix<scalar_t, Complex>::value_t;
+
+        /// @brief Construct from a finalized BlockSparseMatrix; runs batch analyze + factor.
+        explicit SparseBlockLU(const BlockSparseMatrix<scalar_t, Complex> &blocks);
+
+        ~SparseBlockLU();
+        SparseBlockLU(SparseBlockLU &&) noexcept;
+        SparseBlockLU &operator=(SparseBlockLU &&) noexcept;
+        SparseBlockLU(const SparseBlockLU &) = delete;
+        SparseBlockLU &operator=(const SparseBlockLU &) = delete;
+
+        const SparseBlockLUStats<scalar_t, Complex> &stats() const;
+
+        /// @brief Solve A_p * x_p = rhs_p for all blocks p (one CuDSS batch call).
+        /// @param d_rhs Device buffer: block p at offset p*2*max_n, layout [re; im] padded to max_n.
+        /// @param d_x   Device output buffer, same layout as d_rhs.
+        /// @return true on success; throws on CuDSS error.
+        bool solve(const scalar_t *d_rhs, scalar_t *d_x);
+
+        void print(std::ostream &os) const;
+
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> _pimpl;
+    };
+
+    template <typename scalar_t, bool Complex>
+    inline std::ostream &operator<<(std::ostream &os, const SparseBlockLU<scalar_t, Complex> &lu)
+    {
+        lu.print(os);
+        return os;
+    }
 } // namespace cuddh
