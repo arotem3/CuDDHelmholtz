@@ -98,7 +98,7 @@ int main(int argc, char *argv[])
     Helmholtz A(fem, fs, omega, coef);
 
     // Build sparsity pattern from FEM connectivity
-    SparseMatrix<double, true> S(ndof, ndof);
+    SparseMatrix<double, true> S(ndof, ndof, 0, SparseMatrixType::Symmetric);
     fem.set_pattern(S);
     S.finalize_pattern();
     std::cout << "\n\t#nnz = " << S.nnz() << "\n";
