@@ -1,19 +1,22 @@
 #pragma once
 
+#include <complex>
 #include <cuda/std/array>
 #include <cuda/warp>
 #include <type_traits>
 
 #include "EnsembleSpace.hpp"
+#include "FixedTensorWrapper.hpp"
 #include "HostDeviceArray.hpp"
 #include "SmallMatrix.hpp"
 #include "cuddh_config.hpp"
 #include "cuddh_error.hpp"
 #include "forall.hpp"
-#include "FixedTensorWrapper.hpp"
 
 namespace cuddh
 {
+    template <typename scalar_t, bool Complex>
+    class BlockSparseMatrix;
     namespace details
     {
         template <typename scalar_t, int NB, int NEL>
@@ -73,7 +76,13 @@ namespace cuddh
                     .I = d_I};
         }
 
+        /// @brief Accumulate c * S_p into block p of B for each subdomain p.
+        /// B must be in COOAssembly state (after `finalize_pattern()`).
+        void assemble(scalar_t c, BlockSparseMatrix<scalar_t, false> &B) const;
+        void assemble(std::complex<scalar_t> c, BlockSparseMatrix<scalar_t, true> &B) const;
+
     private:
+        const EnsembleSpace &efem;
         int n_basis;
         int mx_elem;
         int n_domains;

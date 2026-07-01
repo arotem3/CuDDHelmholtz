@@ -1,6 +1,7 @@
 #include "DD2D/DDFaceMassMatrix.hpp"
 
 #include "DD2D/DDTraceFunc2D.hpp"
+#include "SparseMatrix.hpp"
 #include "forall.hpp"
 
 using namespace cuddh;
@@ -56,17 +57,39 @@ static HostDeviceArray<scalar_t> init_mass(const EnsembleSpace &efem, const DDTr
 
 template <typename scalar_t>
 DDFaceMassMatrix<scalar_t>::DDFaceMassMatrix(const EnsembleSpace &efem)
-    : mx_fdof{efem.max_fsize()}, n_domains{efem.size()}
+    : efem{efem}, mx_fdof{efem.max_fsize()}, n_domains{efem.size()}
 {
     m = init_mass<scalar_t>(efem, nullptr);
 }
 
 template <typename scalar_t>
 DDFaceMassMatrix<scalar_t>::DDFaceMassMatrix(const EnsembleSpace &efem, const GridFunc2D<double> &a)
-    : mx_fdof{efem.max_fsize()}, n_domains{efem.size()}
+    : efem{efem}, mx_fdof{efem.max_fsize()}, n_domains{efem.size()}
 {
     DDTraceFunc2D<double> tr_a = subdomain_trace(efem, a);
     m = init_mass<scalar_t>(efem, &tr_a);
+}
+
+template <typename scalar_t>
+void DDFaceMassMatrix<scalar_t>::assemble(scalar_t c, BlockSparseMatrix<scalar_t, false> &B) const
+{
+    auto h_H = reshape(m.host_read(), mx_fdof, n_domains);
+    const auto fdof = efem.fsizes(MemorySpace::HOST);
+
+    for (int p = 0; p < n_domains; ++p)
+        for (int i = 0; i < fdof(p); ++i)
+            B.set_value(p, i, i, c * h_H(i, p));
+}
+
+template <typename scalar_t>
+void DDFaceMassMatrix<scalar_t>::assemble(std::complex<scalar_t> c, BlockSparseMatrix<scalar_t, true> &B) const
+{
+    auto h_H = reshape(m.host_read(), mx_fdof, n_domains);
+    const auto fdof = efem.fsizes(MemorySpace::HOST);
+
+    for (int p = 0; p < n_domains; ++p)
+        for (int i = 0; i < fdof(p); ++i)
+            B.set_value(p, i, i, c * h_H(i, p));
 }
 
 namespace cuddh

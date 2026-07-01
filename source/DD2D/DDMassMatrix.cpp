@@ -1,5 +1,7 @@
 #include "DD2D/DDMassMatrix.hpp"
 
+#include "SparseMatrix.hpp"
+
 using namespace cuddh;
 
 template <typename scalar_t>
@@ -58,16 +60,39 @@ static HostDeviceArray<scalar_t> init_mass(const EnsembleSpace &efem, const Grid
 }
 
 template <typename scalar_t>
-DDMassMatrix<scalar_t>::DDMassMatrix(const EnsembleSpace &efem) : mx_dofs{efem.max_size()}, n_domains{efem.size()}
+DDMassMatrix<scalar_t>::DDMassMatrix(const EnsembleSpace &efem)
+    : efem{efem}, mx_dofs{efem.max_size()}, n_domains{efem.size()}
 {
     m = init_mass<scalar_t>(efem, nullptr);
 }
 
 template <typename scalar_t>
 DDMassMatrix<scalar_t>::DDMassMatrix(const EnsembleSpace &efem, const GridFunc2D<double> &a)
-    : mx_dofs{efem.max_size()}, n_domains{efem.size()}
+    : efem{efem}, mx_dofs{efem.max_size()}, n_domains{efem.size()}
 {
     m = init_mass<scalar_t>(efem, &a);
+}
+
+template <typename scalar_t>
+void DDMassMatrix<scalar_t>::assemble(scalar_t c, BlockSparseMatrix<scalar_t, false> &B) const
+{
+    auto h_M = reshape(m.host_read(), mx_dofs, n_domains);
+    const auto ndof = efem.sizes(MemorySpace::HOST);
+
+    for (int p = 0; p < n_domains; ++p)
+        for (int i = 0; i < ndof(p); ++i)
+            B.set_value(p, i, i, c * h_M(i, p));
+}
+
+template <typename scalar_t>
+void DDMassMatrix<scalar_t>::assemble(std::complex<scalar_t> c, BlockSparseMatrix<scalar_t, true> &B) const
+{
+    auto h_M = reshape(m.host_read(), mx_dofs, n_domains);
+    const auto ndof = efem.sizes(MemorySpace::HOST);
+
+    for (int p = 0; p < n_domains; ++p)
+        for (int i = 0; i < ndof(p); ++i)
+            B.set_value(p, i, i, c * h_M(i, p));
 }
 
 namespace cuddh

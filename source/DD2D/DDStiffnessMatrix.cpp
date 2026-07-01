@@ -1,5 +1,7 @@
 #include "DD2D/DDStiffnessMatrix.hpp"
 
+#include "SparseMatrix.hpp"
+
 using namespace cuddh;
 
 template <typename scalar_t>
@@ -58,7 +60,8 @@ static void geom_factors(SmallSymmetricMatrix<scalar_t, 2> *d_G, const EnsembleS
 
 template <typename scalar_t>
 DDStiffnessMatrix<scalar_t>::DDStiffnessMatrix(const EnsembleSpace &efem)
-    : n_basis(efem.h1_space().basis().size()),
+    : efem{efem},
+      n_basis(efem.h1_space().basis().size()),
       mx_elem(efem.max_n_elem()),
       n_domains(efem.size()),
       d(n_basis * n_basis),
@@ -67,6 +70,89 @@ DDStiffnessMatrix<scalar_t>::DDStiffnessMatrix(const EnsembleSpace &efem)
     make_diffmat<scalar_t>(d.host_write(), efem.h1_space().basis());
     geom_factors<scalar_t>(g.device_write(), efem);
     d_I = efem.subspace_indices(MemorySpace::DEVICE);
+}
+
+// Element stiffness formula derived from the action: for output node (tx,ty) and input node (a,b),
+//
+//   K[(tx,ty),(a,b)] = delta(b,ty) * Σᵢ D(i,tx)·G(i,ty).xx·D(i,a)    [xx term]
+//                    + D(a,tx)·G(a,ty).xy·D(ty,b)                      [first xy term]
+//                    + D(b,ty)·G(tx,b).xy·D(tx,a)                      [second xy term]
+//                    + delta(a,tx) * Σᵢ D(i,ty)·G(tx,i).yy·D(i,b)    [yy term]
+//
+// D(i,j) = h_D[i + n_basis*j]  (column-major TensorWrapper layout)
+// G(i,j,el,p) = h_G[i + n_basis*(j + n_basis*(el + mx_elem*p))]
+template <typename scalar_t>
+void DDStiffnessMatrix<scalar_t>::assemble(scalar_t c, BlockSparseMatrix<scalar_t, false> &B) const
+{
+    const auto sI = efem.subspace_indices(MemorySpace::HOST);
+    const auto nel = efem.n_elems(MemorySpace::HOST);
+
+    auto D = reshape(d.host_read(), n_basis, n_basis);
+    auto G = reshape(g.host_read(), n_basis, n_basis, mx_elem, n_domains);
+
+    for (int p = 0; p < n_domains; ++p)
+        for (int el = 0; el < nel(p); ++el)
+            for (int tx = 0; tx < n_basis; ++tx)
+                for (int ty = 0; ty < n_basis; ++ty)
+                {
+                    const int row = sI(tx, ty, el, p);
+                    for (int a = 0; a < n_basis; ++a)
+                        for (int b = 0; b < n_basis; ++b)
+                        {
+                            const int col = sI(a, b, el, p);
+                            scalar_t K = 0;
+
+                            if (b == ty)
+                                for (int i = 0; i < n_basis; ++i)
+                                    K += D(i, tx) * G(i, ty, el, p)(0, 0) * D(i, a);
+
+                            K += D(a, tx) * G(a, ty, el, p)(0, 1) * D(ty, b);
+                            K += D(b, ty) * G(tx, b, el, p)(0, 1) * D(tx, a);
+
+                            if (a == tx)
+                                for (int i = 0; i < n_basis; ++i)
+                                    K += D(i, ty) * G(tx, i, el, p)(1, 1) * D(i, b);
+
+                            B.set_value(p, row, col, c * K);
+                        }
+                }
+}
+
+template <typename scalar_t>
+void DDStiffnessMatrix<scalar_t>::assemble(std::complex<scalar_t> c, BlockSparseMatrix<scalar_t, true> &B) const
+{
+    const auto sI = efem.subspace_indices(MemorySpace::HOST);
+    const auto nel = efem.n_elems(MemorySpace::HOST);
+
+    auto D = reshape(d.host_read(), n_basis, n_basis);
+    auto G = reshape(g.host_read(), n_basis, n_basis, mx_elem, n_domains);
+
+    for (int p = 0; p < n_domains; ++p)
+        for (int el = 0; el < nel(p); ++el)
+            for (int tx = 0; tx < n_basis; ++tx)
+                for (int ty = 0; ty < n_basis; ++ty)
+                {
+                    const int row = sI(tx, ty, el, p);
+                    for (int a = 0; a < n_basis; ++a)
+                        for (int b = 0; b < n_basis; ++b)
+                        {
+                            const int col = sI(a, b, el, p);
+                            scalar_t K = 0;
+
+                            if (b == ty)
+                                for (int i = 0; i < n_basis; ++i)
+                                    K += D(i, tx) * G(i, ty, el, p)(0, 0) * D(i, a);
+
+                            K += D(a, tx) * G(a, ty, el, p)(0, 1) * D(ty, b);
+                            K += D(b, ty) * G(tx, b, el, p)(0, 1) * D(tx, a);
+
+                            if (a == tx)
+                                for (int i = 0; i < n_basis; ++i)
+                                    K += D(i, ty) * G(tx, i, el, p)(1, 1) * D(i, b);
+
+                            B.set_value(p, row, col, c * K);
+                        }
+                }
 }
 
 namespace cuddh

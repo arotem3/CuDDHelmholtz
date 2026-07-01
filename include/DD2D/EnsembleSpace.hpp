@@ -10,6 +10,9 @@
 
 namespace cuddh
 {
+    template <typename scalar_t, bool Complex>
+    class BlockSparseMatrix;
+
     class EnsembleSpace
     {
     public:
@@ -106,6 +109,11 @@ namespace cuddh
         }
 
         int n_shared() const { return n_shared_faces; }
+
+        /// @brief Add (row, col) sparsity entries for every pair of DOFs that share an element
+        /// across all subdomains. Call before `BlockSparseMatrix::finalize_pattern()`.
+        template <typename scalar_t, bool Complex>
+        void set_pattern(BlockSparseMatrix<scalar_t, Complex> &B) const;
 
     private:
         const H1Space2D &fem;

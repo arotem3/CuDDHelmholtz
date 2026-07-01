@@ -1,5 +1,7 @@
 #include "DD2D/EnsembleSpace.hpp"
 
+#include "SparseMatrix.hpp"
+
 using namespace cuddh;
 
 namespace
@@ -544,3 +546,26 @@ void ::EnsembleSpaceBuilder::compute_global_indices(imat_wrapper &h_gI) const
         }
     }
 }
+
+template <typename scalar_t, bool Complex>
+void EnsembleSpace::set_pattern(BlockSparseMatrix<scalar_t, Complex> &B) const
+{
+    const auto sI = subspace_indices(MemorySpace::HOST);
+    const auto nel = n_elems(MemorySpace::HOST);
+
+    for (int p = 0; p < n_spaces; ++p)
+        for (int el = 0; el < nel(p); ++el)
+            for (int ia = 0; ia < n_basis; ++ia)
+                for (int ja = 0; ja < n_basis; ++ja)
+                {
+                    const int row = sI(ia, ja, el, p);
+                    for (int ib = 0; ib < n_basis; ++ib)
+                        for (int jb = 0; jb < n_basis; ++jb)
+                            B.add_entry(p, row, sI(ib, jb, el, p));
+                }
+}
+
+template void EnsembleSpace::set_pattern(BlockSparseMatrix<float, false> &) const;
+template void EnsembleSpace::set_pattern(BlockSparseMatrix<float, true> &) const;
+template void EnsembleSpace::set_pattern(BlockSparseMatrix<double, false> &) const;
+template void EnsembleSpace::set_pattern(BlockSparseMatrix<double, true> &) const;
