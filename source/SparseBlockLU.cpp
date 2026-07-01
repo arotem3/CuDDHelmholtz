@@ -2,6 +2,8 @@
 #include <thrust/complex.h>
 #include <thrust/device_vector.h>
 
+#include <numeric>
+
 #include "SparseMatrix.hpp"
 #include "forall.hpp"
 
@@ -334,8 +336,9 @@ namespace cuddh
 
         int64_t lu_nnz = 0;
         cudssDataGet(p.handle, p.data, CUDSS_DATA_LU_NNZ, &lu_nnz, sizeof(lu_nnz), nullptr);
-        p.stats.factor_bytes = (lu_nnz > 0) ? static_cast<size_t>(lu_nnz) * sizeof(value_t)
-                                            : static_cast<size_t>(total_nnz) * sizeof(value_t);
+        const size_t factor_raw = (lu_nnz > 0) ? static_cast<size_t>(lu_nnz) * sizeof(value_t)
+                                               : static_cast<size_t>(total_nnz) * sizeof(value_t);
+        p.stats.factor_mib = static_cast<double>(factor_raw) / (1024.0 * 1024.0);
 
 #else
         throw std::logic_error("SparseBlockLU: CuDSS is required. Rebuild with -DCUDDH_USE_CUDSS=ON.");
@@ -365,11 +368,18 @@ namespace cuddh
     void SparseBlockLU<scalar_t, Complex>::print(std::ostream &os) const
     {
         const auto &s = _pimpl->stats;
+        const auto &v = s.solve_seconds;
+        const std::string solve_str =
+            v.empty() ? "0 calls"
+                      : std::format("{} calls, {:.3e} s total, {:.3e} min, {:.3e} avg, {:.3e} max", v.size(),
+                                    std::accumulate(v.begin(), v.end(), 0.0), *std::min_element(v.begin(), v.end()),
+                                    std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()),
+                                    *std::max_element(v.begin(), v.end()));
         os << "SparseBlockLU(n_blocks=" << s.n_blocks << ", max_n=" << s.max_n << ", total_nnz=" << s.total_nnz << ")\n"
            << "  analysis: " << s.analysis_seconds << " s\n"
            << "  factor:   " << s.factor_seconds << " s\n"
-           << "  solves:   " << s.solve_calls << " calls, " << s.total_solve_seconds << " s total\n"
-           << "  memory:   factor=" << s.factor_bytes << " B\n";
+           << "  solves:   " << solve_str << "\n"
+           << std::format("  memory:   factor={:.3f} MiB\n", s.factor_mib);
     }
 
     // ─── solve ────────────────────────────────────────────────────────────────────
@@ -403,8 +413,7 @@ namespace cuddh
         cx_to_blocked(p.d_x_cx, d_x, nb, max_n, d_sizes, d_offsets);
 
         const auto t1 = std::chrono::high_resolution_clock::now();
-        p.stats.total_solve_seconds += std::chrono::duration<double>(t1 - t0).count();
-        ++p.stats.solve_calls;
+        p.stats.solve_seconds.push_back(std::chrono::duration<double>(t1 - t0).count());
 
         return true;
 #else

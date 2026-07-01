@@ -2,6 +2,8 @@
 #include <thrust/complex.h>
 #include <thrust/device_vector.h>
 
+#include <numeric>
+
 #include "SparseMatrix.hpp"
 #include "forall.hpp"
 
@@ -52,11 +54,16 @@ namespace cuddh
     {
         switch (t)
         {
-            case SparseMatrixType::Symmetric: return CUDSS_MTYPE_SYMMETRIC;
-            case SparseMatrixType::Hermitian: return CUDSS_MTYPE_HERMITIAN;
-            case SparseMatrixType::SPD:       return CUDSS_MTYPE_SPD;
-            case SparseMatrixType::HPD:       return CUDSS_MTYPE_HPD;
-            default:                          return CUDSS_MTYPE_GENERAL;
+            case SparseMatrixType::Symmetric:
+                return CUDSS_MTYPE_SYMMETRIC;
+            case SparseMatrixType::Hermitian:
+                return CUDSS_MTYPE_HERMITIAN;
+            case SparseMatrixType::SPD:
+                return CUDSS_MTYPE_SPD;
+            case SparseMatrixType::HPD:
+                return CUDSS_MTYPE_HPD;
+            default:
+                return CUDSS_MTYPE_GENERAL;
         }
     }
 
@@ -125,9 +132,8 @@ namespace cuddh
             // n+1-entry CSR row-pointer array.
             cudss_check(cudssMatrixCreateCsr(&A_matrix, static_cast<int64_t>(n), static_cast<int64_t>(n),
                                              static_cast<int64_t>(nnz), rp, nullptr, ci, cv, CUDA_R_32I,
-                                             cudss_value_type<value_t>(),
-                                             to_cudss_matrix_type(mat_type), CUDSS_MVIEW_FULL,
-                                             CUDSS_BASE_ZERO),
+                                             cudss_value_type<value_t>(), to_cudss_matrix_type(mat_type),
+                                             CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO),
                         "cudssMatrixCreateCsr");
         }
 
@@ -167,7 +173,7 @@ namespace cuddh
         p.stats.n_rows = A._rows;
         p.stats.n_cols = A._cols;
         p.stats.nnz = A._nnz;
-        p.stats.finalized_bytes = A.finalized_storage_bytes();
+        p.stats.finalized_mib = static_cast<double>(A.finalized_storage_bytes()) / (1024.0 * 1024.0);
 
 #ifdef CUDDH_HAS_CUDSS
         if (p.n_rows != p.n_cols)
@@ -217,9 +223,9 @@ namespace cuddh
         // Report factor memory from CuDSS
         int64_t lu_nnz = 0;
         cudssDataGet(p.handle, p.data, CUDSS_DATA_LU_NNZ, &lu_nnz, sizeof(lu_nnz), nullptr);
-        p.stats.factor_bytes = static_cast<size_t>(lu_nnz) * sizeof(value_t);
-        if (p.stats.factor_bytes == 0)
-            p.stats.factor_bytes = static_cast<size_t>(nnz) * sizeof(value_t); // fallback estimate
+        const size_t factor_raw =
+            (lu_nnz > 0) ? static_cast<size_t>(lu_nnz) * sizeof(value_t) : static_cast<size_t>(nnz) * sizeof(value_t);
+        p.stats.factor_mib = static_cast<double>(factor_raw) / (1024.0 * 1024.0);
 
 #else
         throw std::logic_error("SparseLU: CuDSS is required. Rebuild with -DCUDDH_USE_CUDSS=ON.");
@@ -247,11 +253,18 @@ namespace cuddh
     void SparseLU<scalar_t, Complex>::print(std::ostream &os) const
     {
         const auto &s = _pimpl->stats;
+        const auto &v = s.solve_seconds;
+        const std::string solve_str =
+            v.empty() ? "0 calls"
+                      : std::format("{} calls, {:.3e} s total, {:.3e} min, {:.3e} avg, {:.3e} max", v.size(),
+                                    std::accumulate(v.begin(), v.end(), 0.0), *std::min_element(v.begin(), v.end()),
+                                    std::accumulate(v.begin(), v.end(), 0.0) / static_cast<double>(v.size()),
+                                    *std::max_element(v.begin(), v.end()));
         os << "SparseLU(n=" << s.n_rows << ", m=" << s.n_cols << ", nnz=" << s.nnz << ")\n"
            << "  analysis: " << s.analysis_seconds << " s\n"
            << "  factor:   " << s.factor_seconds << " s\n"
-           << "  solves:   " << s.solve_calls << " calls, " << s.total_solve_seconds << " s total\n"
-           << "  memory:   finalized=" << s.finalized_bytes << " B, factor=" << s.factor_bytes << " B\n";
+           << "  solves:   " << solve_str << "\n"
+           << std::format("  memory:   finalized={:.3f} MiB, factor={:.3f} MiB\n", s.finalized_mib, s.factor_mib);
     }
 
     // ─── solve ───────────────────────────────────────────────────────────────────
@@ -279,8 +292,7 @@ namespace cuddh
                        cudaMemcpyDeviceToDevice);
 
             const auto t1 = std::chrono::high_resolution_clock::now();
-            p.stats.total_solve_seconds += std::chrono::duration<double>(t1 - t0).count();
-            ++p.stats.solve_calls;
+            p.stats.solve_seconds.push_back(std::chrono::duration<double>(t1 - t0).count());
 
             return st == CUDSS_STATUS_SUCCESS;
         }
@@ -303,8 +315,7 @@ namespace cuddh
             });
 
             const auto t1 = std::chrono::high_resolution_clock::now();
-            p.stats.total_solve_seconds += std::chrono::duration<double>(t1 - t0).count();
-            ++p.stats.solve_calls;
+            p.stats.solve_seconds.push_back(std::chrono::duration<double>(t1 - t0).count());
 
             return st == CUDSS_STATUS_SUCCESS;
         }

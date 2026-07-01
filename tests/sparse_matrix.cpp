@@ -87,7 +87,7 @@ static void test_state_transitions(TestLogger &summary)
     }();
 
     const auto &stats = lu.stats();
-    ok = ok && (stats.solve_calls == 0);
+    ok = ok && (stats.solve_seconds.empty());
 
     const double h_rhs[2] = {1.0, 2.0};
     thrust::device_vector<double> d_rhs(h_rhs, h_rhs + 2);
@@ -98,14 +98,14 @@ static void test_state_transitions(TestLogger &summary)
     std::vector<double> sol(2);
     thrust::copy(d_sol.begin(), d_sol.end(), sol.begin());
     ok = ok && (std::abs(sol[0] - 1.0) < 1e-12) && (std::abs(sol[1] - 1.0) < 1e-12);
-    ok = ok && (lu.stats().solve_calls == 1);
+    ok = ok && (lu.stats().solve_seconds.size() == 1);
 
     thrust::fill(d_sol.begin(), d_sol.end(), 0.0);
     ok = ok && lu.solve(thrust::raw_pointer_cast(d_rhs.data()), thrust::raw_pointer_cast(d_sol.data()));
     cudaDeviceSynchronize();
     thrust::copy(d_sol.begin(), d_sol.end(), sol.begin());
     ok = ok && (std::abs(sol[0] - 1.0) < 1e-12) && (std::abs(sol[1] - 1.0) < 1e-12);
-    ok = ok && (lu.stats().solve_calls == 2);
+    ok = ok && (lu.stats().solve_seconds.size() == 2);
 
     if (ok)
         summary.pass("Sparse matrix state transitions and SparseLU matrix-lifetime independence");
@@ -166,8 +166,8 @@ static void test_factor_and_solve(TestLogger &summary)
     SparseLU<double, false> lu(A);
 
     bool ok = (lu.stats().analysis_seconds >= 0.0) && (lu.stats().factor_seconds >= 0.0);
-    ok = ok && (lu.stats().finalized_bytes > 0);
-    ok = ok && (lu.stats().factor_bytes > 0);
+    ok = ok && (lu.stats().finalized_mib > 0.0);
+    ok = ok && (lu.stats().factor_mib > 0.0);
 
     {
         const double h_rhs[2] = {2.0, 6.0};
@@ -178,8 +178,8 @@ static void test_factor_and_solve(TestLogger &summary)
         std::vector<double> sol(2);
         thrust::copy(d_sol.begin(), d_sol.end(), sol.begin());
         ok = ok && (std::abs(sol[0] - 1.0) < 1e-12) && (std::abs(sol[1] - 2.0) < 1e-12);
-        ok = ok && (lu.stats().solve_calls == 1);
-        ok = ok && (lu.stats().total_solve_seconds >= 0.0);
+        ok = ok && (lu.stats().solve_seconds.size() == 1);
+        ok = ok && (lu.stats().solve_seconds.back() >= 0.0);
 
         SparseMatrix<double, true> C(1, 1, 1);
         C.add_entry(0, 0);
@@ -196,7 +196,7 @@ static void test_factor_and_solve(TestLogger &summary)
         std::vector<double> csol(2);
         thrust::copy(d_csol.begin(), d_csol.end(), csol.begin());
         ok = ok && (std::abs(csol[0] - 1.0) < 1e-12) && (std::abs(csol[1] - 0.0) < 1e-12);
-        ok = ok && (clu.stats().solve_calls == 1);
+        ok = ok && (clu.stats().solve_seconds.size() == 1);
 
         if (ok)
             summary.pass("SparseLU factor, solve, and stats (real + blocked-complex)");

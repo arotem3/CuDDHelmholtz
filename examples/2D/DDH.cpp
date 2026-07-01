@@ -220,6 +220,11 @@ int main(int argc, char *argv[])
     std::cout << std::format("iterations = {}\n", out.num_iter) << std::format("solve time = {:.3f} s\n", solve_time)
               << std::format("Helmholtz residual |b - A u| / |b| ~ {:.2e}\n", res);
 
+#ifdef CUDDH_HAS_CUDSS
+    if (auto ddh_ptr = dynamic_cast<DDH<float, SubdomainSolver::SparseDirect> *>(ddsolver.get()))
+        std::cout << ddh_ptr->op().block_lu();
+#endif
+
     CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
 
     // save solution and collocation nodes to file

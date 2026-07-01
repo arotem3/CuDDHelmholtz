@@ -127,6 +127,15 @@ namespace cuddh
                                static_cast<int>(kernel_config.block_size), kernel_config.tdof);
         }
 
+#ifdef CUDDH_HAS_CUDSS
+        /// Returns the batch LU factorization object (SparseDirect only).
+        const SparseBlockLU<scalar_t, true> &block_lu() const
+            requires(Solver == SubdomainSolver::SparseDirect)
+        {
+            return this->lu;
+        }
+#endif
+
     private:
         void action(const double *fem_in, double *fem_out, const scalar_t *lambda_in, scalar_t *lambda_out) const;
 

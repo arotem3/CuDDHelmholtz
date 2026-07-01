@@ -352,12 +352,11 @@ namespace cuddh
         int n_rows{0};
         int n_cols{0};
         int nnz{0};
-        size_t finalized_bytes{0};
-        size_t factor_bytes{0};
+        double finalized_mib{0.0};
+        double factor_mib{0.0};
         double analysis_seconds{0.0};
         double factor_seconds{0.0};
-        double total_solve_seconds{0.0};
-        int solve_calls{0};
+        std::vector<double> solve_seconds; ///< wall-clock time for each call to solve(), in order
     };
 
     template <typename scalar_t, bool Complex>
@@ -516,11 +515,10 @@ namespace cuddh
         int n_blocks{0};
         int max_n{0};
         int total_nnz{0};
-        size_t factor_bytes{0};
+        double factor_mib{0.0};
         double analysis_seconds{0.0};
         double factor_seconds{0.0};
-        double total_solve_seconds{0.0};
-        int solve_calls{0};
+        std::vector<double> solve_seconds; ///< wall-clock time for each call to solve(), in order
     };
 
     /// @brief CuDSS non-uniform batch LU factorization for a collection of sparse matrices.
