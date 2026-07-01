@@ -2,6 +2,9 @@
 
 #include "DD2D/DDTraceFunc2D.hpp"
 #include "DDHKernelImpl.hpp"
+#ifdef CUDDH_HAS_CUDSS
+#include "SparseMatrix.hpp"
+#endif
 
 using namespace cuddh;
 
@@ -30,6 +33,59 @@ struct MakeSolverData<scalar_t, SubdomainSolver::MINRES>
         return {DDMassMatrix<scalar_t>(efem, a2), DDFaceMassMatrix<scalar_t>(efem, a), scalar_t(omega)};
     }
 };
+
+#ifdef CUDDH_HAS_CUDSS
+template <typename scalar_t>
+struct MakeSolverData<scalar_t, SubdomainSolver::SparseDirect>
+{
+    static DDSolverData<scalar_t, SubdomainSolver::SparseDirect> make(double omega, const GridFunc2D<double> &a,
+                                                                      const EnsembleSpace &efem, int /*wh_iters*/)
+    {
+        const scalar_t oms = scalar_t(omega * omega);
+        const scalar_t om = scalar_t(omega);
+
+        GridFunc2D<double> a2 = a.transform([] __device__(double x) -> double { return x * x; });
+
+        DDStiffnessMatrix<scalar_t> S_dd(efem);
+        DDMassMatrix<scalar_t> M_dd(efem, a2);
+        DDFaceMassMatrix<scalar_t> H_dd(efem, a);
+
+        const auto blk_sizes = efem.sizes(MemorySpace::HOST);
+        BlockSparseMatrix<scalar_t, true> A_blocks(efem.size(), blk_sizes.data());
+        efem.set_pattern(A_blocks);
+        A_blocks.finalize_pattern();
+
+        S_dd.assemble(std::complex<scalar_t>(1, 0), A_blocks);
+        M_dd.assemble(std::complex<scalar_t>(-oms, 0), A_blocks);
+        H_dd.assemble(std::complex<scalar_t>(0, -om), A_blocks);
+
+        A_blocks.finalize_values();
+
+        SparseBlockLU<scalar_t, true> lu(A_blocks);
+
+        const int buf_size = efem.size() * 2 * efem.max_size();
+        return {std::move(lu), thrust::device_vector<scalar_t>(buf_size), thrust::device_vector<scalar_t>(buf_size)};
+    }
+};
+
+namespace cuddh::details
+{
+    template <typename scalar_t>
+    void invoke_sd_kernel(int n_domains, int mx_ndof, int mx_fdof, int g_ndof, int n_lambda, const int *s_ndof,
+                          const int *s_fdof, const int *gI, const scalar_t *punity, const LambdaDOFData<scalar_t> *B,
+                          const double *fem_in, double *fem_out, const scalar_t *lambda_in, scalar_t *lambda_out,
+                          SparseBlockLU<scalar_t, true> &lu, scalar_t *d_rhs, scalar_t *d_sol);
+
+    extern template void invoke_sd_kernel<float>(int, int, int, int, int, const int *, const int *, const int *,
+                                                 const float *, const LambdaDOFData<float> *, const double *, double *,
+                                                 const float *, float *, SparseBlockLU<float, true> &, float *,
+                                                 float *);
+    extern template void invoke_sd_kernel<double>(int, int, int, int, int, const int *, const int *, const int *,
+                                                  const double *, const LambdaDOFData<double> *, const double *,
+                                                  double *, const double *, double *, SparseBlockLU<double, true> &,
+                                                  double *, double *);
+} // namespace cuddh::details
+#endif
 
 static constexpr __device__ int2 get_indices(int t, int2 dims)
 {
@@ -262,6 +318,9 @@ template <typename scalar_t, SubdomainSolver Solver>
 DDSubstructuredOperator<scalar_t, Solver>::DDSubstructuredOperator(const EnsembleSpace &efem, double omega,
                                                                    const GridFunc2D<double> &a, DDKernelConfig config,
                                                                    int waveholtz_iterations)
+#ifdef CUDDH_HAS_CUDSS
+    requires(Solver != SubdomainSolver::SparseDirect)
+#endif
     : Operator<scalar_t>(0),
       DDSolverData<scalar_t, Solver>{MakeSolverData<scalar_t, Solver>::make(omega, a, efem, waveholtz_iterations)},
       g_ndof{efem.h1_space().size()},
@@ -291,6 +350,33 @@ DDSubstructuredOperator<scalar_t, Solver>::DDSubstructuredOperator(const Ensembl
     this->set_size(2 * n_lambda);
 }
 
+#ifdef CUDDH_HAS_CUDSS
+template <typename scalar_t, SubdomainSolver Solver>
+DDSubstructuredOperator<scalar_t, Solver>::DDSubstructuredOperator(const EnsembleSpace &efem, double omega,
+                                                                   const GridFunc2D<double> &a)
+    requires(Solver == SubdomainSolver::SparseDirect)
+    : Operator<scalar_t>(0),
+      DDSolverData<scalar_t, Solver>{MakeSolverData<scalar_t, Solver>::make(omega, a, efem, 0)},
+      g_ndof{efem.h1_space().size()},
+      g_elem{efem.h1_space().mesh().n_elem()},
+      n_basis{efem.h1_space().basis().size()},
+      efem{efem},
+      S(efem)
+{
+    n_domains = efem.size();
+    mx_fdof = efem.max_fsize();
+    mx_elem_per_dom = efem.max_n_elem();
+    mx_dof = efem.max_size();
+
+    _partition_of_unity = partition_of_unity<scalar_t>(efem);
+    CUDDH_CUDA_CHECK(cudaDeviceSynchronize());
+
+    HostDeviceArray<double> a_face = face_dof_values(efem, a);
+    n_lambda = lambda_dofs(_B, efem, omega, reshape(a_face.read(MemorySpace::HOST), mx_fdof, n_domains));
+    this->set_size(2 * n_lambda);
+}
+#endif
+
 template <typename scalar_t, SubdomainSolver Solver>
 void DDSubstructuredOperator<scalar_t, Solver>::action(const double *fem_in, double *fem_out, const scalar_t *lambda_in,
                                                        scalar_t *lambda_out) const
@@ -306,13 +392,24 @@ void DDSubstructuredOperator<scalar_t, Solver>::action(const double *fem_in, dou
                                             this->W, this->waveholtz_iterations, fem_in, fem_out, lambda_in, lambda_out,
                                             d_work);
     }
-    else
+    else if constexpr (Solver == SubdomainSolver::MINRES)
     {
         auto sm = this->mass.to_device();
         auto sfm = this->face_mass.to_device();
         details::invoke_mr_kernel<scalar_t>(n_basis, kernel_config.tdof, bs, efem, g_ndof, n_lambda, B, S, punity, sm,
                                             sfm, this->omega, fem_in, fem_out, lambda_in, lambda_out, d_work);
     }
+#ifdef CUDDH_HAS_CUDSS
+    else if constexpr (Solver == SubdomainSolver::SparseDirect)
+    {
+        scalar_t *d_rhs = thrust::raw_pointer_cast(this->d_rhs.data());
+        scalar_t *d_sol = thrust::raw_pointer_cast(this->d_sol.data());
+        details::invoke_sd_kernel<scalar_t>(
+            n_domains, mx_dof, mx_fdof, g_ndof, n_lambda, efem.sizes(MemorySpace::DEVICE).data(),
+            efem.fsizes(MemorySpace::DEVICE).data(), efem.global_indices(MemorySpace::DEVICE).data(), punity, B, fem_in,
+            fem_out, lambda_in, lambda_out, this->lu, d_rhs, d_sol);
+    }
+#endif
 }
 
 template <typename scalar_t, SubdomainSolver Solver>
@@ -346,4 +443,12 @@ namespace cuddh
     template class DDH<double>;
     template class DDH<float, SubdomainSolver::MINRES>;
     template class DDH<double, SubdomainSolver::MINRES>;
+
+#ifdef CUDDH_HAS_CUDSS
+    template class DDSubstructuredOperator<float, SubdomainSolver::SparseDirect>;
+    template class DDSubstructuredOperator<double, SubdomainSolver::SparseDirect>;
+
+    template class DDH<float, SubdomainSolver::SparseDirect>;
+    template class DDH<double, SubdomainSolver::SparseDirect>;
+#endif
 } // namespace cuddh

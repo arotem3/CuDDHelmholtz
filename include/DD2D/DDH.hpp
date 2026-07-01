@@ -29,6 +29,9 @@
 #include "cuddh_error.hpp"
 #include "forall.hpp"
 #include "linalg.hpp"
+#ifdef CUDDH_HAS_CUDSS
+#include "SparseMatrix.hpp"
+#endif
 
 namespace cuddh
 {
@@ -50,6 +53,16 @@ namespace cuddh
         DDFaceMassMatrix<scalar_t> face_mass;
         scalar_t omega{};
     };
+
+#ifdef CUDDH_HAS_CUDSS
+    template <typename scalar_t>
+    struct DDSolverData<scalar_t, SubdomainSolver::SparseDirect>
+    {
+        mutable SparseBlockLU<scalar_t, true> lu;
+        mutable thrust::device_vector<scalar_t> d_rhs;
+        mutable thrust::device_vector<scalar_t> d_sol;
+    };
+#endif
 
     /**
      * @brief Operator for Helmholtz domain decomposition substructured problem.
@@ -78,7 +91,16 @@ namespace cuddh
         /// @param waveholtz_iterations For WaveHoltz solver only: fixed number of
         ///                             iterations; -1 = residual-based stopping.
         DDSubstructuredOperator(const EnsembleSpace &efem, double omega, const GridFunc2D<double> &a,
-                                DDKernelConfig config = {}, int waveholtz_iterations = -1);
+                                DDKernelConfig config = {}, int waveholtz_iterations = -1)
+#ifdef CUDDH_HAS_CUDSS
+            requires(Solver != SubdomainSolver::SparseDirect)
+#endif
+        ;
+
+#ifdef CUDDH_HAS_CUDSS
+        DDSubstructuredOperator(const EnsembleSpace &efem, double omega, const GridFunc2D<double> &a)
+            requires(Solver == SubdomainSolver::SparseDirect);
+#endif
 
         ~DDSubstructuredOperator() = default;
 
@@ -134,6 +156,10 @@ namespace cuddh
     extern template class DDSubstructuredOperator<double>;
     extern template class DDSubstructuredOperator<float, SubdomainSolver::MINRES>;
     extern template class DDSubstructuredOperator<double, SubdomainSolver::MINRES>;
+#ifdef CUDDH_HAS_CUDSS
+    extern template class DDSubstructuredOperator<float, SubdomainSolver::SparseDirect>;
+    extern template class DDSubstructuredOperator<double, SubdomainSolver::SparseDirect>;
+#endif
 
     /**
      * @brief Domain decomposition Helmholtz solver.
@@ -147,12 +173,22 @@ namespace cuddh
     public:
         DDH(const EnsembleSpace &efem, double omega, const GridFunc2D<double> &a, DDKernelConfig kernel_config = {},
             int waveholtz_iterations = -1)
+#ifdef CUDDH_HAS_CUDSS
+        requires(InnerSolver != SubdomainSolver::SparseDirect)
+#endif
             : Solver<double>(2 * efem.h1_space().size()),
               F(efem, omega, a, kernel_config, waveholtz_iterations),
               solver(F),
               lambda(F.ndof()),
               Y(F.ndof())
         {}
+
+#ifdef CUDDH_HAS_CUDSS
+        DDH(const EnsembleSpace &efem, double omega, const GridFunc2D<double> &a)
+        requires(InnerSolver == SubdomainSolver::SparseDirect)
+            : Solver<double>(2 * efem.h1_space().size()), F(efem, omega, a), solver(F), lambda(F.ndof()), Y(F.ndof())
+        {}
+#endif
 
         SolverResults solve(double *x, const double *b, SolverParams opts = {}) const override
         {
@@ -183,4 +219,8 @@ namespace cuddh
     extern template class DDH<double>;
     extern template class DDH<float, SubdomainSolver::MINRES>;
     extern template class DDH<double, SubdomainSolver::MINRES>;
+#ifdef CUDDH_HAS_CUDSS
+    extern template class DDH<float, SubdomainSolver::SparseDirect>;
+    extern template class DDH<double, SubdomainSolver::SparseDirect>;
+#endif
 } // namespace cuddh

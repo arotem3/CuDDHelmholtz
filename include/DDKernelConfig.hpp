@@ -7,6 +7,9 @@ namespace cuddh
     {
         WaveHoltz,
         MINRES,
+#ifdef CUDDH_HAS_CUDSS
+        SparseDirect,
+#endif
     };
 
     /* Kernels are deployed with `block_size` threads per block with each thread computing `tdof` DOFs.
