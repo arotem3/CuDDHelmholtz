@@ -180,11 +180,124 @@ static void test_fd_batch(TestLogger &log, std::string_view name)
                  std::format("L∞ err re={:.3e} im={:.3e} (tol {:.3e})", double(re_err), double(im_err), double(tol)));
 }
 
+// Verify SparseBlockLU honours the SparseMatrixType passed to BlockSparseMatrix.
+// The complex-shifted FD stencil satisfies A = A^T (complex symmetric) because:
+//   diagonal: 4 + iσh² (same on both sides)
+//   off-diagonals: -1 (symmetric by construction)
+// CuDSS uses LDL^T when type = Symmetric, so the solve must still be correct.
+static void test_batch_matrix_type(TestLogger &log)
+{
+    const int grid_ns[] = {5, 8, 10};
+    const int n_blocks = 3;
+    const double sigma = 1.0;
+    const double pi = std::numbers::pi_v<double>;
+    using cd = std::complex<double>;
+
+    int block_sizes[n_blocks];
+    for (int p = 0; p < n_blocks; ++p)
+        block_sizes[p] = grid_ns[p] * grid_ns[p];
+    const int max_n = block_sizes[n_blocks - 1];
+    const int stride = 2 * max_n;
+
+    BlockSparseMatrix<double, true> bsm(n_blocks, block_sizes, SparseMatrixType::Symmetric);
+
+    for (int p = 0; p < n_blocks; ++p)
+    {
+        const int nn = grid_ns[p];
+        for (int i = 0; i < nn; ++i)
+            for (int j = 0; j < nn; ++j)
+            {
+                const int r = i * nn + j;
+                bsm.add_entry(p, r, r);
+                if (i > 0)
+                    bsm.add_entry(p, r, r - nn);
+                if (i < nn - 1)
+                    bsm.add_entry(p, r, r + nn);
+                if (j > 0)
+                    bsm.add_entry(p, r, r - 1);
+                if (j < nn - 1)
+                    bsm.add_entry(p, r, r + 1);
+            }
+    }
+    bsm.finalize_pattern();
+
+    for (int p = 0; p < n_blocks; ++p)
+    {
+        const int nn = grid_ns[p];
+        const double h = 1.0 / (nn + 1), h2 = h * h;
+        for (int i = 0; i < nn; ++i)
+            for (int j = 0; j < nn; ++j)
+            {
+                const int r = i * nn + j;
+                bsm.set_value(p, r, r, cd(4.0, sigma * h2));
+                if (i > 0)
+                    bsm.set_value(p, r, r - nn, cd(-1.0, 0.0));
+                if (i < nn - 1)
+                    bsm.set_value(p, r, r + nn, cd(-1.0, 0.0));
+                if (j > 0)
+                    bsm.set_value(p, r, r - 1, cd(-1.0, 0.0));
+                if (j < nn - 1)
+                    bsm.set_value(p, r, r + 1, cd(-1.0, 0.0));
+            }
+    }
+    bsm.finalize_values();
+
+    std::vector<double> h_rhs(n_blocks * stride, 0.0);
+    for (int p = 0; p < n_blocks; ++p)
+    {
+        const int nn = grid_ns[p];
+        const double h = 1.0 / (nn + 1), h2 = h * h;
+        for (int i = 0; i < nn; ++i)
+            for (int j = 0; j < nn; ++j)
+            {
+                const int r = i * nn + j;
+                const double x = (i + 1) * h, y = (j + 1) * h;
+                const double u = std::sin(pi * x) * std::sin(pi * y);
+                h_rhs[p * stride + r] = h2 * 2.0 * pi * pi * u;
+                h_rhs[p * stride + max_n + r] = h2 * sigma * u;
+            }
+    }
+
+    SparseBlockLU<double, true> blu(bsm);
+
+    thrust::device_vector<double> d_rhs(h_rhs.begin(), h_rhs.end());
+    thrust::device_vector<double> d_sol(n_blocks * stride, 0.0);
+    blu.solve(thrust::raw_pointer_cast(d_rhs.data()), thrust::raw_pointer_cast(d_sol.data()));
+    cudaDeviceSynchronize();
+
+    std::vector<double> h_sol(n_blocks * stride);
+    thrust::copy(d_sol.begin(), d_sol.end(), h_sol.begin());
+
+    constexpr double tol = 5e-2;
+    double re_err = 0.0, im_err = 0.0;
+    for (int p = 0; p < n_blocks; ++p)
+    {
+        const int nn = grid_ns[p];
+        const double h = 1.0 / (nn + 1);
+        for (int i = 0; i < nn; ++i)
+            for (int j = 0; j < nn; ++j)
+            {
+                const int r = i * nn + j;
+                const double x = (i + 1) * h, y = (j + 1) * h;
+                const double u = std::sin(pi * x) * std::sin(pi * y);
+                re_err = std::max(re_err, std::abs(h_sol[p * stride + r] - u));
+                im_err = std::max(im_err, std::abs(h_sol[p * stride + max_n + r]));
+            }
+    }
+
+    if (re_err < tol && im_err < tol)
+        log.pass("SparseBlockLU matrix type: Symmetric (complex-shifted FD, LDL^T)");
+    else
+        log.fail("SparseBlockLU matrix type: Symmetric (complex-shifted FD, LDL^T)",
+                 std::format("L∞ err re={:.3e} im={:.3e} (tol {:.3e})", re_err, im_err, tol));
+}
+
 int main()
 {
     TestLogger log;
     test_diagonal_batch(log);
     test_fd_batch<double>(log, "double");
     test_fd_batch<float>(log, "float");
+    test_batch_matrix_type(log);
     return log.finish();
 }

@@ -28,6 +28,15 @@ namespace cuddh
         Finalized,
     };
 
+    enum class SparseMatrixType
+    {
+        General,   ///< No symmetry assumed (default).
+        Symmetric, ///< Complex or real symmetric: A = A^T.
+        Hermitian, ///< Hermitian: A = A^H (conjugate transpose).
+        SPD,       ///< Symmetric positive definite (real).
+        HPD,       ///< Hermitian positive definite (complex).
+    };
+
     template <typename scalar_t, bool Complex = false>
     class SparseLU;
 
@@ -40,8 +49,9 @@ namespace cuddh
     public:
         using value_t = std::conditional_t<Complex, std::complex<scalar_t>, scalar_t>;
 
-        explicit SparseMatrix(int n_rows, int n_cols, int reserve_nnz = 0)
-            : Operator<scalar_t>(Complex ? 2 * n_rows : n_rows), _rows{n_rows}, _cols{n_cols}
+        explicit SparseMatrix(int n_rows, int n_cols, int reserve_nnz = 0,
+                              SparseMatrixType type = SparseMatrixType::General)
+            : Operator<scalar_t>(Complex ? 2 * n_rows : n_rows), _rows{n_rows}, _cols{n_cols}, _matrix_type{type}
         {
             if (n_rows < 0 || n_cols < 0)
                 throw std::invalid_argument("SparseMatrix: n_rows and n_cols must be non-negative");
@@ -54,6 +64,7 @@ namespace cuddh
         int n_cols() const { return _cols; }
         int nnz() const { return _nnz; }
         SparseMatrixState state() const { return _state; }
+        SparseMatrixType matrix_type() const { return _matrix_type; }
 
         void add_entry(int row, int col)
         {
@@ -321,6 +332,7 @@ namespace cuddh
         int _nnz{0};
         bool _finalized_storage_present{false};
         SparseMatrixState _state{SparseMatrixState::PatternAssembly};
+        SparseMatrixType _matrix_type{SparseMatrixType::General};
 
         std::vector<PatternEntry> _pattern_entries;
         HostDeviceArray<int> _coo_rows;
@@ -388,12 +400,13 @@ namespace cuddh
 
         BlockSparseMatrix() = default;
 
-        BlockSparseMatrix(int n_blocks, const int *block_sizes)
+        BlockSparseMatrix(int n_blocks, const int *block_sizes, SparseMatrixType type = SparseMatrixType::General)
             : _n_blocks(n_blocks),
               _block_sizes(block_sizes, block_sizes + n_blocks),
               _coo_pattern(n_blocks),
               _rp_offsets(n_blocks + 1, 0),
-              _nz_offsets(n_blocks + 1, 0)
+              _nz_offsets(n_blocks + 1, 0),
+              _matrix_type{type}
         {
             if (n_blocks < 0)
                 throw std::invalid_argument("BlockSparseMatrix: n_blocks must be non-negative");
@@ -404,6 +417,7 @@ namespace cuddh
         int block_nnz(int b) const { return _nz_offsets[b + 1] - _nz_offsets[b]; }
         int total_nnz() const { return _nz_offsets[_n_blocks]; }
         SparseMatrixState state() const { return _state; }
+        SparseMatrixType matrix_type() const { return _matrix_type; }
 
         // Flat CSR data — valid after finalize_pattern().
         // Block b's row ptrs occupy row_ptrs()[rp_offset(b) .. rp_offset(b+1)-1] (local offsets starting from 0).
@@ -493,6 +507,7 @@ namespace cuddh
         std::vector<value_t> _values;
 
         SparseMatrixState _state{SparseMatrixState::PatternAssembly};
+        SparseMatrixType _matrix_type{SparseMatrixType::General};
     };
 
     template <typename scalar_t, bool Complex = false>

@@ -266,6 +266,190 @@ static void test_block_factor_and_solve(TestLogger &log)
     }
 }
 
+// ─── SparseMatrixType tests ──────────────────────────────────────────────────
+//
+// CuDSS selects a different factorization algorithm for each matrix type:
+//   General   → LU
+//   Symmetric → LDL^T (real or complex symmetric)
+//   SPD       → Cholesky (real)
+//   Hermitian → LDL^H
+//   HPD       → Cholesky^H (complex Hermitian positive definite)
+//
+// Each test below uses data that genuinely satisfies the declared type.
+
+// The 10×10 FD Laplacian (-Δ_h) is real symmetric and SPD — valid for Symmetric and SPD.
+// Returns the L∞ error vs sin(πx)sin(πy).
+static double solve_fd_real(SparseMatrixType type)
+{
+    const int n = 10, N = n * n;
+    const double h = 1.0 / (n + 1), h2 = h * h;
+    const double pi = std::numbers::pi_v<double>;
+
+    SparseMatrix<double, false> A(N, N, 5 * N, type);
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+        {
+            const int r = i * n + j;
+            A.add_entry(r, r);
+            if (i > 0)
+                A.add_entry(r, r - n);
+            if (i < n - 1)
+                A.add_entry(r, r + n);
+            if (j > 0)
+                A.add_entry(r, r - 1);
+            if (j < n - 1)
+                A.add_entry(r, r + 1);
+        }
+    A.finalize_pattern();
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+        {
+            const int r = i * n + j;
+            A.set_value(r, r, 4.0);
+            if (i > 0)
+                A.set_value(r, r - n, -1.0);
+            if (i < n - 1)
+                A.set_value(r, r + n, -1.0);
+            if (j > 0)
+                A.set_value(r, r - 1, -1.0);
+            if (j < n - 1)
+                A.set_value(r, r + 1, -1.0);
+        }
+    A.finalize_values();
+
+    std::vector<double> h_rhs(N), h_exact(N);
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+        {
+            const double x = (i + 1) * h, y = (j + 1) * h;
+            const double u = std::sin(pi * x) * std::sin(pi * y);
+            h_exact[i * n + j] = u;
+            h_rhs[i * n + j] = h2 * 2.0 * pi * pi * u;
+        }
+
+    SparseLU<double, false> lu(A);
+    thrust::device_vector<double> d_rhs(h_rhs.begin(), h_rhs.end());
+    thrust::device_vector<double> d_sol(N, 0.0);
+    lu.solve(thrust::raw_pointer_cast(d_rhs.data()), thrust::raw_pointer_cast(d_sol.data()));
+    cudaDeviceSynchronize();
+
+    std::vector<double> h_sol(N);
+    thrust::copy(d_sol.begin(), d_sol.end(), h_sol.begin());
+
+    double err = 0.0;
+    for (int k = 0; k < N; ++k)
+        err = std::max(err, std::abs(h_sol[k] - h_exact[k]));
+    return err;
+}
+
+// Complex sparse matrix holding the FD Laplacian with an optional imaginary shift σ.
+//   σ = 0 → matrix is purely real → Hermitian (A^H = A^T = A) and HPD
+//   σ > 0 → complex-shifted → complex symmetric (A = A^T, but A ≠ A^H)
+// Returns {re_err, im_err} vs (sin(πx)sin(πy), 0).
+static std::pair<double, double> solve_fd_cx(SparseMatrixType type, double sigma)
+{
+    const int n = 10, N = n * n;
+    const double h = 1.0 / (n + 1), h2 = h * h;
+    const double pi = std::numbers::pi_v<double>;
+    using cd = std::complex<double>;
+
+    SparseMatrix<double, true> A(N, N, 5 * N, type);
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+        {
+            const int r = i * n + j;
+            A.add_entry(r, r);
+            if (i > 0)
+                A.add_entry(r, r - n);
+            if (i < n - 1)
+                A.add_entry(r, r + n);
+            if (j > 0)
+                A.add_entry(r, r - 1);
+            if (j < n - 1)
+                A.add_entry(r, r + 1);
+        }
+    A.finalize_pattern();
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+        {
+            const int r = i * n + j;
+            A.set_value(r, r, cd(4.0, sigma * h2));
+            if (i > 0)
+                A.set_value(r, r - n, cd(-1.0, 0.0));
+            if (i < n - 1)
+                A.set_value(r, r + n, cd(-1.0, 0.0));
+            if (j > 0)
+                A.set_value(r, r - 1, cd(-1.0, 0.0));
+            if (j < n - 1)
+                A.set_value(r, r + 1, cd(-1.0, 0.0));
+        }
+    A.finalize_values();
+
+    // f = h²*(2π² + iσ)*u_exact, RHS in blocked format
+    std::vector<double> h_rhs(2 * N, 0.0), h_exact(N);
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+        {
+            const int k = i * n + j;
+            const double x = (i + 1) * h, y = (j + 1) * h;
+            const double u = std::sin(pi * x) * std::sin(pi * y);
+            h_exact[k] = u;
+            h_rhs[k] = h2 * 2.0 * pi * pi * u;
+            h_rhs[N + k] = h2 * sigma * u;
+        }
+
+    SparseLU<double, true> lu(A);
+    thrust::device_vector<double> d_rhs(h_rhs.begin(), h_rhs.end());
+    thrust::device_vector<double> d_sol(2 * N, 0.0);
+    lu.solve(thrust::raw_pointer_cast(d_rhs.data()), thrust::raw_pointer_cast(d_sol.data()));
+    cudaDeviceSynchronize();
+
+    std::vector<double> h_sol(2 * N);
+    thrust::copy(d_sol.begin(), d_sol.end(), h_sol.begin());
+
+    double re_err = 0.0, im_err = 0.0;
+    for (int k = 0; k < N; ++k)
+    {
+        re_err = std::max(re_err, std::abs(h_sol[k] - h_exact[k]));
+        im_err = std::max(im_err, std::abs(h_sol[N + k]));
+    }
+    return {re_err, im_err};
+}
+
+static void test_matrix_types(TestLogger &log)
+{
+    constexpr double tol = 5e-2;
+
+    auto check_real = [&](SparseMatrixType type, std::string_view label) {
+        const double err = solve_fd_real(type);
+        if (err < tol)
+            log.pass(std::format("SparseLU matrix type: {}", label));
+        else
+            log.fail(std::format("SparseLU matrix type: {}", label),
+                     std::format("L∞ error = {:.3e} (tol {:.3e})", err, tol));
+    };
+
+    auto check_cx = [&](SparseMatrixType type, double sigma, std::string_view label) {
+        auto [re_err, im_err] = solve_fd_cx(type, sigma);
+        if (re_err < tol && im_err < tol)
+            log.pass(std::format("SparseLU matrix type: {}", label));
+        else
+            log.fail(std::format("SparseLU matrix type: {}", label),
+                     std::format("L∞ err re={:.3e} im={:.3e} (tol {:.3e})", re_err, im_err, tol));
+    };
+
+    // Real matrix types (SparseMatrix<double, false>)
+    check_real(SparseMatrixType::Symmetric, "Symmetric (real FD, A=A^T)");
+    check_real(SparseMatrixType::SPD, "SPD       (real FD, Cholesky)");
+
+    // Complex matrix types (SparseMatrix<double, true>)
+    // σ=1: complex-shifted FD is complex symmetric (A=A^T, not A^H)
+    check_cx(SparseMatrixType::Symmetric, 1.0, "Symmetric (complex-shifted FD, A=A^T)");
+    // σ=0: purely real FD embedded as complex; A^H = A^T = A → Hermitian and HPD
+    check_cx(SparseMatrixType::Hermitian, 0.0, "Hermitian (real FD as complex, A^H=A)");
+    check_cx(SparseMatrixType::HPD, 0.0, "HPD       (real FD as complex, Cholesky^H)");
+}
+
 // 2D FD diffusion -Δu = f on [0,1]² with Dirichlet BCs.
 // Exact solution u = sin(πx)sin(πy), f = 2π²u.
 // The 5-point stencil (scaled by h²) has diagonal 4 and off-diagonals -1.
@@ -441,6 +625,7 @@ int main()
     test_fd_real_diffusion<float>(summary, "float");
     test_fd_cx_diffusion<double>(summary, "double");
     test_fd_cx_diffusion<float>(summary, "float");
+    test_matrix_types(summary);
 
     return summary.finish();
 }

@@ -46,6 +46,23 @@ namespace cuddh
         return CUDA_C_64F;
     }
 
+    static cudssMatrixType_t to_cudss_matrix_type(SparseMatrixType t)
+    {
+        switch (t)
+        {
+            case SparseMatrixType::Symmetric:
+                return CUDSS_MTYPE_SYMMETRIC;
+            case SparseMatrixType::Hermitian:
+                return CUDSS_MTYPE_HERMITIAN;
+            case SparseMatrixType::SPD:
+                return CUDSS_MTYPE_SPD;
+            case SparseMatrixType::HPD:
+                return CUDSS_MTYPE_HPD;
+            default:
+                return CUDSS_MTYPE_GENERAL;
+        }
+    }
+
     // Blocked-complex device buffer → interleaved complex device buffer.
     // d_blocked layout: block p starts at p * 2 * max_n:
     //   re_0..re_{n_p-1} at [p*2*max_n .. p*2*max_n + n_p - 1]
@@ -280,10 +297,10 @@ namespace cuddh
         cudss_check(cudssConfigCreate(&p.config), "cudssConfigCreate");
         cudss_check(cudssDataCreate(p.handle, &p.data), "cudssDataCreate");
 
-        cudss_check(cudssMatrixCreateBatchCsr(&p.A_matrix, static_cast<int64_t>(nb), h_nrows.data(), h_ncols.data(),
-                                              h_nnz.data(), p.d_rowstart_arr, nullptr, p.d_col_arr, p.d_val_arr,
-                                              CUDA_R_32I, cudss_value_type<value_t>(), CUDSS_MTYPE_GENERAL,
-                                              CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO),
+        cudss_check(cudssMatrixCreateBatchCsr(
+                        &p.A_matrix, static_cast<int64_t>(nb), h_nrows.data(), h_ncols.data(), h_nnz.data(),
+                        p.d_rowstart_arr, nullptr, p.d_col_arr, p.d_val_arr, CUDA_R_32I, cudss_value_type<value_t>(),
+                        to_cudss_matrix_type(blocks.matrix_type()), CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO),
                     "cudssMatrixCreateBatchCsr");
 
         cudss_check(cudssMatrixCreateBatchDn(&p.b_matrix, static_cast<int64_t>(nb), h_nrows.data(), h_ncols_dn.data(),

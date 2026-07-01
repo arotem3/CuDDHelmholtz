@@ -48,6 +48,18 @@ namespace cuddh
         return CUDA_C_64F;
     }
 
+    static cudssMatrixType_t to_cudss_matrix_type(SparseMatrixType t)
+    {
+        switch (t)
+        {
+            case SparseMatrixType::Symmetric: return CUDSS_MTYPE_SYMMETRIC;
+            case SparseMatrixType::Hermitian: return CUDSS_MTYPE_HERMITIAN;
+            case SparseMatrixType::SPD:       return CUDSS_MTYPE_SPD;
+            case SparseMatrixType::HPD:       return CUDSS_MTYPE_HPD;
+            default:                          return CUDSS_MTYPE_GENERAL;
+        }
+    }
+
 #endif // CUDDH_HAS_CUDSS
 
     // ─── Impl ────────────────────────────────────────────────────────────────────
@@ -101,7 +113,7 @@ namespace cuddh
             cudss_check(cudssDataCreate(handle, &data), "cudssDataCreate");
         }
 
-        void build_matrix_descriptor(int n, int nnz)
+        void build_matrix_descriptor(int n, int nnz, SparseMatrixType mat_type)
         {
             // rowStart = csr_row_ptr.data()   (first n of the n+1 entry row-ptr)
             // rowEnd   = csr_row_ptr.data()+1 (elements 1..n)
@@ -113,7 +125,8 @@ namespace cuddh
             // n+1-entry CSR row-pointer array.
             cudss_check(cudssMatrixCreateCsr(&A_matrix, static_cast<int64_t>(n), static_cast<int64_t>(n),
                                              static_cast<int64_t>(nnz), rp, nullptr, ci, cv, CUDA_R_32I,
-                                             cudss_value_type<value_t>(), CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL,
+                                             cudss_value_type<value_t>(),
+                                             to_cudss_matrix_type(mat_type), CUDSS_MVIEW_FULL,
                                              CUDSS_BASE_ZERO),
                         "cudssMatrixCreateCsr");
         }
@@ -180,7 +193,7 @@ namespace cuddh
             p.csr_vals.assign(cv, cv + nnz);
         }
 
-        p.build_matrix_descriptor(n, nnz);
+        p.build_matrix_descriptor(n, nnz, A.matrix_type());
         p.build_rhs_descriptors(n);
 
         cudss_check(cudssExecute(p.handle, CUDSS_PHASE_ANALYSIS, p.config, p.data, p.A_matrix, p.x_matrix, p.b_matrix),
