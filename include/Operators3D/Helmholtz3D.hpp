@@ -15,16 +15,15 @@ namespace cuddh
     /// stiffness matrix, M is the mass matrix weighted by a^2, and H is the boundary mass
     /// matrix weighted by a. Complex vectors are stored in blocked format [x_re; x_im].
     ///
-    /// **Conjugation convention — must be respected by solvers:**
-    /// `action(x, y)` computes the complex CONJUGATE of the standard matvec:
-    ///   [y_re; y_im] = [Re(A*z); -Im(A*z)]   where z = x_re + i*x_im
-    /// This equals conj(A*z) in the blocked representation.
+    /// **Conjugation convention:**
+    /// `action(x, y)` computes [Re(A*z); -Im(A*z)] = conj(A*z) where z = x_re + i*x_im.
+    /// `assemble(c, S)` and `SparseMatrix::action` compute the standard product A*z.
     ///
-    /// `assemble(c, S)` and `SparseMatrix::action` both use the STANDARD (non-conjugated) product.
-    ///
-    /// To solve  action(x) = b  via a direct factorization of A:
-    ///   solve A*y = conj(b),  then x = conj(y)
-    /// This is valid because A has real coefficients, so conj(A*z) = A*conj(z).
+    /// To solve A*x = b:
+    ///   - Iterative (via `action`): pass conj(b) = [b_re; -b_im] as the rhs, since
+    ///     action(x) = conj(b)  ⟺  conj(A*x) = conj(b)  ⟺  A*x = b.
+    ///   - Direct (via `SparseLU`): assemble A with `assemble`, factorize with `SparseLU`,
+    ///     then call `lu.solve(b, x)` directly — no conjugation of b or x needed.
     class Helmholtz3D : public Operator<double>
     {
     public:
